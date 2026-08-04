@@ -152,5 +152,20 @@ describe('webview/focustree interactions', function () {
         assert.strictEqual(nav7.style.outline, before, 'toolbar drag must not touch the selection');
         // The button still receives its own click.
         toolbarBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+        // --- Dropdown popup (a body-level ul, not inside .toolbar) also keeps its behavior ---
+        const ul = document.createElement('ul');
+        ul.className = 'select-dropdown';
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        ul.appendChild(li);
+        document.body.appendChild(ul);
+        const before2 = nav7.style.outline;
+        li.dispatchEvent(new PointerEvent('pointerdown', { clientX: 10, clientY: 10, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'dropdown drag must not move');
+        assert.strictEqual(nav7.style.outline, before2, 'dropdown drag must not touch the selection');
+        ul.remove();
     });
 });

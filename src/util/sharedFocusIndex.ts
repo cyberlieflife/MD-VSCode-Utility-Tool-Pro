@@ -25,17 +25,11 @@ export function registerSharedFocusIndex(): vscode.Disposable {
     const disposables: vscode.Disposable[] = [];
 
     if (sharedFocusIndex) {
-        const estimatedSize: [number] = [0];
-
-        const task = Promise.all([
-            buildGlobalFocusIndex(estimatedSize),
-            buildWorkspaceFocusIndex(estimatedSize)
-        ]);
-
+        const task = ensureFocusIndex();
         vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('sharedFocusIndex.building', 'Building Shared Focus index...'), task);
         void task.then(() => {
             vscode.window.showInformationMessage(localize('sharedFocusIndex.builddone', 'Building Shared Focus index done.'));
-            sendEvent('sharedFocusIndex', { size: estimatedSize[0].toString() });
+            sendEvent('sharedFocusIndex', { size: focusIndexSize[0].toString() });
         });
 
         disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(onChangeWorkspaceFolders));
@@ -47,6 +41,26 @@ export function registerSharedFocusIndex(): vscode.Disposable {
     }
 
     return vscode.Disposable.from(...disposables);
+}
+
+// Shared size counter for the telemetry above the lazy build in registerSharedFocusIndex.
+const focusIndexSize: [number] = [0];
+let focusIndexBuildPromise: Promise<void> | undefined;
+
+// Builds (once, lazily) the global + workspace focus indexes. The focus-tree loader awaits this
+// before resolving shared_focus dependencies, so a preview restored right after VS Code startup
+// (deserialize, while the index is still building) still resolves joint/shared focuses.
+export function ensureFocusIndex(): Promise<void> {
+    if (focusIndexBuildPromise === undefined) {
+        const estimatedSize: [number] = [0];
+        focusIndexBuildPromise = Promise.all([
+            buildGlobalFocusIndex(estimatedSize),
+            buildWorkspaceFocusIndex(estimatedSize),
+        ]).then(() => {
+            focusIndexSize[0] = estimatedSize[0];
+        });
+    }
+    return focusIndexBuildPromise;
 }
 
 const FOCUS_CACHE_VERSION = 1;

@@ -5,7 +5,7 @@ import { localize } from "../../util/i18n";
 import { uniq, flatten, chain } from "lodash";
 import { getGfxContainerFiles } from "../../util/gfxindex";
 import { sharedFocusIndex } from "../../util/featureflags";
-import { findFileByFocusKey } from "../../util/sharedFocusIndex";
+import { findFileByFocusKey, ensureFocusIndex } from "../../util/sharedFocusIndex";
 import { focusTitlebarStylesFile, nationalFocusViewGfxFile, goalsOverlaysGfxFile } from "./titlebar";
 import { addInlayGfxWarnings, listGuiGfxFiles, loadFocusInlayWindows, resolveInlayGfxFiles, resolveInlayGuiWindows, resolveInlaysForTree } from "./inlay";
 
@@ -40,6 +40,9 @@ export class FocusTreeLoader extends ContentLoader<FocusTreeLoaderResult> {
         const file = convertFocusFileNodeToJson(parseHoi4File(content, localize('infile', 'In file {0}:\n', this.file)), constants);
 
         if (sharedFocusIndex) {
+            // The index builds asynchronously at extension activation; a preview restored right
+            // after VS Code startup must wait so shared_focus resolution does not silently miss.
+            await ensureFocusIndex();
             const depPaths = new Set(dependencies.map(d => d.path));
             for (const focusTree of file.focus_tree) {
                 for (const sharedFocus of focusTree.shared_focus) {
