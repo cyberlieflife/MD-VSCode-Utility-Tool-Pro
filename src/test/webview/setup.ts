@@ -24,7 +24,7 @@ const state: Record<string, any> = {};
 // `new Event(...)`, `new MouseEvent(...)`, `new KeyboardEvent(...)` etc.
 // work in test code the same way they do in a real browser.
 for (const name of [
-    'Event', 'MouseEvent', 'KeyboardEvent', 'FocusEvent',
+    'Event', 'MessageEvent', 'MouseEvent', 'KeyboardEvent', 'FocusEvent',
     'PointerEvent', 'WheelEvent',
 ]) {
     (global as any)[name] = (dom.window as any)[name];

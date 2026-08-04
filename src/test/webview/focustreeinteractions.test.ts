@@ -62,6 +62,7 @@ describe('webview/focustree interactions', function () {
             '<div id="inlaywindowplaceholder"></div>',
             '<div id="continuousFocuses"></div>',
             '<input id="searchbox" type="text"/>',
+            '<input id="show-focus-names" type="checkbox"/>',
             '<div id="condition-container"></div>',
             '<div id="allowbranch-container"></div>',
             '<div class="toolbar"><button id="tb">W</button><div class="select-container"><div class="select">dropdown</div></div></div>',
@@ -73,7 +74,7 @@ describe('webview/focustree interactions', function () {
         await readyPromise;
     });
 
-    it('clean press-release navigates; drag neither navigates nor leaves a selection box', function () {
+    it('clean press-release navigates; drag neither navigates nor leaves a selection box', async function () {
         const nav = document.querySelector('.navigator') as HTMLElement;
         assert.ok(nav, 'navigator should be rendered');
 
@@ -167,5 +168,21 @@ describe('webview/focustree interactions', function () {
         assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'dropdown drag must not move');
         assert.strictEqual(nav7.style.outline, before2, 'dropdown drag must not touch the selection');
         ul.remove();
+
+        // --- UI state persistence: restored state is re-applied, toggles save ---
+        messages.length = 0;
+        window.dispatchEvent(new MessageEvent('message', {
+            data: { type: 'uiState', state: { showFocusNames: true, selectedExprs: [], selectedFocusTreeIndex: 0 } },
+        }));
+        for (let i = 0; i < 20; i++) { await Promise.resolve(); }
+        assert.ok(messages.some(m => m.command === 'requestFocusNames'), 'restored name mode should request names: ' + JSON.stringify(messages));
+
+        messages.length = 0;
+        const nameToggle = document.getElementById('show-focus-names') as HTMLInputElement;
+        nameToggle.checked = true;
+        nameToggle.dispatchEvent(new Event('change'));
+        const saveMsg = messages.find(m => m.command === 'saveUiState');
+        assert.ok(saveMsg, 'expected saveUiState, got: ' + JSON.stringify(messages));
+        assert.strictEqual(saveMsg.state.showFocusNames, true, 'name mode must be saved');
     });
 });

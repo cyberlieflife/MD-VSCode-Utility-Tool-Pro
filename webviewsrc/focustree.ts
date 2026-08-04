@@ -424,6 +424,82 @@ function onPointerEnd(e: MouseEvent) {
     }
 }
 
+// Persists the current preview UI state (conditions, toggles, name mode, ...) to the extension
+// host, which stores it per previewed file so closing and reopening the panel restores it.
+function saveUiState() {
+    vscode.postMessage({
+        command: 'saveUiState',
+        state: {
+            ...getState(),
+            showFocusNames: focusNamesMode,
+        },
+    });
+}
+
+// Applies persisted UI state answered to requestUiState: restores the module-level selections,
+// the toggle controls, the name mode, the tree selector, hidden branches and the search box,
+// then re-renders so the restored conditions take effect.
+async function applyRestoredUiState(state: Record<string, any>) {
+    selectedExprs = state.selectedExprs ?? [];
+    selectedInlayExprs = state.selectedInlayExprs ?? [];
+    if (focusTrees.length > 0) {
+        selectedFocusTreeIndex = Math.min(focusTrees.length - 1, state.selectedFocusTreeIndex ?? 0);
+        if (selectedFocusTreeIndex < 0) { selectedFocusTreeIndex = 0; }
+    }
+    setState({
+        selectedExprs,
+        selectedInlayExprs,
+        selectedFocusTreeIndex,
+        hiddenBranches: state.hiddenBranches ?? {},
+        checkedFocuses: state.checkedFocuses ?? {},
+        searchboxValue: state.searchboxValue ?? '',
+        showCustomTitlebars: state.showCustomTitlebars,
+        showFocusOverlays: state.showFocusOverlays,
+        showInlayWindows: state.showInlayWindows,
+        selectedInlayWindowIds: state.selectedInlayWindowIds ?? {},
+    });
+
+    const titlebars = document.getElementById('show-custom-titlebars') as HTMLInputElement | null;
+    if (titlebars) { titlebars.checked = showCustomTitlebars(); }
+    const overlays = document.getElementById('show-focus-overlays') as HTMLInputElement | null;
+    if (overlays) { overlays.checked = showFocusOverlays(); }
+    const inlayWin = document.getElementById('show-inlay-windows') as HTMLInputElement | null;
+    if (inlayWin) {
+        const show = state.showInlayWindows === true;
+        inlayWin.checked = show;
+        (window as any).__showInlayWindows = show;
+    }
+    const nameToggle = document.getElementById('show-focus-names') as HTMLInputElement | null;
+    if (nameToggle) { nameToggle.checked = state.showFocusNames === true; }
+    if (state.showFocusNames === true) {
+        focusNamesMode = true;
+        if (!focusNamesRequested) {
+            focusNamesRequested = true;
+            const ids: string[] = [];
+            for (const tree of focusTrees) {
+                for (const focusId in tree.focuses) { ids.push(focusId); }
+            }
+            vscode.postMessage({ command: 'requestFocusNames', ids });
+        }
+    }
+    const focusesElement = document.getElementById('focuses') as HTMLSelectElement | null;
+    if (focusesElement) { focusesElement.value = selectedFocusTreeIndex.toString(); }
+    if (!useConditionInFocus) {
+        const hiddenBranches = state.hiddenBranches || {};
+        for (const key in hiddenBranches) { showBranch(false, key); }
+        if (allowBranches) {
+            allowBranches.selectedValues$.next(allowBranches.selectedValues$.value.filter(v => !hiddenBranches[v]));
+        }
+    }
+    const searchbox = document.getElementById('searchbox') as HTMLInputElement | null;
+    if (searchbox && state.searchboxValue) { searchbox.value = state.searchboxValue; }
+
+    updateSelectedFocusTree(false);
+    await buildContent();
+    retriggerSearch();
+    updateFocusNameDisplay();
+}
+
 // Applies the ID/name toggle to the on-screen focus labels. Name mode swaps each label to its
 // localised name (caching the original HTML so ID mode can restore it); ID mode restores.
 function updateFocusNameDisplay() {
@@ -773,6 +849,7 @@ function setupCheckedFocuses(focuses: Focus[], focusTree: FocusTree) {
                     }
                     focusCheckState[focus.id] = checkbox.checked;
                     setState({ checkedFocuses: focusCheckState });
+                    saveUiState();
 
                     const rect = checkbox.getBoundingClientRect();
                     const oldLeft = rect.left, oldTop = rect.top;
@@ -888,6 +965,12 @@ window.addEventListener('message', async (event) => {
         return;
     }
 
+    // Persisted preview UI state (conditions, toggles, name mode, ...) from the extension host.
+    if (msg.type === 'uiState') {
+        await applyRestoredUiState(msg.state ?? {});
+        return;
+    }
+
     if (msg.type !== 'update') return;
 
     focusTrees = msg.focusTrees;
@@ -948,6 +1031,7 @@ window.addEventListener('load', tryRun(async function() {
                 vscode.postMessage({ command: 'requestFocusNames', ids });
             }
             updateFocusNameDisplay();
+            saveUiState();
         });
     }
     // Custom titlebars
@@ -957,6 +1041,7 @@ window.addEventListener('load', tryRun(async function() {
         showCustomTitlebarsElement.addEventListener('change', () => {
             setState({ showCustomTitlebars: showCustomTitlebarsElement.checked });
             applyCustomTitlebarVisibility();
+            saveUiState();
         });
     }
     const showFocusOverlaysElement = document.getElementById('show-focus-overlays') as HTMLInputElement | null;
@@ -965,6 +1050,7 @@ window.addEventListener('load', tryRun(async function() {
         showFocusOverlaysElement.addEventListener('change', () => {
             setState({ showFocusOverlays: showFocusOverlaysElement.checked });
             applyFocusOverlayVisibility();
+            saveUiState();
         });
     }
     const showInlayWindowsElement = document.getElementById('show-inlay-windows') as HTMLInputElement | null;
@@ -973,9 +1059,11 @@ window.addEventListener('load', tryRun(async function() {
         showInlayWindowsElement.checked = false;
         showInlayWindowsElement.addEventListener('change', async () => {
             (window as any).__showInlayWindows = showInlayWindowsElement.checked;
+            setState({ showInlayWindows: showInlayWindowsElement.checked });
             updateSelectedFocusTree(false);
             await buildContent();
             retriggerSearch();
+            saveUiState();
         });
     }
 
@@ -990,6 +1078,7 @@ window.addEventListener('load', tryRun(async function() {
             updateSelectedFocusTree(true);
             await buildContent();
             retriggerSearch();
+            saveUiState();
         });
     }
 
@@ -1028,6 +1117,7 @@ window.addEventListener('load', tryRun(async function() {
 
                 const hiddenBranches = difference(allValues, selection);
                 setState({ hiddenBranches });
+                saveUiState();
             });
         }
     }
@@ -1047,6 +1137,7 @@ window.addEventListener('load', tryRun(async function() {
             searchedFocus = search(searchboxValue);
             oldSearchboxValue = searchboxValue;
             setState({ searchboxValue });
+            saveUiState();
         }
     };
 
@@ -1092,6 +1183,7 @@ window.addEventListener('load', tryRun(async function() {
                 });
 
                 setState({ selectedExprs });
+                saveUiState();
                 
                 await buildContent();
                 retriggerSearch();
@@ -1120,6 +1212,7 @@ window.addEventListener('load', tryRun(async function() {
                 });
 
                 setState({ selectedInlayExprs });
+                saveUiState();
 
                 await buildContent();
                 retriggerSearch();
@@ -1147,6 +1240,7 @@ window.addEventListener('load', tryRun(async function() {
     if (resetFocusCheckboxes) {
         resetFocusCheckboxes.addEventListener('click', async () => {
             setState({ checkedFocuses: {} });
+            saveUiState();
             await buildContent();
             retriggerSearch();
         });
@@ -1165,4 +1259,6 @@ window.addEventListener('load', tryRun(async function() {
 
     // Tells the extension the structure is on screen so it can post the deferred focus-icon CSS.
     vscode.postMessage({ command: 'ready' });
+    // Ask for the persisted UI state; the answer re-applies conditions, toggles and name mode.
+    vscode.postMessage({ command: 'requestUiState' });
 }));

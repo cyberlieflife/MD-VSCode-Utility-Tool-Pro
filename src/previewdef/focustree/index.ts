@@ -3,6 +3,7 @@ import { buildFocusTreeHtml, buildNoFocusTreeHtml, buildFocusTreeErrorHtml, buil
 import { matchPathEnd } from '../../util/nodecommon';
 import { PreviewBase } from '../previewbase';
 import { PreviewProviderDef } from '../previewmanager';
+import { contextContainer } from '../../context';
 import { FocusTreeLoader } from './loader';
 import { FocusTree, Focus } from './schema';
 import { buildFocusMoveEdits } from './move';
@@ -83,6 +84,14 @@ class FocusTreePreview extends PreviewBase {
         );
         this.focusTreeLoader.onLoadDone(r => this.updateDependencies(r.dependencies));
         this.panel.webview.onDidReceiveMessage(msg => {
+            if (msg?.command === 'saveUiState') {
+                void savePreviewUiState(this, msg.state);
+                return;
+            }
+            if (msg?.command === 'requestUiState') {
+                void sendPreviewUiState(this);
+                return;
+            }
             if (msg?.command === 'moveFocuses') {
                 void this.applyFocusMoves(msg.moves);
                 return;
@@ -517,3 +526,29 @@ export const focusTreePreviewDef: PreviewProviderDef = {
     canPreview: canPreviewFocusTree,
     previewConstructor: FocusTreePreview,
 };
+
+// Per-file preview UI state (conditions, name mode, toggles, ...) persisted across panel
+// close/reopen. Keyed by the previewed file's URI so each focus file keeps its own settings.
+function previewUiStateKey(uri: vscode.Uri): string {
+    return 'focustreePreviewState.' + encodeURIComponent(uri.toString());
+}
+
+async function savePreviewUiState(preview: FocusTreePreview, state: unknown): Promise<void> {
+    try {
+        await contextContainer.current?.globalState.update(previewUiStateKey(preview.uri), state ?? {});
+    } catch (e) {
+        error(e);
+    }
+}
+
+async function sendPreviewUiState(preview: FocusTreePreview): Promise<void> {
+    try {
+        const state = await contextContainer.current?.globalState.get(previewUiStateKey(preview.uri));
+        if (preview.isDisposed) {
+            return;
+        }
+        preview.panel.webview.postMessage({ type: 'uiState', state: state ?? {} });
+    } catch (e) {
+        error(e);
+    }
+}
