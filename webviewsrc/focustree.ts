@@ -1,5 +1,6 @@
 import { getState, setState, arrayToMap, scrollToState, tryRun, enableZoom, initCommon } from "./util/common";
 import { applySelectionClick, SelectionState, emptySelection } from "./focusselection";
+import { computeGridDelta, buildFocusDragMoves, DragMove } from "./focusdrag";
 import { DivDropdown } from "./util/dropdown";
 import { difference, minBy } from "lodash";
 import { renderGridBoxCommon, GridBoxItem, GridBoxConnection } from "../src/util/hoi4gui/gridboxcommon";
@@ -79,6 +80,22 @@ const focusSpanOriginalHtml = new Map<string, string>();
 // Multi-selection of focus cells. Selection is per-session (not persisted); the set is cleared on
 // tree switches and DOM rebuilds keep it (it is id-based and re-applied as highlight).
 let selectionState: SelectionState = emptySelection();
+
+// Drag state while a mouse button is down on a focus cell. `moved` flips once the pointer travels
+// past the drag threshold; the visual follows via transform on the selected cells.
+interface DragState {
+    startClientX: number;
+    startClientY: number;
+    moved: boolean;
+    contentDeltaX: number;
+    contentDeltaY: number;
+}
+let dragState: DragState | null = null;
+// Pre-drag file coordinates of the moves sent to the extension host, for rollback if the write
+// fails (the local re-render has already applied them by then).
+let pendingMoveRollback: Map<string, { x: number; y: number }> | null = null;
+
+const dragThresholdPx = 3;
 
 function escapeHtml(unsafe: string): string {
     return unsafe
@@ -213,6 +230,7 @@ function bindFocusInteractions() {
             } else {
                 applyClickSelection(id, ctrl, shift);
             }
+            startDragTracking(e);
         });
         nav.addEventListener('dblclick', () => {
             const startStr = nav.getAttribute('start');
@@ -234,6 +252,92 @@ function bindFocusInteractions() {
             }
         });
     }
+}
+
+// Binds the transient window listeners that track a drag. The visual follows the pointer via
+// transform on the selected cells; releasing past the threshold writes the moves back.
+function startDragTracking(e: MouseEvent) {
+    dragState = {
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        moved: false,
+        contentDeltaX: 0,
+        contentDeltaY: 0,
+    };
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragEnd);
+}
+
+function onDragMove(e: MouseEvent) {
+    const drag = dragState;
+    if (!drag) {
+        return;
+    }
+    const clientDeltaX = e.clientX - drag.startClientX;
+    const clientDeltaY = e.clientY - drag.startClientY;
+    if (!drag.moved && Math.abs(clientDeltaX) < dragThresholdPx && Math.abs(clientDeltaY) < dragThresholdPx) {
+        return;
+    }
+    drag.moved = true;
+    const scale = getState().scale || 1;
+    drag.contentDeltaX = clientDeltaX / scale;
+    drag.contentDeltaY = clientDeltaY / scale;
+    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    for (let i = 0; i < navigators.length; i++) {
+        if (selectionState.selected.has(navigators[i].dataset.focusId ?? '')) {
+            navigators[i].style.transform = `translate(${drag.contentDeltaX}px, ${drag.contentDeltaY}px)`;
+        }
+    }
+}
+
+function clearDragTransforms() {
+    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    for (let i = 0; i < navigators.length; i++) {
+        navigators[i].style.transform = '';
+    }
+}
+
+function onDragEnd() {
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', onDragEnd);
+    const drag = dragState;
+    dragState = null;
+    if (!drag?.moved) {
+        return;
+    }
+    const tree = focusTrees[selectedFocusTreeIndex];
+    if (!tree) {
+        clearDragTransforms();
+        return;
+    }
+    const scale = getState().scale || 1;
+    const xGridSize = (window as any).xGridSize ?? 96;
+    const yGridSize = (window as any).gridBox?.slotsize?.height?._value ?? 130;
+    const delta = computeGridDelta(drag.contentDeltaX * scale, drag.contentDeltaY * scale, scale, xGridSize, yGridSize);
+    if (delta.dx === 0 && delta.dy === 0) {
+        clearDragTransforms();
+        return;
+    }
+
+    // Snapshot the pre-drag file coordinates, apply the move locally (immediate re-render), then
+    // ask the extension host to write it back; on failure the snapshot restores the preview.
+    const prevPositions: Record<string, { x: number; y: number }> = {};
+    const moves: DragMove[] = buildFocusDragMoves(selectionState.selected, currentFocusPositions(), delta);
+    for (const move of moves) {
+        const focus = tree.focuses[move.id];
+        if (focus) {
+            prevPositions[move.id] = { x: focus.x, y: focus.y };
+            focus.x = move.x;
+            focus.y = move.y;
+        }
+    }
+    if (moves.length === 0) {
+        clearDragTransforms();
+        return;
+    }
+    pendingMoveRollback = new Map(Object.entries(prevPositions));
+    void buildContent().then(() => retriggerSearch());
+    vscode.postMessage({ command: 'moveFocuses', moves });
 }
 
 // Applies the ID/name toggle to the on-screen focus labels. Name mode swaps each label to its
@@ -671,6 +775,29 @@ window.addEventListener('message', async (event) => {
         focusNames = msg.names ?? {};
         focusNamesRequested = true;
         updateFocusNameDisplay();
+        return;
+    }
+
+    // Drag-move write-back result. Success needs no action (the document change triggers a fresh
+    // render); failure restores the pre-drag coordinates locally.
+    if (msg.type === 'focusesMoved') {
+        if (msg.ok !== true && pendingMoveRollback) {
+            const tree = focusTrees[selectedFocusTreeIndex];
+            if (tree) {
+                for (const [id, pos] of pendingMoveRollback) {
+                    const focus = tree.focuses[id];
+                    if (focus) {
+                        focus.x = pos.x;
+                        focus.y = pos.y;
+                    }
+                }
+            }
+            pendingMoveRollback = null;
+            await buildContent();
+            retriggerSearch();
+        } else {
+            pendingMoveRollback = null;
+        }
         return;
     }
 
