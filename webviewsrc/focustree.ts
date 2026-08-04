@@ -228,6 +228,7 @@ function bindFocusInteractions() {
                 return;
             }
             startPointer(e, 'move', id);
+            vscode.postMessage({ command: 'ftdiag', msg: `mousedown focus=${id}` });
         });
     }
 
@@ -256,6 +257,7 @@ function navigateToFocus(id: string) {
             const file = navigators[i].getAttribute('file');
             const start = !startStr || startStr === 'undefined' ? undefined : parseInt(startStr);
             const end = !endStr ? undefined : parseInt(endStr);
+            vscode.postMessage({ command: 'ftdiag', msg: `navigate focus=${id} start=${start} end=${end} file=${file ?? 'none'}` });
             vscode.postMessage({ command: 'navigate', start, end, file });
             return;
         }
@@ -426,6 +428,7 @@ function onPointerEnd(e: MouseEvent) {
     // Clear the selection synchronously (before the re-render), so no highlight box lingers
     // after a move even if the rebuild is slow or fails.
     clearFocusSelection();
+    vscode.postMessage({ command: 'ftdiag', msg: `moves=${moves.length} clearSelection` });
     void buildContent().then(() => retriggerSearch()).catch(() => {});
     vscode.postMessage({ command: 'moveFocuses', moves });
 }
