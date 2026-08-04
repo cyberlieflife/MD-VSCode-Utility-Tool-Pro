@@ -227,10 +227,16 @@ function bindFocusInteractions() {
             if (id === undefined) {
                 return;
             }
-            // Dragging an unselected focus box-selects from the press point (desktop-style);
-            // dragging an already-selected focus moves the selection. A clean press-release
-            // navigates either way.
-            const mode = selectionState.selected.has(id) ? 'move' : 'rubber-band';
+            // The icon/titlebar/overlay layers have pointer-events: none, so both the focus body
+            // and the cell's empty margin resolve to the navigator itself. Distinguish by press
+            // position: the central band (icon, titlebar, overlay) and the bottom label are the
+            // focus body (drag = move, press-release = navigate); the cell margins and any space
+            // outside cells are empty canvas (drag = box-select).
+            const rect = nav.getBoundingClientRect();
+            const ratioX = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+            const ratioY = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+            const isFocusBody = (Math.abs(ratioX - 0.5) <= 0.34 && ratioY >= 0.12 && ratioY <= 0.8) || ratioY >= 0.8;
+            const mode = isFocusBody ? 'move' : 'rubber-band';
             // Capture guarantees the matching pointerup reaches us even if the pointer leaves the
             // cell or the webview frame before release (the mouseup that used to be lost).
             try {
@@ -306,6 +312,11 @@ function onPointerMove(e: MouseEvent) {
     }
     if (!pointer.moved) {
         pointer.moved = true;
+        if (pointer.mode === 'move' && pointer.moveStartId !== undefined && !selectionState.selected.has(pointer.moveStartId)) {
+            // Dragging an unselected focus body moves only it. No highlight here: the box would
+            // only flash during the drag and is cleared on release (and after a valid move).
+            selectionState = { selected: new Set([pointer.moveStartId]) };
+        }
     }
     const scale = getState().scale || 1;
     pointer.contentDeltaX = clientDeltaX / scale;
