@@ -97,9 +97,11 @@ interface PointerState {
     overlay: HTMLDivElement | null;
 }
 let pointerState: PointerState | null = null;
-// Set right after a drag release so the click that follows (same element, same press) does not
-// navigate; the navigation click is restored on the next clean click.
-let suppressClickNavigation = false;
+// Position of the most recent mousedown on a focus cell, so a click that follows a drag (the
+// pointer travelled past the threshold) can be told apart from a clean navigation click. The
+// click event carries the mouseup position; a large displacement means a drag happened.
+let lastPointerDownClientX = -1;
+let lastPointerDownClientY = -1;
 // Pre-drag file coordinates of the moves sent to the extension host, for rollback if the write
 // fails (the local re-render has already applied them by then).
 let pendingMoveRollback: Map<string, { x: number; y: number }> | null = null;
@@ -230,9 +232,11 @@ function bindFocusInteractions() {
             }
             startPointer(e, 'move', id);
         });
-        nav.addEventListener('click', () => {
-            if (suppressClickNavigation) {
-                suppressClickNavigation = false;
+        nav.addEventListener('click', (e) => {
+            // A click right after a drag on the same cell is not a navigation click: the pointer
+            // moved past the threshold between mousedown and mouseup, so skip it.
+            if (Math.abs(e.clientX - lastPointerDownClientX) > dragThresholdPx ||
+                Math.abs(e.clientY - lastPointerDownClientY) > dragThresholdPx) {
                 return;
             }
             const startStr = nav.getAttribute('start');
@@ -261,6 +265,8 @@ function bindFocusInteractions() {
 
 // Binds the transient window listeners that track the pointer until release.
 function startPointer(e: MouseEvent, mode: 'move' | 'rubber-band', moveStartId: string | undefined) {
+    lastPointerDownClientX = e.clientX;
+    lastPointerDownClientY = e.clientY;
     pointerState = {
         startClientX: e.clientX,
         startClientY: e.clientY,
@@ -385,8 +391,8 @@ function onPointerEnd(e: MouseEvent) {
         return;
     }
 
-    // Move mode: suppress the click that follows this drag, then write the moves back.
-    suppressClickNavigation = true;
+    // Move mode: write the moves back, then clear the selection (the focus moved; the highlight
+    // box is no longer wanted).
     const tree = focusTrees[selectedFocusTreeIndex];
     if (!tree) {
         clearDragTransforms();
@@ -418,7 +424,10 @@ function onPointerEnd(e: MouseEvent) {
         return;
     }
     pendingMoveRollback = new Map(Object.entries(prevPositions));
-    void buildContent().then(() => retriggerSearch());
+    void buildContent().then(() => {
+        retriggerSearch();
+        clearFocusSelection();
+    });
     vscode.postMessage({ command: 'moveFocuses', moves });
 }
 
@@ -878,6 +887,7 @@ window.addEventListener('message', async (event) => {
             pendingMoveRollback = null;
             await buildContent();
             retriggerSearch();
+            clearFocusSelection();
         } else {
             pendingMoveRollback = null;
         }
