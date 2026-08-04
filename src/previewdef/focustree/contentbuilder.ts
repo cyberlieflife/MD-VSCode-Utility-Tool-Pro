@@ -650,6 +650,7 @@ async function renderFocus(
             cursor: pointer;
         `)}
     "
+    data-focus-id="${focus.id}"
     start="${focus.token?.start}"
     end="${focus.token?.end}"
     ${file === focus.file ? '' : `file="${focus.file}"`}

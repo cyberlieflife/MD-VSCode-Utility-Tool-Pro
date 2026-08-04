@@ -1,4 +1,5 @@
-import { getState, setState, arrayToMap, subscribeNavigators, scrollToState, tryRun, enableZoom, initCommon } from "./util/common";
+import { getState, setState, arrayToMap, scrollToState, tryRun, enableZoom, initCommon } from "./util/common";
+import { applySelectionClick, SelectionState, emptySelection } from "./focusselection";
 import { DivDropdown } from "./util/dropdown";
 import { difference, minBy } from "lodash";
 import { renderGridBoxCommon, GridBoxItem, GridBoxConnection } from "../src/util/hoi4gui/gridboxcommon";
@@ -75,6 +76,10 @@ let focusNames: Record<string, string> = {};
 // restores the rendered content, making stale entries wrong).
 const focusSpanOriginalHtml = new Map<string, string>();
 
+// Multi-selection of focus cells. Selection is per-session (not persisted); the set is cleared on
+// tree switches and DOM rebuilds keep it (it is id-based and re-applied as highlight).
+let selectionState: SelectionState = emptySelection();
+
 function escapeHtml(unsafe: string): string {
     return unsafe
         .replace(/&/g, '&amp;')
@@ -143,6 +148,91 @@ function applyFocusOverlayVisibility() {
         if (element.dataset.hasFocusOverlay === 'true') {
             element.style.display = visible ? 'block' : 'none';
         }
+    }
+}
+
+// Focus multi-selection ------------------------------------------------
+function updateFocusSelectionHighlight() {
+    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    for (let i = 0; i < navigators.length; i++) {
+        const nav = navigators[i];
+        if (selectionState.selected.has(nav.dataset.focusId ?? '')) {
+            nav.style.outline = '2px solid var(--vscode-focusBorder)';
+            nav.style.outlineOffset = '-2px';
+        } else {
+            nav.style.outline = '';
+        }
+    }
+}
+
+function clearFocusSelection() {
+    selectionState = emptySelection();
+    updateFocusSelectionHighlight();
+}
+
+// Grid positions of the current tree's focuses (file coordinates), used for shift-range selection.
+function currentFocusPositions(): Record<string, { x: number; y: number }> {
+    const positions: Record<string, { x: number; y: number }> = {};
+    const tree = focusTrees[selectedFocusTreeIndex];
+    if (tree) {
+        for (const focusId in tree.focuses) {
+            positions[focusId] = { x: tree.focuses[focusId].x, y: tree.focuses[focusId].y };
+        }
+    }
+    return positions;
+}
+
+function applyClickSelection(id: string, ctrl: boolean, shift: boolean) {
+    selectionState = applySelectionClick(selectionState, id, { ctrl, shift }, currentFocusPositions());
+    updateFocusSelectionHighlight();
+}
+
+// Replaces the shared subscribeNavigators click-to-navigate with selection-aware interactions:
+// mousedown selects (with ctrl/shift modifiers), double-click navigates to the source file.
+function bindFocusInteractions() {
+    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    for (let i = 0; i < navigators.length; i++) {
+        const nav = navigators[i];
+        nav.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) {
+                return;
+            }
+            // Clicks on the completion checkbox (or other inputs) never select.
+            const target = e.target as HTMLElement;
+            if (target.closest('input, .focus-checkbox')) {
+                return;
+            }
+            const id = nav.dataset.focusId;
+            if (id === undefined) {
+                return;
+            }
+            const ctrl = e.ctrlKey || e.metaKey;
+            const shift = e.shiftKey;
+            if (!ctrl && !shift && !selectionState.selected.has(id)) {
+                applyClickSelection(id, false, false);
+            } else {
+                applyClickSelection(id, ctrl, shift);
+            }
+        });
+        nav.addEventListener('dblclick', () => {
+            const startStr = nav.getAttribute('start');
+            const endStr = nav.getAttribute('end');
+            const file = nav.getAttribute('file');
+            const start = !startStr || startStr === 'undefined' ? undefined : parseInt(startStr);
+            const end = !endStr ? undefined : parseInt(endStr);
+            vscode.postMessage({ command: 'navigate', start, end, file });
+        });
+    }
+
+    // Clicking empty canvas space clears the selection.
+    const content = document.getElementById('focustreecontent');
+    if (content) {
+        content.addEventListener('mousedown', (e) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('[data-focus-id]') && !target.closest('input, select, button, label')) {
+                clearFocusSelection();
+            }
+        });
     }
 }
 
@@ -229,14 +319,15 @@ async function buildContent() {
     const inlayWindowPlaceholder = document.getElementById('inlaywindowplaceholder') as HTMLDivElement;
     inlayWindowPlaceholder.innerHTML = renderInlayWindows(focusTree, exprs);
 
-    subscribeNavigators();
+    bindFocusInteractions();
     setupCheckedFocuses(focuses, focusTree);
     applyCustomTitlebarVisibility();
     applyFocusOverlayVisibility();
     // The rebuild replaced every focus label, so cached originals are stale. Re-apply the name
-    // mode (no-op in ID mode) after the fresh render.
+    // mode (no-op in ID mode) and the selection highlight after the fresh render.
     focusSpanOriginalHtml.clear();
     updateFocusNameDisplay();
+    updateFocusSelectionHighlight();
 }
 
 function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Record<string, boolean>) {
@@ -660,6 +751,7 @@ window.addEventListener('load', tryRun(async function() {
         focusesElement.addEventListener('change', async () => {
             selectedFocusTreeIndex = parseInt(focusesElement.value);
             setState({ selectedFocusTreeIndex });
+            clearFocusSelection();
             updateSelectedFocusTree(true);
             await buildContent();
             retriggerSearch();
@@ -824,6 +916,13 @@ window.addEventListener('load', tryRun(async function() {
             retriggerSearch();
         });
     }
+
+    // Escape clears the focus selection.
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && selectionState.selected.size > 0) {
+            clearFocusSelection();
+        }
+    });
 
     updateSelectedFocusTree(false);
     await buildContent();
