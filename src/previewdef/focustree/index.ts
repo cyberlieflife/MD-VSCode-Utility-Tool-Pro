@@ -4,7 +4,8 @@ import { matchPathEnd } from '../../util/nodecommon';
 import { PreviewBase } from '../previewbase';
 import { PreviewProviderDef } from '../previewmanager';
 import { FocusTreeLoader } from './loader';
-import { FocusTree } from './schema';
+import { FocusTree, Focus } from './schema';
+import { buildFocusMoveEdits } from './move';
 import { getRelativePathInWorkspace, getDocumentByUri, getConfiguration } from '../../util/vsccommon';
 import { localize } from '../../util/i18n';
 import { loadingShellHtml } from '../../util/html';
@@ -68,6 +69,9 @@ class FocusTreePreview extends PreviewBase {
     // Resolves when the webview signals it has rendered the structure and can accept icon CSS.
     private webviewReady: Promise<void> = Promise.resolve();
     private signalWebviewReady: () => void = () => {};
+    // Focus trees of the last successful render, kept for drag-move write-back (the webview only
+    // knows ids; the token positions for precise edits live here).
+    private lastFocusTrees: FocusTree[] = [];
 
     constructor(uri: vscode.Uri, panel: vscode.WebviewPanel) {
         super(uri, panel);
@@ -79,6 +83,10 @@ class FocusTreePreview extends PreviewBase {
         );
         this.focusTreeLoader.onLoadDone(r => this.updateDependencies(r.dependencies));
         this.panel.webview.onDidReceiveMessage(msg => {
+            if (msg?.command === 'moveFocuses') {
+                void this.applyFocusMoves(msg.moves);
+                return;
+            }
             if (msg?.command === 'requestFocusNames') {
                 void this.sendFocusNames(msg.ids);
                 return;
@@ -100,6 +108,54 @@ class FocusTreePreview extends PreviewBase {
                 this.repushCachedIconStyles();
             }
         });
+    }
+
+    /**
+     * Writes drag moves back into the previewed focus document via a single WorkspaceEdit
+     * (undoable). Only focuses that live in this document are moved; shared/joint focuses from
+     * dependency files are skipped and reported as a failure so the webview can roll back.
+     */
+    private async applyFocusMoves(moves: { id: string; x: number; y: number }[]): Promise<void> {
+        try {
+            const document = getDocumentByUri(this.uri);
+            if (!document) {
+                this.panel.webview.postMessage({ type: 'focusesMoved', ok: false });
+                return;
+            }
+            const text = document.getText();
+            const focusById = new Map<string, Focus>();
+            for (const tree of this.lastFocusTrees) {
+                for (const focus of Object.values(tree.focuses)) {
+                    focusById.set(focus.id, focus);
+                }
+            }
+            const edit = new vscode.WorkspaceEdit();
+            let failed = false;
+            for (const move of moves) {
+                const focus = focusById.get(move.id);
+                if (!focus || focus.file !== this.focusTreeLoader.file) {
+                    failed = true;
+                    continue;
+                }
+                const specs = buildFocusMoveEdits(text, focus, move.x, move.y);
+                if (specs.length === 0) {
+                    failed = true;
+                    continue;
+                }
+                for (const spec of specs) {
+                    edit.replace(this.uri, new vscode.Range(document.positionAt(spec.start), document.positionAt(spec.end)), spec.text);
+                }
+            }
+            if (failed) {
+                this.panel.webview.postMessage({ type: 'focusesMoved', ok: false });
+                return;
+            }
+            const ok = await vscode.workspace.applyEdit(edit);
+            this.panel.webview.postMessage({ type: 'focusesMoved', ok });
+        } catch (e) {
+            error(e);
+            this.panel.webview.postMessage({ type: 'focusesMoved', ok: false });
+        }
     }
 
     private repushCachedIconStyles(): void {
@@ -217,6 +273,7 @@ class FocusTreePreview extends PreviewBase {
                 this.lastTreeIcon = treeFingerprints.icon;
                 this.lastToolbarFlags = structure.toolbarFlags;
                 this.lastGoodHadFocusTrees = true;
+                this.lastFocusTrees = structure.focusTrees;
                 // Phase 2 (background): resolve the real focus icons and stream their CSS into the
                 // already-visible preview. No hard timeout: slow icons fill in when ready.
                 void this.pushIconStyles(generation);
@@ -229,6 +286,7 @@ class FocusTreePreview extends PreviewBase {
             this.lastTreeIcon = undefined;
             this.lastToolbarFlags = undefined;
             this.lastGoodHadFocusTrees = false;
+            this.lastFocusTrees = [];
             return buildNoFocusTreeHtml(this.panel.webview, document.uri);
         } catch (e) {
             // Timeout or unexpected failure: show a recoverable panel with a Reload button
@@ -244,6 +302,7 @@ class FocusTreePreview extends PreviewBase {
             this.lastTreeIcon = undefined;
             this.lastToolbarFlags = undefined;
             this.lastGoodHadFocusTrees = false;
+            this.lastFocusTrees = [];
             return buildFocusTreeErrorHtml(this.panel.webview, document.uri, e);
         } finally {
             this.focusTreeLoader.setProgressListener(undefined);
@@ -390,6 +449,7 @@ class FocusTreePreview extends PreviewBase {
             this.lastTreeIcon = treeFingerprints.icon;
             this.lastToolbarFlags = structure.toolbarFlags;
             this.lastGoodHadFocusTrees = true;
+            this.lastFocusTrees = structure.focusTrees;
 
             if (decision.postUpdate) {
                 const updateMsg: FocusTreeUpdatePayload & { type: string } = {
