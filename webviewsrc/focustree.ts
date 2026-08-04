@@ -97,11 +97,6 @@ interface PointerState {
     overlay: HTMLDivElement | null;
 }
 let pointerState: PointerState | null = null;
-// Position of the most recent mousedown on a focus cell, so a click that follows a drag (the
-// pointer travelled past the threshold) can be told apart from a clean navigation click. The
-// click event carries the mouseup position; a large displacement means a drag happened.
-let lastPointerDownClientX = -1;
-let lastPointerDownClientY = -1;
 // Pre-drag file coordinates of the moves sent to the extension host, for rollback if the write
 // fails (the local re-render has already applied them by then).
 let pendingMoveRollback: Map<string, { x: number; y: number }> | null = null;
@@ -210,9 +205,11 @@ function currentFocusPositions(): Record<string, { x: number; y: number }> {
     return positions;
 }
 
-// Focus-cell interactions: single click navigates to the source line (original behavior),
-// dragging a focus cell moves the selection (dragging an unselected cell selects it first),
-// and dragging on empty canvas rubber-band box-selects every intersected focus.
+// Focus-cell interactions: a clean press-release on a focus cell navigates to the source line
+// (original behavior), dragging a focus cell moves the selection (dragging an unselected cell
+// selects it first), and dragging on empty canvas rubber-band box-selects every intersected
+// focus. Navigation happens on mouseup, not on the browser's click event, so it cannot be lost
+// to click-suppression quirks (text selection, pointer capture, etc.).
 function bindFocusInteractions() {
     const navigators = document.querySelectorAll<HTMLElement>('.navigator');
     for (let i = 0; i < navigators.length; i++) {
@@ -232,20 +229,6 @@ function bindFocusInteractions() {
             }
             startPointer(e, 'move', id);
         });
-        nav.addEventListener('click', (e) => {
-            // A click right after a drag on the same cell is not a navigation click: the pointer
-            // moved past the threshold between mousedown and mouseup, so skip it.
-            if (Math.abs(e.clientX - lastPointerDownClientX) > dragThresholdPx ||
-                Math.abs(e.clientY - lastPointerDownClientY) > dragThresholdPx) {
-                return;
-            }
-            const startStr = nav.getAttribute('start');
-            const endStr = nav.getAttribute('end');
-            const file = nav.getAttribute('file');
-            const start = !startStr || startStr === 'undefined' ? undefined : parseInt(startStr);
-            const end = !endStr ? undefined : parseInt(endStr);
-            vscode.postMessage({ command: 'navigate', start, end, file });
-        });
     }
 
     // Empty canvas: mousedown starts a rubber-band box select (a plain click clears the selection).
@@ -263,10 +246,24 @@ function bindFocusInteractions() {
     }
 }
 
+// Sends the navigate message for the focus cell with the given id (its source-line tokens).
+function navigateToFocus(id: string) {
+    const navigators = document.querySelectorAll<HTMLElement>('.navigator');
+    for (let i = 0; i < navigators.length; i++) {
+        if (navigators[i].dataset.focusId === id) {
+            const startStr = navigators[i].getAttribute('start');
+            const endStr = navigators[i].getAttribute('end');
+            const file = navigators[i].getAttribute('file');
+            const start = !startStr || startStr === 'undefined' ? undefined : parseInt(startStr);
+            const end = !endStr ? undefined : parseInt(endStr);
+            vscode.postMessage({ command: 'navigate', start, end, file });
+            return;
+        }
+    }
+}
+
 // Binds the transient window listeners that track the pointer until release.
 function startPointer(e: MouseEvent, mode: 'move' | 'rubber-band', moveStartId: string | undefined) {
-    lastPointerDownClientX = e.clientX;
-    lastPointerDownClientY = e.clientY;
     pointerState = {
         startClientX: e.clientX,
         startClientY: e.clientY,
@@ -360,9 +357,11 @@ function onPointerEnd(e: MouseEvent) {
     }
 
     if (!pointer.moved) {
-        // A plain click: on a focus cell the click event navigates; on empty canvas clear the
-        // selection.
-        if (pointer.mode === 'rubber-band') {
+        // A clean press-release: on a focus cell navigate to its source line; on empty canvas
+        // clear the selection.
+        if (pointer.mode === 'move' && pointer.moveStartId !== undefined) {
+            navigateToFocus(pointer.moveStartId);
+        } else if (pointer.mode === 'rubber-band') {
             clearFocusSelection();
         }
         return;
@@ -424,10 +423,10 @@ function onPointerEnd(e: MouseEvent) {
         return;
     }
     pendingMoveRollback = new Map(Object.entries(prevPositions));
-    void buildContent().then(() => {
-        retriggerSearch();
-        clearFocusSelection();
-    });
+    // Clear the selection synchronously (before the re-render), so no highlight box lingers
+    // after a move even if the rebuild is slow or fails.
+    clearFocusSelection();
+    void buildContent().then(() => retriggerSearch()).catch(() => {});
     vscode.postMessage({ command: 'moveFocuses', moves });
 }
 
@@ -885,9 +884,9 @@ window.addEventListener('message', async (event) => {
                 }
             }
             pendingMoveRollback = null;
+            clearFocusSelection();
             await buildContent();
             retriggerSearch();
-            clearFocusSelection();
         } else {
             pendingMoveRollback = null;
         }
