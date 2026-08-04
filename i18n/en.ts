@@ -40,6 +40,7 @@ const internalTable = /* SOT Do not remove this comment */{
     "focustree.loading.slow": "Still working on a heavy focus tree...",
     "focustree.loading.slow_title": "The focus tree is taking too long to render (large file or low memory).",
     "focustree.loading.start": "Preparing focus tree...",
+    "focustree.names": "Names",
     "focustree.nofocustree": "No focus tree.",
     "focustree.reload": "Reload",
     "focustree.resetcheckboxes": "Reset focus checkboxes",

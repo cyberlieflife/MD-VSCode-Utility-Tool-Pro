@@ -11,6 +11,7 @@ import { loadingShellHtml } from '../../util/html';
 import { withTimeout, TimeoutError } from '../../util/common';
 import { error } from '../../util/debug';
 import { useConditionInFocus, localisationIndex } from '../../util/featureflags';
+import { ensureLocalisationIndex, getLocalisedTextUnchecked } from '../../util/localisationIndex';
 import { computeStructuralFingerprint, computeIconSourceFingerprint, computeTreeStructuralFingerprint, computeTreeIconFingerprint, decideFocusTreeUpdate, FocusTreeFingerprints } from './fingerprint';
 
 // A render taking longer than this is treated as stuck. The underlying load keeps running
@@ -78,6 +79,10 @@ class FocusTreePreview extends PreviewBase {
         );
         this.focusTreeLoader.onLoadDone(r => this.updateDependencies(r.dependencies));
         this.panel.webview.onDidReceiveMessage(msg => {
+            if (msg?.command === 'requestFocusNames') {
+                void this.sendFocusNames(msg.ids);
+                return;
+            }
             if (msg?.command === 'ready') {
                 this.signalWebviewReady();
                 // Bug #36: the webview re-posts `ready` after VS Code reloads it (e.g. on hide->show),
@@ -100,6 +105,31 @@ class FocusTreePreview extends PreviewBase {
     private repushCachedIconStyles(): void {
         if (this.lastPushedIconCss !== undefined && this.lastPushedIconGeneration === this.iconRenderGeneration && !this.isDisposed) {
             this.panel.webview.postMessage({ type: 'iconStyles', css: this.lastPushedIconCss });
+        }
+    }
+
+    /**
+     * Resolves the localised display names for the given focus ids (using the editor language)
+     * and posts them back to the webview for its ID/name toggle. The localisation index is built
+     * on demand here, so the toggle works without the localisationIndex setting.
+     */
+    private async sendFocusNames(ids: string[]): Promise<void> {
+        try {
+            await ensureLocalisationIndex();
+            if (this.isDisposed) {
+                return;
+            }
+            const language = vscode.env.language;
+            const names: Record<string, string> = {};
+            for (const id of ids) {
+                const name = getLocalisedTextUnchecked(id, language);
+                if (name !== undefined && name !== id) {
+                    names[id] = name;
+                }
+            }
+            this.panel.webview.postMessage({ type: 'focusNames', names });
+        } catch (e) {
+            error(e);
         }
     }
 

@@ -65,8 +65,36 @@ let conditions: DivDropdown | undefined = undefined;
 let inlayConditions: DivDropdown | undefined = undefined;
 let checkedFocuses: Record<string, Checkbox> = {};
 
+// ID/name display toggle state. Off by default (focus ids shown); when on, focus labels swap to
+// the localised names resolved by the extension host from the editor-language localisation files.
+let focusNamesMode = false;
+let focusNamesRequested = false;
+let focusNames: Record<string, string> = {};
+// Original innerHTML of each focus label while name mode is active, so ID mode can restore it
+// without a full re-render. Cleared whenever buildContent rebuilds the DOM (the rebuild already
+// restores the rendered content, making stale entries wrong).
+const focusSpanOriginalHtml = new Map<string, string>();
+
+function escapeHtml(unsafe: string): string {
+    return unsafe
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function showCustomTitlebars() {
-    return getState().showCustomTitlebars ?? false;
+    // On by default: focus frames render with their (possibly default_style fallback) titlebar
+    // unless the user explicitly hides them. v1.1.15 flipped this default from off to on, so a
+    // state persisted by older versions (which may have recorded `false` from a past toggle, or
+    // nothing at all) must not shadow the new default: the first run after upgrade re-asserts
+    // `true` and records the migration once, so an explicit later toggle still wins.
+    const state = getState();
+    if (state.customTitlebarDefaultApplied !== true) {
+        setState({ showCustomTitlebars: true, customTitlebarDefaultApplied: true });
+        return true;
+    }
+    return state.showCustomTitlebars ?? true;
 }
 
 function showFocusOverlays() {
@@ -114,6 +142,34 @@ function applyFocusOverlayVisibility() {
         const element = elements[i] as HTMLDivElement;
         if (element.dataset.hasFocusOverlay === 'true') {
             element.style.display = visible ? 'block' : 'none';
+        }
+    }
+}
+
+// Applies the ID/name toggle to the on-screen focus labels. Name mode swaps each label to its
+// localised name (caching the original HTML so ID mode can restore it); ID mode restores.
+function updateFocusNameDisplay() {
+    const spans = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    for (let i = 0; i < spans.length; i++) {
+        const span = spans[i];
+        const id = span.dataset.focusId;
+        if (id === undefined) {
+            continue;
+        }
+        if (focusNamesMode) {
+            const name = focusNames[id];
+            if (name !== undefined) {
+                if (!focusSpanOriginalHtml.has(id)) {
+                    focusSpanOriginalHtml.set(id, span.innerHTML);
+                }
+                span.innerHTML = escapeHtml(name);
+            }
+        } else {
+            const original = focusSpanOriginalHtml.get(id);
+            if (original !== undefined) {
+                span.innerHTML = original;
+                focusSpanOriginalHtml.delete(id);
+            }
         }
     }
 }
@@ -177,6 +233,10 @@ async function buildContent() {
     setupCheckedFocuses(focuses, focusTree);
     applyCustomTitlebarVisibility();
     applyFocusOverlayVisibility();
+    // The rebuild replaced every focus label, so cached originals are stale. Re-apply the name
+    // mode (no-op in ID mode) after the fresh render.
+    focusSpanOriginalHtml.clear();
+    updateFocusNameDisplay();
 }
 
 function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Record<string, boolean>) {
@@ -515,6 +575,14 @@ window.addEventListener('message', async (event) => {
         return;
     }
 
+    // Localised names for the ID/name toggle arrived from the extension host.
+    if (msg.type === 'focusNames') {
+        focusNames = msg.names ?? {};
+        focusNamesRequested = true;
+        updateFocusNameDisplay();
+        return;
+    }
+
     if (msg.type !== 'update') return;
 
     focusTrees = msg.focusTrees;
@@ -537,6 +605,25 @@ window.addEventListener('message', async (event) => {
 });
 
 window.addEventListener('load', tryRun(async function() {
+    // Focus name display: ID (default) or localised name
+    const showFocusNamesElement = document.getElementById('show-focus-names') as HTMLInputElement | null;
+    if (showFocusNamesElement) {
+        showFocusNamesElement.checked = focusNamesMode;
+        showFocusNamesElement.addEventListener('change', () => {
+            focusNamesMode = showFocusNamesElement.checked;
+            if (focusNamesMode && !focusNamesRequested) {
+                focusNamesRequested = true;
+                const ids: string[] = [];
+                for (const tree of focusTrees) {
+                    for (const focusId in tree.focuses) {
+                        ids.push(focusId);
+                    }
+                }
+                vscode.postMessage({ command: 'requestFocusNames', ids });
+            }
+            updateFocusNameDisplay();
+        });
+    }
     // Custom titlebars
     const showCustomTitlebarsElement = document.getElementById('show-custom-titlebars') as HTMLInputElement | null;
     if (showCustomTitlebarsElement) {

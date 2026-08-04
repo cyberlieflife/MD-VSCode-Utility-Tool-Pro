@@ -67,6 +67,9 @@ function buildStub() {
         showQuickPick: async () => undefined,
         showOpenDialog: async () => undefined,
         setStatusBarMessage: () => disposable(),
+        createOutputChannel: () => ({
+            appendLine: noop, append: noop, show: noop, hide: noop, dispose: noop, name: '',
+        }),
         createStatusBarItem: () => ({
             text: '', tooltip: '', command: undefined,
             show: noop, hide: noop, dispose: noop,

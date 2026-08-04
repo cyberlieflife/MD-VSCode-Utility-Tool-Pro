@@ -13,7 +13,7 @@ import { StyleTable, normalizeForStyle } from '../../util/styletable';
 import { useConditionInFocus, localisationIndex } from '../../util/featureflags';
 import { flatMap } from 'lodash';
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
-import { getFocusTitlebarImage, getFocusOverlayImage, loadFocusTitlebarStyles } from "./titlebar";
+import { getFocusTitlebarImage, getFocusOverlayImage, loadFocusTitlebarStyles, resolveTitlebarGfxName } from "./titlebar";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
 import { renderInstantTextBox } from "../../util/hoi4gui/instanttextbox";
@@ -108,7 +108,9 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             `imageDecodes=${iconResolveStats.imageDecodes} decodeTime=${iconResolveStats.imageDecodeMs}ms`);
 
         const toolbarFlags: ToolbarFlags = {
-            hasCustomTitlebar: focusTrees.some(ft => Object.values(ft.focuses).some(f => f.textIcon !== undefined && titlebarStyles[f.textIcon] !== undefined)),
+            // A focus without text_icon still renders its frame through the default_style titlebar,
+            // so the toggle must appear whenever any focus can resolve a titlebar (explicit or fallback).
+            hasCustomTitlebar: focusTrees.some(ft => Object.values(ft.focuses).some(f => resolveTitlebarGfxName(f.textIcon, titlebarStyles) !== undefined)),
             hasFocusOverlay: focusTrees.some(ft => Object.values(ft.focuses).some(f => f.overlay !== undefined)),
             hasInlayWindows: focusTrees.some(ft => ft.inlayWindows.length > 0),
         };
@@ -316,6 +318,18 @@ function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, flags: T
             type="text"
         />`;
 
+    // ID/name display toggle: un-checked = show focus ids (default), checked = show localised
+    // names resolved from the editor-language localisation files on demand.
+    const nameToggle = `
+        <div class="${styleTable.style('focusNamesContainer', () => `margin-right:10px; display:flex; align-items:center;`)}">
+            <label for="show-focus-names" class="${styleTable.style('focusNamesIdLabel', () => `margin-right:5px;`)}">ID</label>
+            <input
+                id="show-focus-names"
+                type="checkbox"
+            />
+            <label for="show-focus-names" class="${styleTable.style('focusNamesNameLabel', () => `margin-left:5px;`)}">${localize('focustree.names', 'Names')}</label>
+        </div>`;
+
     const customTitlebars = !flags.hasCustomTitlebar ? '' : `
         <div class="${styleTable.style('customTitlebarsContainer', () => `margin-right:10px; display:flex; align-items:center;`)}">
             <label for="show-custom-titlebars">${localize('focustree.customtitlebars', 'Custom titlebars')}</label>
@@ -397,6 +411,7 @@ function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, flags: T
             ${useConditionInFocus ? conditions + inlayConditions : allowbranch}
             ${focuses}
             ${searchbox}
+            ${nameToggle}
             ${customTitlebars}
             ${focusOverlays}
             ${inlayWindowsToggle}
@@ -682,7 +697,8 @@ async function renderFocus(
             margin-top: 85px;
             text-align: center;
             display: inline-block;
-        `)}">
+        `)}"
+        data-focus-id="${focus.id}">
         ${textContent}
         </span>
     </div>`;

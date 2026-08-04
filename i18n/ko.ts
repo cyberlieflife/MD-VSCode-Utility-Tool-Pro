@@ -40,6 +40,7 @@ const table: Partial<typeof __table> = {
     "focustree.loading.slow": "Still working on a heavy focus tree...",
     "focustree.loading.slow_title": "The focus tree is taking too long to render (large file or low memory).",
     "focustree.loading.start": "Preparing focus tree...",
+    "focustree.names": "이름",
     "focustree.nofocustree": "중점 계통도 없음.",
     "focustree.reload": "Reload",
     "focustree.resetcheckboxes": "Reset focus checkboxes",

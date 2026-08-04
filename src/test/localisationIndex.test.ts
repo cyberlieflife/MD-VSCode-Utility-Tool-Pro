@@ -1,5 +1,7 @@
 import * as assert from 'assert';
-import { parseLocalisation } from '../util/localisationIndex';
+import * as vscode from 'vscode';
+import { parseLocalisation, getLocalisedTextUnchecked, ensureLocalisationIndex } from '../util/localisationIndex';
+import { clearDlcZipCache } from '../util/fileloader';
 
 describe('util/localisationIndex', () => {
     describe('parseLocalisation', () => {
@@ -14,6 +16,18 @@ describe('util/localisationIndex', () => {
                 KEY_A: 'value a',
                 KEY_B: 'value b',
                 KEY_C: 'value c',
+            });
+        });
+
+        it('accepts a missing space around the colon (ID:"Name" style)', () => {
+            const result = parseLocalisation([
+                'l_english:',
+                ' KEY_A:"value a"',
+                ' KEY_B:0"value b"',
+            ].join('\n'));
+            assert.deepStrictEqual(result.l_english, {
+                KEY_A: 'value a',
+                KEY_B: 'value b',
             });
         });
 
@@ -63,5 +77,87 @@ describe('util/localisationIndex', () => {
             assert.strictEqual(result.l_english.KEY, 'english');
             assert.strictEqual(result.l_russian.KEY, 'russian');
         });
+    });
+
+    describe('getLocalisedTextUnchecked', () => {
+        it('returns the key itself when the index has no entry', () => {
+            assert.strictEqual(getLocalisedTextUnchecked('GER_focus_nonexistent', 'en'), 'GER_focus_nonexistent');
+        });
+
+        it('passes undefined keys through', () => {
+            assert.strictEqual(getLocalisedTextUnchecked(undefined, 'en'), undefined);
+        });
+    });
+});
+
+// End-to-end repro of the focus-tree name toggle: the index is built on demand (no
+// localisationIndex setting required) from the workspace localisation files, then names resolve
+// per editor language with the key as the fallback.
+describe('util/localisationIndex on-demand index', function () {
+    const File = vscode.FileType.File;
+    const Directory = vscode.FileType.Directory;
+    const realGetConfig = (vscode.workspace as any).getConfiguration;
+    const realStat = (vscode.workspace.fs as any).stat;
+    const realReadFile = (vscode.workspace.fs as any).readFile;
+    const realReadDirectory = (vscode.workspace.fs as any).readDirectory;
+    const realWorkspaceFolders = (vscode.workspace as any).workspaceFolders;
+
+    const englishYml = [
+        'l_english:',
+        ' TEST_FOCUS_A:0 "Test Focus A"',
+        ' TEST_FOCUS_B: "Test Focus B without version"',
+    ].join('\n');
+    const simpChineseYml = [
+        'l_simp_chinese:',
+        ' TEST_FOCUS_A:0 "测试国策A"',
+    ].join('\n');
+
+    function fsPath(uri: any): string {
+        return String(uri.fsPath ?? uri.path ?? '').replace(/\\/g, '/');
+    }
+
+    beforeEach(function () {
+        (vscode.workspace as any).workspaceFolders = [{ uri: vscode.Uri.parse('file:///mod'), name: 'mod', index: 0 }];
+        (vscode.workspace as any).getConfiguration = () => ({
+            get: () => undefined, update: () => Promise.resolve(), inspect: () => undefined,
+            modFile: '', loadDlcContents: false, inlayWindowGfxRoots: [],
+        });
+        (vscode.workspace.fs as any).stat = async (uri: any) => {
+            const p = fsPath(uri);
+            if (p.endsWith('/localisation') || p.endsWith('/english') || p.endsWith('/simp_chinese')) {
+                return { type: Directory, mtime: 1, ctime: 0, size: 0 };
+            }
+            return { type: File, mtime: 1, ctime: 0, size: 0 };
+        };
+        (vscode.workspace.fs as any).readDirectory = async (uri: any) => {
+            const p = fsPath(uri);
+            if (p.endsWith('/localisation')) { return [['english', Directory], ['simp_chinese', Directory]]; }
+            if (p.endsWith('/localisation/english')) { return [['test_l_english.yml', File]]; }
+            if (p.endsWith('/localisation/simp_chinese')) { return [['test_l_simp_chinese.yml', File]]; }
+            return [];
+        };
+        (vscode.workspace.fs as any).readFile = async (uri: any) => {
+            const p = fsPath(uri);
+            if (p.endsWith('test_l_english.yml')) { return Buffer.from(englishYml); }
+            if (p.endsWith('test_l_simp_chinese.yml')) { return Buffer.from(simpChineseYml); }
+            throw new Error('unexpected read: ' + p);
+        };
+    });
+
+    afterEach(async function () {
+        (vscode.workspace as any).workspaceFolders = realWorkspaceFolders;
+        (vscode.workspace as any).getConfiguration = realGetConfig;
+        (vscode.workspace.fs as any).stat = realStat;
+        (vscode.workspace.fs as any).readDirectory = realReadDirectory;
+        (vscode.workspace.fs as any).readFile = realReadFile;
+        await clearDlcZipCache();
+    });
+
+    it('builds the index on demand and resolves names per language, falling back to the key', async function () {
+        await ensureLocalisationIndex();
+        assert.strictEqual(getLocalisedTextUnchecked('TEST_FOCUS_A', 'en'), 'Test Focus A');
+        assert.strictEqual(getLocalisedTextUnchecked('TEST_FOCUS_A', 'zh-cn'), '测试国策A');
+        assert.strictEqual(getLocalisedTextUnchecked('TEST_FOCUS_B', 'en'), 'Test Focus B without version');
+        assert.strictEqual(getLocalisedTextUnchecked('TEST_FOCUS_MISSING', 'en'), 'TEST_FOCUS_MISSING');
     });
 });

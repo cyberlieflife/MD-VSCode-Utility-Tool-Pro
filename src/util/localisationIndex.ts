@@ -47,15 +47,11 @@ const localeISOMapping: Record<string, string> = {
 export function registerLocalisationIndex(): vscode.Disposable {
     const disposables: vscode.Disposable[] = [];
     if (localisationIndex) {
-        const estimatedSize: [number] = [0];
-        const task = Promise.all([
-            buildGlobalLocalisationIndex(estimatedSize),
-            buildWorkspaceLocalisationIndex(estimatedSize)
-        ]);
+        const task = ensureLocalisationIndex();
         vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('localisationIndex.building', 'Building Localisation index...'), task);
         void task.then(() => {
             vscode.window.showInformationMessage(localize('localisationIndex.builddone', 'Building Localisation index done.'));
-            sendEvent('localisationIndex', {size: estimatedSize[0].toString()});
+            sendEvent('localisationIndex', {size: localisationIndexSize[0].toString()});
         });
         disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(onChangeWorkspaceFolders));
         disposables.push(vscode.workspace.onDidChangeTextDocument(onChangeTextDocument));
@@ -68,12 +64,45 @@ export function registerLocalisationIndex(): vscode.Disposable {
     return vscode.Disposable.from(...disposables);
 }
 
+// Shared size counter for the telemetry below the lazy build in registerLocalisationIndex.
+const localisationIndexSize: [number] = [0];
+let localisationIndexBuildPromise: Promise<void> | undefined;
+
+// Builds (once, lazily) the global + workspace localisation indexes. The focus-tree name toggle
+// calls this on demand, so switching a tree to localised names works even without the
+// localisationIndex setting being enabled.
+export function ensureLocalisationIndex(): Promise<void> {
+    if (localisationIndexBuildPromise === undefined) {
+        const estimatedSize: [number] = [0];
+        localisationIndexBuildPromise = Promise.all([
+            buildGlobalLocalisationIndex(estimatedSize),
+            buildWorkspaceLocalisationIndex(estimatedSize),
+        ]).then(() => {
+            localisationIndexSize[0] = estimatedSize[0];
+        });
+    }
+    return localisationIndexBuildPromise;
+}
+
 export function getLocalisedTextQuick(localisationKey: string | undefined): string | undefined {
     const previewLocalisation = vscode.workspace.getConfiguration(ConfigurationKey).previewLocalisation;
     if (previewLocalisation){
         return getLocalisedText(localisationKey, localeISOMapping[previewLocalisation]?? vscode.env.language);
     }
     return getLocalisedText(localisationKey, vscode.env.language);
+}
+
+// Shared lookup: editor-language first, then l_english fallback. `getLocalisedText` gates this on
+// the localisationIndex feature flag (its index is not built without it); the unchecked variant
+// is for callers that have built the index on demand (e.g. the focus-tree name toggle).
+function lookupLocalisedText(localisationKey: string, language: string): string | undefined {
+    const langKey = localeMapping[language.toLowerCase()] || 'l_english'; // use mapping to get language suffix
+    const defaultLangKey = 'l_english';
+
+    return globalLocalisationIndex[langKey]?.[localisationKey] ||
+        workspaceLocalisationIndex[langKey]?.[localisationKey] ||
+        globalLocalisationIndex[defaultLangKey]?.[localisationKey] ||
+        workspaceLocalisationIndex[defaultLangKey]?.[localisationKey];
 }
 
 export function getLocalisedText(localisationKey: string | undefined, language: string): string | undefined {
@@ -85,18 +114,16 @@ export function getLocalisedText(localisationKey: string | undefined, language: 
         return localisationKey ?? '';
     }
 
-    const langKey = localeMapping[language.toLowerCase()] || 'l_english'; // use mapping to get language suffix
-    const defaultLangKey = 'l_english';
+    return lookupLocalisedText(localisationKey, language) ?? localisationKey;
+}
 
-    let text = globalLocalisationIndex[langKey]?.[localisationKey] ||
-        workspaceLocalisationIndex[langKey]?.[localisationKey];
-
-    if (!text) {
-        text = globalLocalisationIndex[defaultLangKey]?.[localisationKey] ||
-            workspaceLocalisationIndex[defaultLangKey]?.[localisationKey];
+// Flag-independent variant of getLocalisedText for on-demand callers (see ensureLocalisationIndex).
+export function getLocalisedTextUnchecked(localisationKey: string | undefined, language: string): string | undefined {
+    if (!localisationKey) {
+        return localisationKey;
     }
 
-    return text ?? localisationKey;
+    return lookupLocalisedText(localisationKey, language) ?? localisationKey;
 }
 
 const LOC_CACHE_VERSION = 1;

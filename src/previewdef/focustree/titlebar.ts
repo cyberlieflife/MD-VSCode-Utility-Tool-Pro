@@ -6,6 +6,15 @@ export const focusTitlebarStylesFile = 'common/national_focus/00_titlebar_styles
 export const nationalFocusViewGfxFile = 'interface/nationalfocusview.gfx';
 export const goalsOverlaysGfxFile = 'interface/goals_overlays.gfx';
 
+// Style name used when a focus has no text_icon: the focus frame falls back to this titlebar
+// instead of rendering without one.
+export const defaultTitlebarStyle = 'default_style';
+
+// Maps a focus's text_icon (or the default fallback when it has none) to its GFX sprite name.
+export function resolveTitlebarGfxName(textIcon: string | undefined, titlebarStyles: Record<string, string>): string | undefined {
+    return titlebarStyles[textIcon ?? defaultTitlebarStyle];
+}
+
 interface TitlebarStyleDef {
     name: string;
     available: string;
@@ -46,11 +55,7 @@ export async function loadFocusTitlebarStyles(): Promise<Record<string, string>>
 }
 
 export async function getFocusTitlebarImage(textIcon: string | undefined, titlebarStyles: Record<string, string>): Promise<Image | undefined> {
-    if (!textIcon) {
-        return undefined;
-    }
-
-    const gfxName = titlebarStyles[textIcon];
+    const gfxName = resolveTitlebarGfxName(textIcon, titlebarStyles);
     if (!gfxName) {
         return undefined;
     }
