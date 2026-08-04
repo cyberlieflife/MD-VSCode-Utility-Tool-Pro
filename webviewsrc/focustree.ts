@@ -227,12 +227,16 @@ function bindFocusInteractions() {
             if (id === undefined) {
                 return;
             }
+            // Dragging an unselected focus box-selects from the press point (desktop-style);
+            // dragging an already-selected focus moves the selection. A clean press-release
+            // navigates either way.
+            const mode = selectionState.selected.has(id) ? 'move' : 'rubber-band';
             // Capture guarantees the matching pointerup reaches us even if the pointer leaves the
             // cell or the webview frame before release (the mouseup that used to be lost).
             try {
                 nav.setPointerCapture(e.pointerId);
             } catch { /* not supported (jsdom, older engines): mouse events still work */ }
-            startPointer(e, 'move', id);
+            startPointer(e, mode, id);
         });
     }
 
@@ -302,11 +306,6 @@ function onPointerMove(e: MouseEvent) {
     }
     if (!pointer.moved) {
         pointer.moved = true;
-        if (pointer.mode === 'move' && pointer.moveStartId !== undefined && !selectionState.selected.has(pointer.moveStartId)) {
-            // Dragging an unselected focus moves only it. No highlight here: the box would only
-            // flash during the drag and is cleared on release (and after a valid move).
-            selectionState = { selected: new Set([pointer.moveStartId]) };
-        }
     }
     const scale = getState().scale || 1;
     pointer.contentDeltaX = clientDeltaX / scale;
@@ -367,11 +366,11 @@ function onPointerEnd(e: MouseEvent) {
     }
 
     if (!pointer.moved) {
-        // A clean press-release: on a focus cell navigate to its source line; on empty canvas
-        // clear the selection.
-        if (pointer.mode === 'move' && pointer.moveStartId !== undefined) {
+        // A clean press-release: when it started on a focus cell (moveStartId set) navigate to
+        // its source line regardless of the drag mode; on empty canvas clear the selection.
+        if (pointer.moveStartId !== undefined) {
             navigateToFocus(pointer.moveStartId);
-        } else if (pointer.mode === 'rubber-band') {
+        } else {
             clearFocusSelection();
         }
         return;

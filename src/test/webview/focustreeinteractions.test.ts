@@ -85,16 +85,29 @@ describe('webview/focustree interactions', function () {
         assert.strictEqual(navigate.start, 10);
         assert.strictEqual(navigate.end, 20);
 
-        // --- Dragging the focus moves it, does not navigate, and clears the selection ---
+        // --- Dragging an UNSELECTED focus box-selects it (no move) ---
         messages.length = 0;
         const nav2 = document.querySelector('.navigator') as HTMLElement;
+        // jsdom returns all-zero bounds; give the cell a real rect so the box-select hits it.
+        Object.defineProperty(nav2, 'getBoundingClientRect', {
+            value: () => ({ left: 50, top: 50, right: 150, bottom: 150, width: 100, height: 100 }),
+        });
         nav2.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
 
-        assert.ok(messages.some(m => m.command === 'moveFocuses'), 'expected moveFocuses, got: ' + JSON.stringify(messages));
+        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'unselected drag must box-select, not move');
+        const navSel = document.querySelector('.navigator') as HTMLElement;
+        assert.notStrictEqual(navSel.style.outline, '', 'box-select should highlight the focus');
+
+        // --- Dragging a SELECTED focus moves it and clears the box ---
+        messages.length = 0;
+        navSel.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+
+        assert.ok(messages.some(m => m.command === 'moveFocuses'), 'selected drag should move, got: ' + JSON.stringify(messages));
         assert.ok(!messages.some(m => m.command === 'navigate'), 'drag release must not navigate: ' + JSON.stringify(messages));
-        // The selection clear is synchronous; the rebuilt navigator must not carry an outline.
         const nav3 = document.querySelector('.navigator') as HTMLElement;
         assert.strictEqual(nav3.style.outline, '', 'selection highlight must be cleared after a move');
 
