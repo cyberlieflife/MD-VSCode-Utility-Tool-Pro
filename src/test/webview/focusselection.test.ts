@@ -1,62 +1,42 @@
 import './setup';
 import * as assert from 'assert';
-import { applySelectionClick, emptySelection, SelectionState } from '../../../webviewsrc/focusselection';
+import { emptySelection, selectFocusIds, idsInRect, Rect, RectItem } from '../../../webviewsrc/focusselection';
 
 describe('webview/focusselection', () => {
-    const positions = {
-        a: { x: 0, y: 0 },
-        b: { x: 2, y: 0 },
-        c: { x: 1, y: 2 },
-        d: { x: 3, y: 3 },
-    };
-
-    it('plain click replaces the selection and sets the anchor', () => {
-        const state = applySelectionClick(emptySelection(), 'a', { ctrl: false, shift: false }, positions);
-        assert.deepStrictEqual([...state.selected], ['a']);
-        assert.strictEqual(state.anchor, 'a');
-
-        const next = applySelectionClick(state, 'b', { ctrl: false, shift: false }, positions);
-        assert.deepStrictEqual([...next.selected], ['b']);
-        assert.strictEqual(next.anchor, 'b');
+    it('starts empty', () => {
+        const state = emptySelection();
+        assert.strictEqual(state.selected.size, 0);
     });
 
-    it('ctrl click toggles a focus and keeps the anchor', () => {
-        let state = applySelectionClick(emptySelection(), 'a', { ctrl: false, shift: false }, positions);
-        state = applySelectionClick(state, 'b', { ctrl: true, shift: false }, positions);
+    it('selectFocusIds replaces the selection', () => {
+        const state = selectFocusIds(emptySelection(), ['a', 'b']);
         assert.deepStrictEqual([...state.selected].sort(), ['a', 'b']);
-        assert.strictEqual(state.anchor, 'a');
 
-        state = applySelectionClick(state, 'b', { ctrl: true, shift: false }, positions);
-        assert.deepStrictEqual([...state.selected], ['a']);
-        assert.strictEqual(state.anchor, 'a');
+        const next = selectFocusIds(state, ['c']);
+        assert.deepStrictEqual([...next.selected], ['c']);
     });
 
-    it('shift click selects the rectangle spanned by the anchor and the clicked focus', () => {
-        let state = applySelectionClick(emptySelection(), 'a', { ctrl: false, shift: false }, positions);
-        state = applySelectionClick(state, 'd', { ctrl: false, shift: true }, positions);
-        // Rectangle a(0,0)-d(3,3) contains a, b? b is (2,0) inside; c (1,2) inside; d inside.
-        assert.deepStrictEqual([...state.selected].sort(), ['a', 'b', 'c', 'd']);
-        assert.strictEqual(state.anchor, 'a');
-    });
+    describe('idsInRect', () => {
+        const items: RectItem[] = [
+            { id: 'a', left: 0, top: 0, right: 100, bottom: 100 },
+            { id: 'b', left: 200, top: 0, right: 300, bottom: 100 },
+            { id: 'c', left: 50, top: 50, right: 150, bottom: 150 },
+        ];
 
-    it('shift click without an anchor falls back to a plain click', () => {
-        const state = applySelectionClick(emptySelection(), 'b', { ctrl: false, shift: true }, positions);
-        assert.deepStrictEqual([...state.selected], ['b']);
-        assert.strictEqual(state.anchor, 'b');
-    });
+        it('returns ids whose bounds intersect the rect', () => {
+            const rect: Rect = { left: 40, top: 40, right: 220, bottom: 120 };
+            assert.deepStrictEqual(idsInRect(rect, items).sort(), ['a', 'b', 'c']);
+        });
 
-    it('shift click keeps selecting with the original anchor', () => {
-        let state = applySelectionClick(emptySelection(), 'a', { ctrl: false, shift: false }, positions);
-        state = applySelectionClick(state, 'd', { ctrl: false, shift: true }, positions);
-        state = applySelectionClick(state, 'b', { ctrl: false, shift: true }, positions);
-        // Anchor stays a: rectangle a(0,0)-b(2,0) contains a and b.
-        assert.deepStrictEqual([...state.selected].sort(), ['a', 'b']);
-        assert.strictEqual(state.anchor, 'a');
-    });
+        it('returns an empty list for a rect that touches nothing', () => {
+            const rect: Rect = { left: 400, top: 400, right: 500, bottom: 500 };
+            assert.deepStrictEqual(idsInRect(rect, items), []);
+        });
 
-    it('works with an empty selection state', () => {
-        const empty: SelectionState = emptySelection();
-        assert.strictEqual(empty.selected.size, 0);
-        assert.strictEqual(empty.anchor, undefined);
+        it('treats a touching boundary as intersecting', () => {
+            // a's right edge and b's left edge both touch the rect boundary.
+            const rect: Rect = { left: 100, top: 0, right: 200, bottom: 100 };
+            assert.deepStrictEqual(idsInRect(rect, [items[0], items[1]]), ['a', 'b']);
+        });
     });
 });

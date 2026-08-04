@@ -1,6 +1,10 @@
 // Pure drag-move helpers for the focus-tree preview. Import-free on purpose so unit tests can
 // exercise them without a DOM.
-import { FocusGridPosition } from './focusselection';
+
+export interface FocusGridPosition {
+    x: number;
+    y: number;
+}
 
 export interface DragMove {
     id: string;

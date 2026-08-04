@@ -1,5 +1,5 @@
 import { getState, setState, arrayToMap, scrollToState, tryRun, enableZoom, initCommon } from "./util/common";
-import { applySelectionClick, SelectionState, emptySelection } from "./focusselection";
+import { SelectionState, emptySelection, selectFocusIds, idsInRect, Rect, RectItem } from "./focusselection";
 import { computeGridDelta, buildFocusDragMoves, DragMove } from "./focusdrag";
 import { DivDropdown } from "./util/dropdown";
 import { difference, minBy } from "lodash";
@@ -81,16 +81,25 @@ const focusSpanOriginalHtml = new Map<string, string>();
 // tree switches and DOM rebuilds keep it (it is id-based and re-applied as highlight).
 let selectionState: SelectionState = emptySelection();
 
-// Drag state while a mouse button is down on a focus cell. `moved` flips once the pointer travels
-// past the drag threshold; the visual follows via transform on the selected cells.
-interface DragState {
+// Pointer state while a mouse button is down: `move` started on a focus cell (drag the
+// selection), `rubber-band` started on empty canvas (box-select). `moved` flips once the pointer
+// travels past the drag threshold; the mode is only decided then.
+interface PointerState {
     startClientX: number;
     startClientY: number;
     moved: boolean;
+    mode: 'move' | 'rubber-band' | undefined;
+    moveStartId: string | undefined;
     contentDeltaX: number;
     contentDeltaY: number;
+    rubberStartClientX: number;
+    rubberStartClientY: number;
+    overlay: HTMLDivElement | null;
 }
-let dragState: DragState | null = null;
+let pointerState: PointerState | null = null;
+// Set right after a drag release so the click that follows (same element, same press) does not
+// navigate; the navigation click is restored on the next clean click.
+let suppressClickNavigation = false;
 // Pre-drag file coordinates of the moves sent to the extension host, for rollback if the write
 // fails (the local re-render has already applied them by then).
 let pendingMoveRollback: Map<string, { x: number; y: number }> | null = null;
@@ -170,7 +179,7 @@ function applyFocusOverlayVisibility() {
 
 // Focus multi-selection ------------------------------------------------
 function updateFocusSelectionHighlight() {
-    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    const navigators = document.querySelectorAll<HTMLElement>('.navigator');
     for (let i = 0; i < navigators.length; i++) {
         const nav = navigators[i];
         if (selectionState.selected.has(nav.dataset.focusId ?? '')) {
@@ -187,7 +196,7 @@ function clearFocusSelection() {
     updateFocusSelectionHighlight();
 }
 
-// Grid positions of the current tree's focuses (file coordinates), used for shift-range selection.
+// Grid positions of the current tree's focuses (file coordinates), used to compute drag moves.
 function currentFocusPositions(): Record<string, { x: number; y: number }> {
     const positions: Record<string, { x: number; y: number }> = {};
     const tree = focusTrees[selectedFocusTreeIndex];
@@ -199,22 +208,18 @@ function currentFocusPositions(): Record<string, { x: number; y: number }> {
     return positions;
 }
 
-function applyClickSelection(id: string, ctrl: boolean, shift: boolean) {
-    selectionState = applySelectionClick(selectionState, id, { ctrl, shift }, currentFocusPositions());
-    updateFocusSelectionHighlight();
-}
-
-// Replaces the shared subscribeNavigators click-to-navigate with selection-aware interactions:
-// mousedown selects (with ctrl/shift modifiers), double-click navigates to the source file.
+// Focus-cell interactions: single click navigates to the source line (original behavior),
+// dragging a focus cell moves the selection (dragging an unselected cell selects it first),
+// and dragging on empty canvas rubber-band box-selects every intersected focus.
 function bindFocusInteractions() {
-    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    const navigators = document.querySelectorAll<HTMLElement>('.navigator');
     for (let i = 0; i < navigators.length; i++) {
         const nav = navigators[i];
         nav.addEventListener('mousedown', (e) => {
             if (e.button !== 0) {
                 return;
             }
-            // Clicks on the completion checkbox (or other inputs) never select.
+            // Clicks on the completion checkbox (or other inputs) never start a drag.
             const target = e.target as HTMLElement;
             if (target.closest('input, .focus-checkbox')) {
                 return;
@@ -223,16 +228,13 @@ function bindFocusInteractions() {
             if (id === undefined) {
                 return;
             }
-            const ctrl = e.ctrlKey || e.metaKey;
-            const shift = e.shiftKey;
-            if (!ctrl && !shift && !selectionState.selected.has(id)) {
-                applyClickSelection(id, false, false);
-            } else {
-                applyClickSelection(id, ctrl, shift);
-            }
-            startDragTracking(e);
+            startPointer(e, 'move', id);
         });
-        nav.addEventListener('dblclick', () => {
+        nav.addEventListener('click', () => {
+            if (suppressClickNavigation) {
+                suppressClickNavigation = false;
+                return;
+            }
             const startStr = nav.getAttribute('start');
             const endStr = nav.getAttribute('end');
             const file = nav.getAttribute('file');
@@ -242,69 +244,149 @@ function bindFocusInteractions() {
         });
     }
 
-    // Clicking empty canvas space clears the selection.
+    // Empty canvas: mousedown starts a rubber-band box select (a plain click clears the selection).
     const content = document.getElementById('focustreecontent');
     if (content) {
         content.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) {
+                return;
+            }
             const target = e.target as HTMLElement;
-            if (!target.closest('[data-focus-id]') && !target.closest('input, select, button, label')) {
-                clearFocusSelection();
+            if (!target.closest('.navigator') && !target.closest('input, select, button, label')) {
+                startPointer(e, 'rubber-band', undefined);
             }
         });
     }
 }
 
-// Binds the transient window listeners that track a drag. The visual follows the pointer via
-// transform on the selected cells; releasing past the threshold writes the moves back.
-function startDragTracking(e: MouseEvent) {
-    dragState = {
+// Binds the transient window listeners that track the pointer until release.
+function startPointer(e: MouseEvent, mode: 'move' | 'rubber-band', moveStartId: string | undefined) {
+    pointerState = {
         startClientX: e.clientX,
         startClientY: e.clientY,
         moved: false,
+        mode,
+        moveStartId,
         contentDeltaX: 0,
         contentDeltaY: 0,
+        rubberStartClientX: e.clientX,
+        rubberStartClientY: e.clientY,
+        overlay: null,
     };
-    window.addEventListener('mousemove', onDragMove);
-    window.addEventListener('mouseup', onDragEnd);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerEnd);
 }
 
-function onDragMove(e: MouseEvent) {
-    const drag = dragState;
-    if (!drag) {
+function onPointerMove(e: MouseEvent) {
+    const pointer = pointerState;
+    if (!pointer) {
         return;
     }
-    const clientDeltaX = e.clientX - drag.startClientX;
-    const clientDeltaY = e.clientY - drag.startClientY;
-    if (!drag.moved && Math.abs(clientDeltaX) < dragThresholdPx && Math.abs(clientDeltaY) < dragThresholdPx) {
+    const clientDeltaX = e.clientX - pointer.startClientX;
+    const clientDeltaY = e.clientY - pointer.startClientY;
+    if (!pointer.moved && Math.abs(clientDeltaX) < dragThresholdPx && Math.abs(clientDeltaY) < dragThresholdPx) {
         return;
     }
-    drag.moved = true;
+    if (!pointer.moved) {
+        pointer.moved = true;
+        if (pointer.mode === 'move' && pointer.moveStartId !== undefined && !selectionState.selected.has(pointer.moveStartId)) {
+            // Dragging an unselected focus moves only it.
+            selectionState = { selected: new Set([pointer.moveStartId]) };
+            updateFocusSelectionHighlight();
+        }
+    }
     const scale = getState().scale || 1;
-    drag.contentDeltaX = clientDeltaX / scale;
-    drag.contentDeltaY = clientDeltaY / scale;
-    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    pointer.contentDeltaX = clientDeltaX / scale;
+    pointer.contentDeltaY = clientDeltaY / scale;
+    if (pointer.mode === 'move') {
+        applyDragTransforms(pointer.contentDeltaX, pointer.contentDeltaY);
+    } else if (pointer.mode === 'rubber-band') {
+        updateRubberBand(e);
+    }
+}
+
+function updateRubberBand(e: MouseEvent) {
+    const pointer = pointerState;
+    if (!pointer) {
+        return;
+    }
+    if (!pointer.overlay) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;border:1px solid var(--vscode-focusBorder);' +
+            'background:rgba(127,127,127,0.2);z-index:1000;pointer-events:none;';
+        document.body.appendChild(overlay);
+        pointer.overlay = overlay;
+    }
+    const left = Math.min(pointer.rubberStartClientX, e.clientX);
+    const top = Math.min(pointer.rubberStartClientY, e.clientY);
+    pointer.overlay.style.left = left + 'px';
+    pointer.overlay.style.top = top + 'px';
+    pointer.overlay.style.width = Math.abs(e.clientX - pointer.rubberStartClientX) + 'px';
+    pointer.overlay.style.height = Math.abs(e.clientY - pointer.rubberStartClientY) + 'px';
+}
+
+function applyDragTransforms(contentDeltaX: number, contentDeltaY: number) {
+    const navigators = document.querySelectorAll<HTMLElement>('.navigator');
     for (let i = 0; i < navigators.length; i++) {
         if (selectionState.selected.has(navigators[i].dataset.focusId ?? '')) {
-            navigators[i].style.transform = `translate(${drag.contentDeltaX}px, ${drag.contentDeltaY}px)`;
+            navigators[i].style.transform = `translate(${contentDeltaX}px, ${contentDeltaY}px)`;
         }
     }
 }
 
 function clearDragTransforms() {
-    const navigators = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    const navigators = document.querySelectorAll<HTMLElement>('.navigator');
     for (let i = 0; i < navigators.length; i++) {
         navigators[i].style.transform = '';
     }
 }
 
-function onDragEnd() {
-    window.removeEventListener('mousemove', onDragMove);
-    window.removeEventListener('mouseup', onDragEnd);
-    const drag = dragState;
-    dragState = null;
-    if (!drag?.moved) {
+function onPointerEnd(e: MouseEvent) {
+    window.removeEventListener('mousemove', onPointerMove);
+    window.removeEventListener('mouseup', onPointerEnd);
+    const pointer = pointerState;
+    pointerState = null;
+    if (!pointer) {
         return;
     }
+    if (pointer.overlay) {
+        pointer.overlay.remove();
+    }
+
+    if (!pointer.moved) {
+        // A plain click: on a focus cell the click event navigates; on empty canvas clear the
+        // selection.
+        if (pointer.mode === 'rubber-band') {
+            clearFocusSelection();
+        }
+        return;
+    }
+
+    if (pointer.mode === 'rubber-band') {
+        // Box-select every focus whose bounds intersect the drag rectangle.
+        const rect: Rect = {
+            left: Math.min(pointer.rubberStartClientX, e.clientX),
+            top: Math.min(pointer.rubberStartClientY, e.clientY),
+            right: Math.max(pointer.rubberStartClientX, e.clientX),
+            bottom: Math.max(pointer.rubberStartClientY, e.clientY),
+        };
+        const items: RectItem[] = [];
+        const navigators = document.querySelectorAll<HTMLElement>('.navigator');
+        for (let i = 0; i < navigators.length; i++) {
+            const id = navigators[i].dataset.focusId;
+            if (id === undefined) {
+                continue;
+            }
+            const bounds = navigators[i].getBoundingClientRect();
+            items.push({ id, left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom });
+        }
+        selectionState = selectFocusIds(selectionState, idsInRect(rect, items));
+        updateFocusSelectionHighlight();
+        return;
+    }
+
+    // Move mode: suppress the click that follows this drag, then write the moves back.
+    suppressClickNavigation = true;
     const tree = focusTrees[selectedFocusTreeIndex];
     if (!tree) {
         clearDragTransforms();
@@ -313,7 +395,7 @@ function onDragEnd() {
     const scale = getState().scale || 1;
     const xGridSize = (window as any).xGridSize ?? 96;
     const yGridSize = (window as any).gridBox?.slotsize?.height?._value ?? 130;
-    const delta = computeGridDelta(drag.contentDeltaX * scale, drag.contentDeltaY * scale, scale, xGridSize, yGridSize);
+    const delta = computeGridDelta(pointer.contentDeltaX * scale, pointer.contentDeltaY * scale, scale, xGridSize, yGridSize);
     if (delta.dx === 0 && delta.dy === 0) {
         clearDragTransforms();
         return;
@@ -343,7 +425,8 @@ function onDragEnd() {
 // Applies the ID/name toggle to the on-screen focus labels. Name mode swaps each label to its
 // localised name (caching the original HTML so ID mode can restore it); ID mode restores.
 function updateFocusNameDisplay() {
-    const spans = document.querySelectorAll<HTMLElement>('[data-focus-id]');
+    // Only the label span inside each focus cell (the navigator also carries data-focus-id).
+    const spans = document.querySelectorAll<HTMLElement>('.navigator [data-focus-id]');
     for (let i = 0; i < spans.length; i++) {
         const span = spans[i];
         const id = span.dataset.focusId;
