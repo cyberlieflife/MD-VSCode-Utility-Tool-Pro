@@ -69,7 +69,7 @@ export abstract class PreviewBase {
             switch (msg.command) {
                 case 'navigate':
                     if (msg.start !== undefined) {
-                        if (msg.file === undefined) {
+                        if (msg.file == null) {
                             const document = getDocumentByUri(this.uri);
                             if (document === undefined) {
                                 return;

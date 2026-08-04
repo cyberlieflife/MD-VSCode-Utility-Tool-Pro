@@ -97,5 +97,15 @@ describe('webview/focustree interactions', function () {
         // The selection clear is synchronous; the rebuilt navigator must not carry an outline.
         const nav3 = document.querySelector('.navigator') as HTMLElement;
         assert.strictEqual(nav3.style.outline, '', 'selection highlight must be cleared after a move');
+
+        // --- A no-op drag (release that did not cross a grid step) must also clear the box ---
+        messages.length = 0;
+        const nav4 = document.querySelector('.navigator') as HTMLElement;
+        nav4.dispatchEvent(new PointerEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 30, clientY: 40, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 30, clientY: 40, button: 0, bubbles: true, pointerId: 1 }));
+        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'no moves for a sub-cell drag');
+        const nav5 = document.querySelector('.navigator') as HTMLElement;
+        assert.strictEqual(nav5.style.outline, '', 'no highlight after a no-op drag');
     });
 });

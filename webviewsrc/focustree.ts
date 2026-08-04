@@ -261,7 +261,9 @@ function navigateToFocus(id: string) {
         if (navigators[i].dataset.focusId === id) {
             const startStr = navigators[i].getAttribute('start');
             const endStr = navigators[i].getAttribute('end');
-            const file = navigators[i].getAttribute('file');
+            // getAttribute returns null for a missing attribute; the extension host checks
+            // `msg.file === undefined`, so null must become undefined (JSON then omits the field).
+            const file = navigators[i].getAttribute('file') ?? undefined;
             const start = !startStr || startStr === 'undefined' ? undefined : parseInt(startStr);
             const end = !endStr ? undefined : parseInt(endStr);
             vscode.postMessage({ command: 'navigate', start, end, file });
@@ -301,9 +303,9 @@ function onPointerMove(e: MouseEvent) {
     if (!pointer.moved) {
         pointer.moved = true;
         if (pointer.mode === 'move' && pointer.moveStartId !== undefined && !selectionState.selected.has(pointer.moveStartId)) {
-            // Dragging an unselected focus moves only it.
+            // Dragging an unselected focus moves only it. No highlight here: the box would only
+            // flash during the drag and is cleared on release (and after a valid move).
             selectionState = { selected: new Set([pointer.moveStartId]) };
-            updateFocusSelectionHighlight();
         }
     }
     const scale = getState().scale || 1;
@@ -398,44 +400,37 @@ function onPointerEnd(e: MouseEvent) {
         return;
     }
 
-    // Move mode: write the moves back, then clear the selection (the focus moved; the highlight
-    // box is no longer wanted).
+    // Move mode: compute the moves first (they depend on the current selection), then clear the
+    // selection unconditionally - a release that did not cross a grid step must not leave the
+    // highlight box behind - and write the moves back.
     const tree = focusTrees[selectedFocusTreeIndex];
-    if (!tree) {
-        clearDragTransforms();
-        return;
-    }
-    const scale = getState().scale || 1;
-    const xGridSize = (window as any).xGridSize ?? 96;
-    const yGridSize = (window as any).gridBox?.slotsize?.height?._value ?? 130;
-    const delta = computeGridDelta(pointer.contentDeltaX * scale, pointer.contentDeltaY * scale, scale, xGridSize, yGridSize);
-    if (delta.dx === 0 && delta.dy === 0) {
-        clearDragTransforms();
-        return;
-    }
-
-    // Snapshot the pre-drag file coordinates, apply the move locally (immediate re-render), then
-    // ask the extension host to write it back; on failure the snapshot restores the preview.
-    const prevPositions: Record<string, { x: number; y: number }> = {};
-    const moves: DragMove[] = buildFocusDragMoves(selectionState.selected, currentFocusPositions(), delta);
-    for (const move of moves) {
-        const focus = tree.focuses[move.id];
-        if (focus) {
-            prevPositions[move.id] = { x: focus.x, y: focus.y };
-            focus.x = move.x;
-            focus.y = move.y;
+    if (tree) {
+        const scale = getState().scale || 1;
+        const xGridSize = (window as any).xGridSize ?? 96;
+        const yGridSize = (window as any).gridBox?.slotsize?.height?._value ?? 130;
+        const delta = computeGridDelta(pointer.contentDeltaX * scale, pointer.contentDeltaY * scale, scale, xGridSize, yGridSize);
+        const prevPositions: Record<string, { x: number; y: number }> = {};
+        const moves: DragMove[] = buildFocusDragMoves(selectionState.selected, currentFocusPositions(), delta);
+        for (const move of moves) {
+            const focus = tree.focuses[move.id];
+            if (focus) {
+                prevPositions[move.id] = { x: focus.x, y: focus.y };
+                focus.x = move.x;
+                focus.y = move.y;
+            }
         }
-    }
-    if (moves.length === 0) {
+        clearFocusSelection();
+        if (moves.length === 0) {
+            clearDragTransforms();
+            return;
+        }
+        pendingMoveRollback = new Map(Object.entries(prevPositions));
+        void buildContent().then(() => retriggerSearch()).catch(() => {});
+        vscode.postMessage({ command: 'moveFocuses', moves });
+    } else {
+        clearFocusSelection();
         clearDragTransforms();
-        return;
     }
-    pendingMoveRollback = new Map(Object.entries(prevPositions));
-    // Clear the selection synchronously (before the re-render), so no highlight box lingers
-    // after a move even if the rebuild is slow or fails.
-    clearFocusSelection();
-    void buildContent().then(() => retriggerSearch()).catch(() => {});
-    vscode.postMessage({ command: 'moveFocuses', moves });
 }
 
 // Applies the ID/name toggle to the on-screen focus labels. Name mode swaps each label to its
