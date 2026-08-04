@@ -45,6 +45,9 @@ export interface Focus {
     relativePositionId: string | undefined;
     offset: Offset[];
     token: Token | undefined;
+    // Source positions of the x/y value tokens in the focus file, used to write drag moves back.
+    xToken: { start: number; end: number } | undefined;
+    yToken: { start: number; end: number } | undefined;
     file: string;
     text?: string;
 }
@@ -116,8 +119,8 @@ interface FocusDef {
     icon: Raw[];
     text_icon: string;
     overlay: string;
-    x: number;
-    y: number;
+    x: Raw;
+    y: Raw;
     prerequisite: FocusOrORList[];
     mutually_exclusive: FocusOrORList[];
     relative_position_id: string;
@@ -168,8 +171,8 @@ const focusSchema: SchemaDef<FocusDef> = {
     },
     text_icon: "string",
     overlay: "string",
-    x: "number",
-    y: "number",
+    x: "raw",
+    y: "raw",
     prerequisite: {
         _innerType: focusOrORListSchema,
         _type: 'array',
@@ -424,6 +427,19 @@ function getFocuses(hoiFocuses: HOIPartial<FocusDef>[], conditionExprs: Conditio
     return focuses;
 }
 
+// Extracts a focus coordinate (x or y) from its raw schema node: the numeric value plus the
+// exact source span of the value token (used to write drag moves back into the file). Missing or
+// non-numeric values yield { value: undefined, token: undefined }.
+function getFocusCoordinate(raw: HOIPartial<Raw> | undefined): { value: number; token: { start: number; end: number } | undefined } | undefined {
+    const node = raw?._raw;
+    if (!node) {
+        return undefined;
+    }
+    const value = typeof node.value === 'number' ? node.value : undefined;
+    const token = node.valueStartToken ? { start: node.valueStartToken.start, end: node.valueStartToken.end } : undefined;
+    return { value: value ?? 0, token };
+}
+
 function getFocus(hoiFocus: HOIPartial<FocusDef>, conditionExprs: ConditionItem[], filePath: string, warnings: FocusWarning[], constants: {}): Focus | null {
     const id = hoiFocus.id ?? `[missing_id_${randomString(8)}]`;
 
@@ -434,8 +450,10 @@ function getFocus(hoiFocus: HOIPartial<FocusDef>, conditionExprs: ConditionItem[
         });
     }
 
-    const x = hoiFocus.x ?? 0;
-    const y = hoiFocus.y ?? 0;
+    const xRaw = getFocusCoordinate(hoiFocus.x);
+    const yRaw = getFocusCoordinate(hoiFocus.y);
+    const x = xRaw?.value ?? 0;
+    const y = yRaw?.value ?? 0;
     const relativePositionId = hoiFocus.relative_position_id;
 
     const exclusive = chain(hoiFocus.mutually_exclusive)
@@ -464,6 +482,8 @@ function getFocus(hoiFocus: HOIPartial<FocusDef>, conditionExprs: ConditionItem[
         overlay,
         x,
         y,
+        xToken: xRaw?.token,
+        yToken: yRaw?.token,
         relativePositionId,
         prerequisite,
         exclusive,
