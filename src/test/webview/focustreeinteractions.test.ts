@@ -76,8 +76,9 @@ describe('webview/focustree interactions', function () {
         const nav = document.querySelector('.navigator') as HTMLElement;
         assert.ok(nav, 'navigator should be rendered');
 
-        // --- Clean press-release navigates to the source line (on pointerup, no click needed) ---
-        nav.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        // --- Clean press-release on the FOCUS BODY navigates (no click needed) ---
+        const label = document.querySelector('.navigator [data-focus-id]') as HTMLElement;
+        label.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
 
         const navigate = messages.find(m => m.command === 'navigate');
@@ -85,10 +86,9 @@ describe('webview/focustree interactions', function () {
         assert.strictEqual(navigate.start, 10);
         assert.strictEqual(navigate.end, 20);
 
-        // --- Dragging the focus BODY (center) moves it; the cell was box-selected below ---
+        // --- Dragging the FOCUS BODY moves it (unselected body selects it first) ---
         messages.length = 0;
-        const nav2 = document.querySelector('.navigator') as HTMLElement;
-        nav2.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        label.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
 
@@ -97,36 +97,47 @@ describe('webview/focustree interactions', function () {
         const nav3 = document.querySelector('.navigator') as HTMLElement;
         assert.strictEqual(nav3.style.outline, '', 'selection highlight must be cleared after a move');
 
-        // --- Dragging the empty cell margin box-selects instead of moving ---
+        // --- Dragging the cell's empty margin box-selects instead of moving ---
         messages.length = 0;
         const nav4 = document.querySelector('.navigator') as HTMLElement;
         // jsdom returns all-zero bounds; give the cell a real rect so the box-select hits it.
         Object.defineProperty(nav4, 'getBoundingClientRect', {
             value: () => ({ left: 50, top: 50, right: 150, bottom: 150, width: 100, height: 100 }),
         });
-        nav4.dispatchEvent(new PointerEvent('pointerdown', { clientX: 60, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        // Pressing the cell background resolves to the navigator itself (gap, not the body).
+        nav4.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
 
-        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'empty-area drag must box-select, not move');
+        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'gap drag must box-select, not move');
         const navSel = document.querySelector('.navigator') as HTMLElement;
         assert.notStrictEqual(navSel.style.outline, '', 'box-select should highlight the focus');
 
         // --- Dragging the now-SELECTED focus body moves it and clears the box ---
         messages.length = 0;
-        navSel.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        const label2 = document.querySelector('.navigator [data-focus-id]') as HTMLElement;
+        label2.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
         assert.ok(messages.some(m => m.command === 'moveFocuses'), 'selected focus body should move');
 
-        // --- A no-op drag (release that did not cross a grid step) must also clear the box ---
+        // --- A no-op sub-cell drag on the body must clear the box ---
         messages.length = 0;
-        const nav5 = document.querySelector('.navigator') as HTMLElement;
-        nav5.dispatchEvent(new PointerEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true, pointerId: 1 }));
+        const label3 = document.querySelector('.navigator [data-focus-id]') as HTMLElement;
+        label3.dispatchEvent(new PointerEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointermove', { clientX: 30, clientY: 40, button: 0, bubbles: true, pointerId: 1 }));
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 30, clientY: 40, button: 0, bubbles: true, pointerId: 1 }));
         assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'no moves for a sub-cell drag');
         const nav6 = document.querySelector('.navigator') as HTMLElement;
         assert.strictEqual(nav6.style.outline, '', 'no highlight after a no-op drag');
+
+        // --- Far blank canvas (outside the tree container) also box-selects ---
+        messages.length = 0;
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'blank canvas must not move');
+        const nav7 = document.querySelector('.navigator') as HTMLElement;
+        assert.notStrictEqual(nav7.style.outline, '', 'blank-canvas box-select should highlight the cell');
     });
 });

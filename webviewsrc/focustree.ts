@@ -227,39 +227,17 @@ function bindFocusInteractions() {
             if (id === undefined) {
                 return;
             }
-            // The icon/titlebar/overlay layers have pointer-events: none, so both the focus body
-            // and the cell's empty margin resolve to the navigator itself. Distinguish by press
-            // position: the central band (icon, titlebar, overlay) and the bottom label are the
-            // focus body (drag = move, press-release = navigate); the cell margins and any space
-            // outside cells are empty canvas (drag = box-select).
-            const rect = nav.getBoundingClientRect();
-            const ratioX = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
-            const ratioY = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
-            const isFocusBody = (Math.abs(ratioX - 0.5) <= 0.34 && ratioY >= 0.12 && ratioY <= 0.8) || ratioY >= 0.8;
-            const mode = isFocusBody ? 'move' : 'rubber-band';
+            // The icon/titlebar/overlay layers and the label are the focus body and are
+            // pointer-events: auto, so pressing them resolves to a child element (drag = move,
+            // press-release = navigate). Pressing the cell's visual gaps resolves to the
+            // navigator itself (everything else passes through), which box-selects instead.
+            const mode = target === nav ? 'rubber-band' : 'move';
             // Capture guarantees the matching pointerup reaches us even if the pointer leaves the
             // cell or the webview frame before release (the mouseup that used to be lost).
             try {
                 nav.setPointerCapture(e.pointerId);
             } catch { /* not supported (jsdom, older engines): mouse events still work */ }
             startPointer(e, mode, id);
-        });
-    }
-
-    // Empty canvas: pointerdown starts a rubber-band box select (a plain click clears the selection).
-    const content = document.getElementById('focustreecontent');
-    if (content) {
-        content.addEventListener('pointerdown', (e) => {
-            if (e.button !== 0) {
-                return;
-            }
-            const target = e.target as HTMLElement;
-            if (!target.closest('.navigator') && !target.closest('input, select, button, label')) {
-                try {
-                    content.setPointerCapture(e.pointerId);
-                } catch { /* not supported: mouse events still work */ }
-                startPointer(e, 'rubber-band', undefined);
-            }
         });
     }
 }
@@ -460,7 +438,8 @@ function updateFocusNameDisplay() {
                 if (!focusSpanOriginalHtml.has(id)) {
                     focusSpanOriginalHtml.set(id, span.innerHTML);
                 }
-                span.innerHTML = escapeHtml(name);
+                // Keep the inner hit-area span so the label still counts as the focus body.
+                span.innerHTML = '<span style="pointer-events: auto;">' + escapeHtml(name) + '</span>';
             }
         } else {
             const original = focusSpanOriginalHtml.get(id);
@@ -928,6 +907,23 @@ window.addEventListener('message', async (event) => {
 });
 
 window.addEventListener('load', tryRun(async function() {
+    // Empty canvas anywhere (outside focus cells and controls) starts a rubber-band box select.
+    // Bound on document so blank areas outside the tree container also work; registered once.
+    document.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) {
+            return;
+        }
+        const target = e.target as HTMLElement;
+        // Focus cells handle their own press (body vs gap); controls keep their own behavior.
+        if (target.closest('.navigator') || target.closest('input, select, button, label')) {
+            return;
+        }
+        try {
+            document.body.setPointerCapture(e.pointerId);
+        } catch { /* not supported (jsdom, older engines): mouse events still work */ }
+        startPointer(e, 'rubber-band', undefined);
+    });
+
     // Focus name display: ID (default) or localised name
     const showFocusNamesElement = document.getElementById('show-focus-names') as HTMLInputElement | null;
     if (showFocusNamesElement) {

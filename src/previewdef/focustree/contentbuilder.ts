@@ -658,12 +658,15 @@ async function renderFocus(
         <div
         class="{{iconClass}} ${styleTable.style('focus-icon-layer', () => `
             position: absolute;
-            inset: 0;
+            left: 50%;
+            top: calc(50% - 18px);
+            transform: translate(-50%, -50%);
+            width: 64px;
+            height: 64px;
             background-position-x: center;
-            background-position-y: calc(50% - 18px);
+            background-position-y: center;
             background-repeat: no-repeat;
             z-index: 1;
-            pointer-events: none;
         `)}"></div>
         <div
         class="focus-titlebar-layer ${titlebarClass} ${styleTable.style('focus-titlebar-layer', () => `
@@ -672,7 +675,6 @@ async function renderFocus(
             top: 70px;
             transform: translateX(-50%);
             background-repeat: no-repeat;
-            pointer-events: none;
             z-index: 0;
         `)}"
         data-has-custom-titlebar="${titlebarObject ? 'true' : 'false'}"></div>
@@ -683,13 +685,16 @@ async function renderFocus(
             top: 50%;
             transform: translate(-50%, calc(-50% - 3px));
             background-repeat: no-repeat;
-            pointer-events: none;
             z-index: 2;
         `)}"
         data-has-focus-overlay="${overlayObject ? 'true' : 'false'}"></div>
         <div class="focus-checkbox ${styleTable.style('focus-checkbox', () => `position: absolute; top: 1px; z-index: 3;`)}">
             <input id="checkbox-${normalizeForStyle(focus.id)}" type="checkbox"/>
         </div>
+        <!-- The outer span only provides the layout (the negative margins extend it far past the
+             cell); it must not swallow clicks in the visual gaps. The inner span is the actual
+             label hit area, so clicking the text counts as the focus body (move/navigate) while
+             clicking anywhere else in the cell passes through to the navigator (box-select). -->
         <span
         class="${styleTable.style('focus-span', () => `
             position: relative;
@@ -698,9 +703,10 @@ async function renderFocus(
             margin-top: 85px;
             text-align: center;
             display: inline-block;
+            pointer-events: none;
         `)}"
         data-focus-id="${focus.id}">
-        ${textContent}
+        <span style="pointer-events: auto;">${textContent}</span>
         </span>
     </div>`;
 }
