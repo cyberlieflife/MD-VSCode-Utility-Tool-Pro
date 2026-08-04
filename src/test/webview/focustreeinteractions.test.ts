@@ -76,9 +76,9 @@ describe('webview/focustree interactions', function () {
         const nav = document.querySelector('.navigator') as HTMLElement;
         assert.ok(nav, 'navigator should be rendered');
 
-        // --- Clean press-release navigates to the source line (on mouseup, no click needed) ---
-        nav.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, button: 0, bubbles: true }));
-        window.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, clientY: 100, button: 0, bubbles: true }));
+        // --- Clean press-release navigates to the source line (on pointerup, no click needed) ---
+        nav.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
 
         const navigate = messages.find(m => m.command === 'navigate');
         assert.ok(navigate, 'expected a navigate message, got: ' + JSON.stringify(messages));
@@ -88,9 +88,9 @@ describe('webview/focustree interactions', function () {
         // --- Dragging the focus moves it, does not navigate, and clears the selection ---
         messages.length = 0;
         const nav2 = document.querySelector('.navigator') as HTMLElement;
-        nav2.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 100, button: 0, bubbles: true }));
-        window.dispatchEvent(new MouseEvent('mousemove', { clientX: 300, clientY: 300, button: 0, bubbles: true }));
-        window.dispatchEvent(new MouseEvent('mouseup', { clientX: 300, clientY: 300, button: 0, bubbles: true }));
+        nav2.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
 
         assert.ok(messages.some(m => m.command === 'moveFocuses'), 'expected moveFocuses, got: ' + JSON.stringify(messages));
         assert.ok(!messages.some(m => m.command === 'navigate'), 'drag release must not navigate: ' + JSON.stringify(messages));

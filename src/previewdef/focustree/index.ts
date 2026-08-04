@@ -11,7 +11,6 @@ import { localize } from '../../util/i18n';
 import { loadingShellHtml } from '../../util/html';
 import { withTimeout, TimeoutError } from '../../util/common';
 import { error } from '../../util/debug';
-import { Logger } from '../../util/logger';
 import { useConditionInFocus, localisationIndex } from '../../util/featureflags';
 import { ensureLocalisationIndex, getLocalisedTextUnchecked } from '../../util/localisationIndex';
 import { computeStructuralFingerprint, computeIconSourceFingerprint, computeTreeStructuralFingerprint, computeTreeIconFingerprint, decideFocusTreeUpdate, FocusTreeFingerprints } from './fingerprint';
@@ -84,14 +83,6 @@ class FocusTreePreview extends PreviewBase {
         );
         this.focusTreeLoader.onLoadDone(r => this.updateDependencies(r.dependencies));
         this.panel.webview.onDidReceiveMessage(msg => {
-            if (msg?.command === 'ftdiag') {
-                Logger.info('[ftdiag] ' + msg.msg);
-                return;
-            }
-            if (msg?.command === 'navigate') {
-                // Observe only: PreviewBase's listener performs the actual navigation.
-                Logger.info(`[ftdiag] ext navigate start=${msg.start} end=${msg.end} file=${msg.file ?? 'none'}`);
-            }
             if (msg?.command === 'moveFocuses') {
                 void this.applyFocusMoves(msg.moves);
                 return;

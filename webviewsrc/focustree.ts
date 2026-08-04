@@ -208,13 +208,13 @@ function currentFocusPositions(): Record<string, { x: number; y: number }> {
 // Focus-cell interactions: a clean press-release on a focus cell navigates to the source line
 // (original behavior), dragging a focus cell moves the selection (dragging an unselected cell
 // selects it first), and dragging on empty canvas rubber-band box-selects every intersected
-// focus. Navigation happens on mouseup, not on the browser's click event, so it cannot be lost
-// to click-suppression quirks (text selection, pointer capture, etc.).
+// focus. Pointer events with pointer capture guarantee the release is always delivered, so
+// navigation cannot be lost to mouseup suppression.
 function bindFocusInteractions() {
     const navigators = document.querySelectorAll<HTMLElement>('.navigator');
     for (let i = 0; i < navigators.length; i++) {
         const nav = navigators[i];
-        nav.addEventListener('mousedown', (e) => {
+        nav.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) {
                 return;
             }
@@ -227,20 +227,27 @@ function bindFocusInteractions() {
             if (id === undefined) {
                 return;
             }
+            // Capture guarantees the matching pointerup reaches us even if the pointer leaves the
+            // cell or the webview frame before release (the mouseup that used to be lost).
+            try {
+                nav.setPointerCapture(e.pointerId);
+            } catch { /* not supported (jsdom, older engines): mouse events still work */ }
             startPointer(e, 'move', id);
-            vscode.postMessage({ command: 'ftdiag', msg: `mousedown focus=${id}` });
         });
     }
 
-    // Empty canvas: mousedown starts a rubber-band box select (a plain click clears the selection).
+    // Empty canvas: pointerdown starts a rubber-band box select (a plain click clears the selection).
     const content = document.getElementById('focustreecontent');
     if (content) {
-        content.addEventListener('mousedown', (e) => {
+        content.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) {
                 return;
             }
             const target = e.target as HTMLElement;
             if (!target.closest('.navigator') && !target.closest('input, select, button, label')) {
+                try {
+                    content.setPointerCapture(e.pointerId);
+                } catch { /* not supported: mouse events still work */ }
                 startPointer(e, 'rubber-band', undefined);
             }
         });
@@ -257,7 +264,6 @@ function navigateToFocus(id: string) {
             const file = navigators[i].getAttribute('file');
             const start = !startStr || startStr === 'undefined' ? undefined : parseInt(startStr);
             const end = !endStr ? undefined : parseInt(endStr);
-            vscode.postMessage({ command: 'ftdiag', msg: `navigate focus=${id} start=${start} end=${end} file=${file ?? 'none'}` });
             vscode.postMessage({ command: 'navigate', start, end, file });
             return;
         }
@@ -278,8 +284,8 @@ function startPointer(e: MouseEvent, mode: 'move' | 'rubber-band', moveStartId: 
         rubberStartClientY: e.clientY,
         overlay: null,
     };
-    window.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerEnd);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerEnd);
 }
 
 function onPointerMove(e: MouseEvent) {
@@ -347,8 +353,8 @@ function clearDragTransforms() {
 }
 
 function onPointerEnd(e: MouseEvent) {
-    window.removeEventListener('mousemove', onPointerMove);
-    window.removeEventListener('mouseup', onPointerEnd);
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerEnd);
     const pointer = pointerState;
     pointerState = null;
     if (!pointer) {
@@ -428,7 +434,6 @@ function onPointerEnd(e: MouseEvent) {
     // Clear the selection synchronously (before the re-render), so no highlight box lingers
     // after a move even if the rebuild is slow or fails.
     clearFocusSelection();
-    vscode.postMessage({ command: 'ftdiag', msg: `moves=${moves.length} clearSelection` });
     void buildContent().then(() => retriggerSearch()).catch(() => {});
     vscode.postMessage({ command: 'moveFocuses', moves });
 }
