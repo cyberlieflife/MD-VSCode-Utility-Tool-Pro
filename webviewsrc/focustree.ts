@@ -917,8 +917,11 @@ window.addEventListener('load', tryRun(async function() {
             return;
         }
         const target = e.target as HTMLElement;
-        // Focus cells handle their own press (body vs gap); controls keep their own behavior.
-        if (target.closest('.navigator') || target.closest('input, select, button, label')) {
+        // Focus cells handle their own press (body vs gap); toolbar controls (buttons, selects,
+        // dropdowns, inputs) and the warnings textarea keep their own behavior; only blank
+        // canvas starts a box-select.
+        if (target.closest('.navigator') || target.closest('.toolbar, .toolbar-outer') ||
+            target.closest('input, select, textarea, button, label')) {
             return;
         }
         try {

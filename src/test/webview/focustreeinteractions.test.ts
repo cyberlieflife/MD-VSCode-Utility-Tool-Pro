@@ -64,6 +64,7 @@ describe('webview/focustree interactions', function () {
             '<input id="searchbox" type="text"/>',
             '<div id="condition-container"></div>',
             '<div id="allowbranch-container"></div>',
+            '<div class="toolbar"><button id="tb">W</button><div class="select-container"><div class="select">dropdown</div></div></div>',
         ].join('');
 
         await import('../../../webviewsrc/focustree');
@@ -139,5 +140,17 @@ describe('webview/focustree interactions', function () {
         assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'blank canvas must not move');
         const nav7 = document.querySelector('.navigator') as HTMLElement;
         assert.notStrictEqual(nav7.style.outline, '', 'blank-canvas box-select should highlight the cell');
+
+        // --- Toolbar controls keep their own behavior (no box-select, no move) ---
+        messages.length = 0;
+        const before = nav7.style.outline;
+        const toolbarBtn = document.getElementById('tb') as HTMLElement;
+        toolbarBtn.dispatchEvent(new PointerEvent('pointerdown', { clientX: 10, clientY: 10, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'toolbar drag must not move');
+        assert.strictEqual(nav7.style.outline, before, 'toolbar drag must not touch the selection');
+        // The button still receives its own click.
+        toolbarBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 });
