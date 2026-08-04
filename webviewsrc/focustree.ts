@@ -262,6 +262,9 @@ function navigateToFocus(id: string) {
 
 // Binds the transient window listeners that track the pointer until release.
 function startPointer(e: MouseEvent, mode: 'move' | 'rubber-band', moveStartId: string | undefined) {
+    // Block the browser's default press-and-drag behaviors (text selection, native drag), which
+    // otherwise fight the box-select or make the selection look like it is "moving".
+    e.preventDefault();
     pointerState = {
         startClientX: e.clientX,
         startClientY: e.clientY,

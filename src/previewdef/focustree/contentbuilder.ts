@@ -256,7 +256,7 @@ function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, t
             left:0;
             top:0;
         `)}"></div>` +
-        `<div id="focustreecontent" class="${styleTable.oneTimeStyle('focustreecontent', () => `top:52px;left:-20px;position:relative`)}">
+        `<div id="focustreecontent" class="${styleTable.oneTimeStyle('focustreecontent', () => `top:52px;left:-20px;position:relative;user-select:none;-webkit-user-select:none;`)}">
             <div id="focustreeplaceholder"></div>
             <div id="inlaywindowplaceholder"></div>
             ${continuousFocusContent}
