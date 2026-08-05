@@ -164,6 +164,15 @@ focus_tree = {
             assert.deepStrictEqual(buildDeleteFocusEdits(content, ['nope']), []);
         });
 
+        it('deletes a focus with a numeric id (id = 123 parses as a number)', () => {
+            const numeric = 'focus_tree = {\n\tid = test\n\tfocus = { id = 123 x = 5 }\n}';
+            const edits = buildDeleteFocusEdits(numeric, ['123']);
+            assert.strictEqual(edits.length, 1, JSON.stringify(edits));
+            const result = applyEdits(numeric, edits);
+            assert.ok(!result.includes('123'), result);
+            assert.ok(result.includes('id = test'), result);
+        });
+
         it('handles multiple ids and keeps order', () => {
             const edits = buildDeleteFocusEdits(content, ['focus_c', 'focus_a']);
             assert.strictEqual(edits.length, 2);

@@ -64,10 +64,13 @@ export function forEachFocusBlock(node: Node, cb: (focusNode: Node, id: string |
             let id: string | undefined;
             for (const child of n.value) {
                 if (child.name === 'id') {
-                    // `id = focus_a` parses as a SymbolNode (bare identifier), `id = "focus_a"` as
-                    // a plain string; both must resolve to the same string.
+                    // `id = focus_a` parses as a SymbolNode (bare identifier), `id = "focus_a"`
+                    // as a plain string, and numeric ids like `id = 123` as a number; all must
+                    // resolve to the same string the webview sends.
                     if (typeof child.value === 'string') {
                         id = child.value;
+                    } else if (typeof child.value === 'number') {
+                        id = String(child.value);
                     } else if (child.value && typeof child.value === 'object' && 'name' in child.value) {
                         const name = child.value.name;
                         id = typeof name === 'string' ? name : undefined;
