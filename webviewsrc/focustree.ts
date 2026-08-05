@@ -556,6 +556,32 @@ function openCreateFocusPanel(gridX: number, gridY: number) {
     iconRow.appendChild(iconWrap);
     box.appendChild(iconRow);
 
+    // Duration as the focus cost (weeks): the hint shows the resulting days (cost * 7).
+    const costRow = document.createElement('div');
+    costRow.style.cssText = 'margin-bottom:8px;';
+    const costLab = document.createElement('label');
+    costLab.style.cssText = 'display:block;margin-bottom:2px;';
+    costLab.textContent = feLocalize('focustree.cost', 'Duration (cost)');
+    const costHint = document.createElement('div');
+    costHint.style.cssText = 'color:var(--vscode-descriptionForeground);font-size:11px;margin-top:2px;';
+    const costInput = document.createElement('input');
+    costInput.type = 'number';
+    costInput.min = '1';
+    costInput.step = '1';
+    costInput.style.cssText = 'width:100%;box-sizing:border-box;';
+    const updateCostHint = () => {
+        const cost = parseInt(costInput.value, 10);
+        costHint.textContent = Number.isFinite(cost) && cost > 0
+            ? feLocalize('focustree.costdays', '≈ {0} days (cost × 7)', String(cost * 7))
+            : feLocalize('focustree.costdays.empty', 'final days = cost × 7');
+    };
+    costInput.addEventListener('input', updateCostHint);
+    updateCostHint();
+    costRow.appendChild(costLab);
+    costRow.appendChild(costInput);
+    costRow.appendChild(costHint);
+    box.appendChild(costRow);
+
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px;';
     const cancelBtn = makeDialogButton(feLocalize('focustree.cancel', 'Cancel'));
@@ -578,6 +604,7 @@ function openCreateFocusPanel(gridX: number, gridY: number) {
         const name = nameInput.value.trim();
         const desc = descInput.value.trim();
         const icon = iconInput.value.trim();
+        const cost = parseInt(costInput.value, 10);
         closeCreateFocusPanel();
         vscode.postMessage({
             command: 'createFocus',
@@ -586,6 +613,7 @@ function openCreateFocusPanel(gridX: number, gridY: number) {
                 name: name || undefined,
                 desc: desc || undefined,
                 icon: icon || undefined,
+                cost: Number.isFinite(cost) && cost > 0 ? cost : undefined,
                 x: gridX,
                 y: gridY,
             },

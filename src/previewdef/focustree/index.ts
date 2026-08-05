@@ -211,7 +211,7 @@ class FocusTreePreview extends PreviewBase {
      * Inserts a new focus block just before the closing brace of the last focus_tree block.
      * The name/description go in as comments (no localisation entries); the id is required.
      */
-    private async createFocus(focus: { id: string; name?: string; desc?: string; icon?: string; x?: number; y?: number }): Promise<void> {
+    private async createFocus(focus: { id: string; name?: string; desc?: string; icon?: string; cost?: number; x?: number; y?: number }): Promise<void> {
         try {
             const document = getDocumentByUri(this.uri);
             if (!document || !focus?.id) {

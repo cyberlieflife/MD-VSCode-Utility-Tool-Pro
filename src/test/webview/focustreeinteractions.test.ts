@@ -272,6 +272,11 @@ describe('webview/focustree interactions', function () {
         assert.ok(idInput, 'create panel should have an id input');
         idInput.value = 'NEW_FOCUS';
         idInput.dispatchEvent(new Event('input', { bubbles: true }));
+        // Duration (cost) input is the second-to-last numeric field; set cost = 10.
+        const costInput = document.querySelector('.ft-create input[type="number"]') as HTMLInputElement;
+        assert.ok(costInput, 'create panel should have a cost input');
+        costInput.value = '10';
+        costInput.dispatchEvent(new Event('input', { bubbles: true }));
 
         messages.length = 0;
         const okBtn = [...document.querySelectorAll('.ft-create button')].find(b => b.textContent === 'Confirm');
@@ -281,6 +286,7 @@ describe('webview/focustree interactions', function () {
         const createMsg = messages.find(m => m.command === 'createFocus');
         assert.ok(createMsg, 'expected createFocus, got: ' + JSON.stringify(messages));
         assert.strictEqual(createMsg.focus.id, 'NEW_FOCUS');
+        assert.strictEqual(createMsg.focus.cost, 10, 'cost must be forwarded, got: ' + JSON.stringify(createMsg.focus));
         assert.strictEqual(createMsg.focus.x, 1, 'x must be the grid cell under the cursor, got: ' + JSON.stringify(createMsg.focus));
         assert.strictEqual(createMsg.focus.y, 1, 'y must be the grid cell under the cursor');
         assert.ok(!document.querySelector('.ft-create'), 'create panel should close after confirm');

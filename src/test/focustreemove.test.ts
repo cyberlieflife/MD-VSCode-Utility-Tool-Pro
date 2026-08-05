@@ -207,6 +207,18 @@ focus_tree = {
             assert.ok(block.includes('icon = GFX_goal_new'), block);
         });
 
+        it('writes cost only when given (days = cost * 7) and always the empty prerequisite/reward blocks', () => {
+            const withCost = buildFocusInsertBlock({ id: 'A', cost: 10 });
+            assert.ok(withCost.includes('\t\tcost = 10\n'), withCost);
+            assert.ok(withCost.includes('\t\tprerequisite = {\n\t\t}\n'), withCost);
+            assert.ok(withCost.includes('\t\tcompletion_reward = {\n\t\t}\n'), withCost);
+
+            const withoutCost = buildFocusInsertBlock({ id: 'B' });
+            assert.ok(!withoutCost.includes('cost'), withoutCost);
+            assert.ok(withoutCost.includes('\t\tprerequisite = {\n\t\t}\n'), withoutCost);
+            assert.ok(withoutCost.includes('\t\tcompletion_reward = {\n\t\t}\n'), withoutCost);
+        });
+
         it('uses the given grid coordinates (default 0) and ends with a newline so the tree brace stays alone', () => {
             const block = buildFocusInsertBlock({ id: 'NEW_FOCUS', x: 7, y: -3 });
             assert.ok(block.includes('\tx = 7\n'), block);
