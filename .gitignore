@@ -87,3 +87,4 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+*.bak_*
