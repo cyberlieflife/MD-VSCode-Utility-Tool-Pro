@@ -1,9 +1,9 @@
 {
     "hoi4modutilities.locale": "ru",
-    "hoi4modutilities.category": "钢铁雄心4模组工具扩展版",
+    "hoi4modutilities.category": "Hearts of Iron 4 Utilities Pro",
     "hoi4modutilities.dds.editorName": "Предпросмотр DDS",
     "hoi4modutilities.tga.editorName": "Предпросмотр TGA",
-    "hoi4modutilities.displayName": "钢铁雄心4模组工具扩展版",
+    "hoi4modutilities.displayName": "Hearts of Iron 4 Utilities Pro",
     "hoi4modutilities.useConditionInFocus.title": "Показать условия в фокусах",
     "hoi4modutilities.useConditionInFocus.desc": "Отображать условия в предпросмотре дерева фокусов. Требуется перезагрузка после изменения.",
     "hoi4modutilities.eventTreePreview.title": "Предпросмотр дерева событий",

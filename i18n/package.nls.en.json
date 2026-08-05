@@ -1,9 +1,9 @@
 {
     "hoi4modutilities.locale": "en",
-    "hoi4modutilities.category": "钢铁雄心4模组工具扩展版",
+    "hoi4modutilities.category": "Hearts of Iron 4 Utilities Pro",
     "hoi4modutilities.dds.editorName": "Preview DDS",
     "hoi4modutilities.tga.editorName": "Preview TGA",
-    "hoi4modutilities.displayName": "钢铁雄心4模组工具扩展版",
+    "hoi4modutilities.displayName": "Hearts of Iron 4 Utilities Pro",
     "hoi4modutilities.useConditionInFocus.title": "Use Condition In Focus",
     "hoi4modutilities.useConditionInFocus.desc": "Show conditions in the focus tree preview. Reloading is required after changing this.",
     "hoi4modutilities.eventTreePreview.title": "Event Tree Preview",

@@ -3,12 +3,12 @@
 	"displayName": "%hoi4modutilities.displayName%",
 	"description": "钢铁雄心4模组工具扩展版",
 	"version": "1.1.16",
-	"author": "TheGeneral",
-	"publisher": "MilleniumDawnModTeam",
+	"author": "Cyberlieflife",
+	"publisher": "Cyberlieflife",
 	"icon": "icon.png",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/MillenniumDawn/MD-VSCode-Utility-Tool"
+		"url": "https://github.com/cyberlieflife/MD-VSCode-Utility-Tool-Pro"
 	},
 	"engines": {
 		"vscode": "^1.74.0"
