@@ -8,6 +8,7 @@ describe('webview/focustree interactions', function () {
     this.timeout(10000);
 
     const messages: any[] = [];
+    const uiState: Record<string, any> = {};
     let readyPromise: Promise<void>;
     let resolveReady: () => void;
 
@@ -29,8 +30,8 @@ describe('webview/focustree interactions', function () {
                     resolveReady();
                 }
             },
-            getState: () => ({}),
-            setState: () => {},
+            getState: () => uiState,
+            setState: (s: any) => { Object.assign(uiState, s); },
         });
 
         const focus = {
@@ -184,5 +185,49 @@ describe('webview/focustree interactions', function () {
         const saveMsg = messages.find(m => m.command === 'saveUiState');
         assert.ok(saveMsg, 'expected saveUiState, got: ' + JSON.stringify(messages));
         assert.strictEqual(saveMsg.state.showFocusNames, true, 'name mode must be saved');
+    });
+
+    it('modal dialogs block canvas interaction behind them', async function () {
+        // Open the create panel: right-click blank canvas, then pick "Create focus".
+        document.body.dispatchEvent(new MouseEvent('contextmenu', { clientX: 200, clientY: 200, bubbles: true, cancelable: true }));
+        const menu = document.querySelector('.ft-context-menu');
+        assert.ok(menu, 'context menu should open on blank-canvas right-click');
+        const createItem = [...menu!.querySelectorAll('div')].find(d => d.textContent === 'Create focus');
+        assert.ok(createItem, 'menu should offer Create focus, got: ' + JSON.stringify(menu!.textContent));
+        createItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        assert.ok(document.querySelector('.ft-create'), 'create panel should open');
+
+        // While a modal is open, a press on a focus body must neither navigate nor drag.
+        messages.length = 0;
+        const label = document.querySelector('.navigator [data-focus-id]') as HTMLElement;
+        label.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        assert.ok(!messages.some(m => m.command === 'navigate'), 'no navigation while a modal is open: ' + JSON.stringify(messages));
+        assert.ok(!messages.some(m => m.command === 'moveFocuses'), 'no drag while a modal is open: ' + JSON.stringify(messages));
+
+        // Blank canvas must not box-select while a modal is open.
+        const nav = document.querySelector('.navigator') as HTMLElement;
+        const before = nav.style.outline;
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { clientX: 0, clientY: 0, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
+        assert.strictEqual(nav.style.outline, before, 'no box-select while a modal is open');
+
+        // Wheel zoom is disabled while a modal is open (scale stays put).
+        const scaleBefore = uiState.scale;
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+        assert.strictEqual(uiState.scale, scaleBefore, 'no zoom while a modal is open');
+
+        // Cancel closes the panel and restores canvas interaction.
+        const cancelBtn = [...document.querySelectorAll('.ft-create button')].find(b => b.textContent === 'Cancel');
+        assert.ok(cancelBtn, 'create panel should have a Cancel button');
+        cancelBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        assert.ok(!document.querySelector('.ft-create'), 'create panel should close');
+
+        messages.length = 0;
+        const label2 = document.querySelector('.navigator [data-focus-id]') as HTMLElement;
+        label2.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
+        assert.ok(messages.some(m => m.command === 'navigate'), 'navigation works again after the modal closes');
     });
 });

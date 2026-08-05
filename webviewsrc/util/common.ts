@@ -67,6 +67,15 @@ export function tryRun<T extends (...args: any[]) => any>(func: T): (...args: Pa
 }
 
 let shouldDisableZoom = false;
+
+/**
+ * Disables or re-enables mouse-wheel zooming of the focus canvas. The create/delete modal
+ * dialogs call this so the preview behind them cannot be zoomed while they are open.
+ */
+export function setZoomEnabled(enabled: boolean): void {
+    shouldDisableZoom = !enabled;
+}
+
 export function enableZoom(contentElement: HTMLDivElement, xOffset: number, yOffset: number): void {
     let scale = getState().scale || 1;
     contentElement.style.transform = `scale(${scale})`;

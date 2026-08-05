@@ -1,4 +1,4 @@
-import { getState, setState, arrayToMap, scrollToState, tryRun, enableZoom, initCommon } from "./util/common";
+import { getState, setState, arrayToMap, scrollToState, tryRun, enableZoom, initCommon, setZoomEnabled } from "./util/common";
 import { SelectionState, emptySelection, selectFocusIds, idsInRect, Rect, RectItem } from "./focusselection";
 import { computeGridDelta, buildFocusDragMoves, DragMove } from "./focusdrag";
 import { DivDropdown } from "./util/dropdown";
@@ -215,7 +215,7 @@ function bindFocusInteractions() {
     for (let i = 0; i < navigators.length; i++) {
         const nav = navigators[i];
         nav.addEventListener('pointerdown', (e) => {
-            if (e.button !== 0) {
+            if (e.button !== 0 || uiModalOpen) {
                 return;
             }
             // Clicks on the completion checkbox (or other inputs) never start a drag.
@@ -285,6 +285,7 @@ function closeDeleteConfirm() {
     deleteConfirmOverlay?.remove();
     deleteConfirmOverlay = null;
     deleteConfirmId = null;
+    setUiModal(false);
 }
 
 function showDeleteConfirm() {
@@ -304,18 +305,17 @@ function showDeleteConfirm() {
     box.appendChild(msg);
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = feLocalize('focustree.cancel', 'Cancel');
-    const okBtn = document.createElement('button');
-    okBtn.textContent = deleteConfirmStep === 1
+    const cancelBtn = makeDialogButton(feLocalize('focustree.cancel', 'Cancel'));
+    const okBtn = makeDialogButton(deleteConfirmStep === 1
         ? feLocalize('focustree.continue', 'Continue')
-        : feLocalize('focustree.deletefocus', 'Delete');
+        : feLocalize('focustree.deletefocus', 'Delete'));
     btnRow.appendChild(cancelBtn);
     btnRow.appendChild(okBtn);
     box.appendChild(btnRow);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
     deleteConfirmOverlay = overlay;
+    setUiModal(true);
 
     cancelBtn.addEventListener('click', closeDeleteConfirm);
     okBtn.addEventListener('click', () => {
@@ -344,6 +344,28 @@ let createPanelOverlay: HTMLDivElement | null = null;
 function closeCreateFocusPanel() {
     createPanelOverlay?.remove();
     createPanelOverlay = null;
+    setUiModal(false);
+}
+
+// Modal dialogs (delete confirm, create panel, icon picker) must block canvas interaction behind
+// them: no box-select, no drag/navigate press, no wheel zoom. The modal overlays are children of
+// <body>, so document-level handlers would otherwise keep firing through them.
+let uiModalOpen = false;
+
+function setUiModal(open: boolean): void {
+    uiModalOpen = open;
+    setZoomEnabled(!open);
+}
+
+// Dialog buttons: common.css styles bare <button> as 20x20 toolbar icon buttons, which crushes
+// text (a two-character label wraps into vertical text). Give modal buttons explicit sizing.
+function makeDialogButton(text: string): HTMLButtonElement {
+    const b = document.createElement('button');
+    b.textContent = text;
+    b.style.cssText = 'width:auto;height:auto;min-width:72px;padding:4px 12px;white-space:nowrap;' +
+        'background:var(--vscode-button-background);color:var(--vscode-button-foreground);' +
+        'border:1px solid var(--vscode-button-border);border-radius:2px;cursor:pointer;transform:none;';
+    return b;
 }
 
 // Icon picker popup: shows every focus icon used by the workspace and the HOI4 install (names
@@ -359,11 +381,13 @@ function closeIconPicker() {
     iconPickerOverlay = null;
     iconPickerCallback = null;
     iconPickerRender = null;
+    setUiModal(false);
 }
 
 function openIconPicker(onPick: (name: string) => void) {
     closeIconPicker();
     iconPickerCallback = onPick;
+    setUiModal(true);
     if (!focusIconsRequested) {
         focusIconsRequested = true;
         vscode.postMessage({ command: 'requestFocusIcons' });
@@ -388,9 +412,8 @@ function openIconPicker(onPick: (name: string) => void) {
     const grid = document.createElement('div');
     grid.style.cssText = 'overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;';
     box.appendChild(grid);
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = feLocalize('focustree.cancel', 'Cancel');
-    closeBtn.style.cssText = 'margin-top:8px;align-self:flex-end;';
+    const closeBtn = makeDialogButton(feLocalize('focustree.cancel', 'Cancel'));
+    closeBtn.style.cssText += 'margin-top:8px;align-self:flex-end;';
     box.appendChild(closeBtn);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
@@ -477,14 +500,14 @@ function openCreateFocusPanel() {
     iconRow.style.cssText = 'margin-bottom:8px;';
     const iconLab = document.createElement('label');
     iconLab.style.cssText = 'display:block;margin-bottom:2px;';
-    iconLab.textContent = 'Icon (GFX name)';
+    iconLab.textContent = feLocalize('focustree.icon', 'Icon (GFX name)');
     const iconWrap = document.createElement('div');
     iconWrap.style.cssText = 'display:flex;gap:4px;';
     const iconInput = document.createElement('input');
     iconInput.type = 'text';
     iconInput.style.cssText = 'flex:1;';
-    const pickBtn = document.createElement('button');
-    pickBtn.textContent = feLocalize('focustree.pickicon', 'Pick…');
+    const pickBtn = makeDialogButton(feLocalize('focustree.pickicon', 'Pick…'));
+    pickBtn.style.minWidth = 'auto';
     pickBtn.addEventListener('click', () => openIconPicker((name) => { iconInput.value = name; }));
     iconWrap.appendChild(iconInput);
     iconWrap.appendChild(pickBtn);
@@ -494,16 +517,15 @@ function openCreateFocusPanel() {
 
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px;';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = feLocalize('focustree.cancel', 'Cancel');
-    const okBtn = document.createElement('button');
-    okBtn.textContent = feLocalize('focustree.confirm', 'Confirm');
+    const cancelBtn = makeDialogButton(feLocalize('focustree.cancel', 'Cancel'));
+    const okBtn = makeDialogButton(feLocalize('focustree.confirm', 'Confirm'));
     btnRow.appendChild(cancelBtn);
     btnRow.appendChild(okBtn);
     box.appendChild(btnRow);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
     createPanelOverlay = overlay;
+    setUiModal(true);
     idInput.focus();
 
     cancelBtn.addEventListener('click', closeCreateFocusPanel);
@@ -1291,7 +1313,7 @@ window.addEventListener('load', tryRun(async function() {
     // Empty canvas anywhere (outside focus cells and controls) starts a rubber-band box select.
     // Bound on document so blank areas outside the tree container also work; registered once.
     document.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0) {
+        if (e.button !== 0 || uiModalOpen) {
             return;
         }
         const target = e.target as HTMLElement;
@@ -1312,6 +1334,9 @@ window.addEventListener('load', tryRun(async function() {
     // Right-click on a focus cell offers delete; on empty canvas it offers create.
     document.addEventListener('contextmenu', (e) => {
         e.preventDefault();
+        if (uiModalOpen) {
+            return;
+        }
         const target = e.target as HTMLElement;
         const nav = target.closest('.navigator') as HTMLElement | null;
         if (nav) {
