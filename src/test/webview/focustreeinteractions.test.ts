@@ -311,4 +311,30 @@ describe('webview/focustree interactions', function () {
         assert.strictEqual(createMsg2.focus.x, 29, 'x must be 29 for a right-click at grid 29, got: ' + JSON.stringify(createMsg2.focus));
         assert.strictEqual(createMsg2.focus.y, 2, 'y must be 2 for a right-click at grid 2');
     });
+
+    it('delete flow: right-click a focus, double-confirm, posts deleteFocuses', async function () {
+        const nav = document.querySelector('.navigator') as HTMLElement;
+        assert.ok(nav, 'navigator should be rendered');
+        nav.dispatchEvent(new MouseEvent('contextmenu', { clientX: 120, clientY: 120, bubbles: true, cancelable: true }));
+        const menu = document.querySelector('.ft-context-menu');
+        assert.ok(menu, 'context menu should open on a focus right-click');
+        const deleteItem = [...menu!.querySelectorAll('div')].find(d => d.textContent?.includes('Delete focus'));
+        assert.ok(deleteItem, 'menu should offer Delete focus, got: ' + JSON.stringify(menu!.textContent));
+        deleteItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        assert.ok(document.querySelector('.ft-confirm'), 'delete confirm should open');
+
+        // Step 1: soft confirm -> Continue.
+        let okBtn = [...document.querySelectorAll('.ft-confirm button')].find(b => b.textContent === 'Continue');
+        assert.ok(okBtn, 'step 1 should offer Continue');
+        okBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        // Step 2: explicit confirm -> Delete.
+        okBtn = [...document.querySelectorAll('.ft-confirm button')].find(b => b.textContent === 'Delete');
+        assert.ok(okBtn, 'step 2 should offer Delete');
+        messages.length = 0;
+        okBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const del = messages.find(m => m.command === 'deleteFocuses');
+        assert.ok(del, 'expected deleteFocuses, got: ' + JSON.stringify(messages));
+        assert.deepStrictEqual(del.ids, ['a']);
+        assert.ok(!document.querySelector('.ft-confirm'), 'confirm should close after delete');
+    });
 });

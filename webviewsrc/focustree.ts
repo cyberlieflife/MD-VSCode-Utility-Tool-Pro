@@ -330,7 +330,11 @@ function closeDeleteConfirm() {
 }
 
 function showDeleteConfirm() {
-    closeDeleteConfirm();
+    // Rebuild the dialog (also used for the step 1 -> step 2 transition). Only the old overlay
+    // is removed here: deleteConfirmId/deleteConfirmStep are flow state that must survive the
+    // rebuild, so closing helpers must not be used (they reset the id).
+    deleteConfirmOverlay?.remove();
+    deleteConfirmOverlay = null;
     const overlay = document.createElement('div');
     overlay.className = 'ft-confirm';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.4);' +
