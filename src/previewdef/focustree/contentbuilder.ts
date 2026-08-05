@@ -591,14 +591,14 @@ async function renderFocus(
         const iconObject = resolveIcons && iconName ? await getFocusIcon(iconName, gfxFiles) : null;
         styleTable.style('focus-icon-' + normalizeForStyle(iconName ?? '-empty'), () =>
             iconObject
-                ? `background-image: url(${iconObject.uri}); background-size: ${iconObject.width}px; background-color: transparent;`
+                ? `background-image: url(${iconObject.uri}); width: ${iconObject.width}px; height: ${iconObject.height}px; background-size: ${iconObject.width}px ${iconObject.height}px; background-color: transparent;`
                 : resolveIcons
-                    ? `background: grey; background-size: 0px;`
-                    : `background-color: rgba(127, 127, 127, 0.25); background-size: 0px;`
+                    ? `background: grey; width: 64px; height: 64px; background-size: 0px;`
+                    : `background-color: rgba(127, 127, 127, 0.25); width: 64px; height: 64px; background-size: 0px;`
         );
     }
     
-    styleTable.style('focus-icon-' + normalizeForStyle('-empty'), () => 'background: grey;');
+    styleTable.style('focus-icon-' + normalizeForStyle('-empty'), () => 'background: grey; width: 64px; height: 64px;');
 
     const titlebarObject = await getFocusTitlebarImage(focus.textIcon, titlebarStyles);
     const titlebarClass = styleTable.style('focus-titlebar-' + normalizeForStyle(focus.textIcon ?? '-empty'), () =>
@@ -661,8 +661,6 @@ async function renderFocus(
             left: 50%;
             top: calc(50% - 18px);
             transform: translate(-50%, -50%);
-            width: 64px;
-            height: 64px;
             background-position-x: center;
             background-position-y: center;
             background-repeat: no-repeat;
