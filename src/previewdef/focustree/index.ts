@@ -8,6 +8,7 @@ import { FocusTreeLoader } from './loader';
 import { FocusTree, Focus, extractFocusIcons } from './schema';
 import { buildFocusMoveEdits, buildDeleteFocusEdits, findFocusTreeInsertPosition, buildFocusInsertBlock } from './move';
 import { listFilesFromModOrHOI4, parseHoi4FileCached } from '../../util/fileloader';
+import { Logger } from '../../util/logger';
 import { getSpriteByGfxName } from '../../util/image/imagecache';
 import { mapLimit } from '../../util/common';
 import { getRelativePathInWorkspace, getDocumentByUri, getConfiguration } from '../../util/vsccommon';
@@ -189,11 +190,13 @@ class FocusTreePreview extends PreviewBase {
     private async deleteFocuses(ids: string[]): Promise<void> {
         try {
             const document = getDocumentByUri(this.uri);
+            Logger.info(`ftdelete: ids=${JSON.stringify(ids)} doc=${document ? 'yes' : 'NO'} uri=${this.uri.toString()}`);
             if (!document) {
                 return;
             }
             const text = document.getText();
             const specs = buildDeleteFocusEdits(text, ids ?? []);
+            Logger.info(`ftdelete: textLen=${text.length} specs=${specs.length}${specs.map(s => ` [${s.start}..${s.end}]`).join('')}`);
             if (specs.length === 0) {
                 return;
             }
@@ -201,7 +204,8 @@ class FocusTreePreview extends PreviewBase {
             for (const spec of specs) {
                 edit.delete(this.uri, new vscode.Range(document.positionAt(spec.start), document.positionAt(spec.end)));
             }
-            await vscode.workspace.applyEdit(edit);
+            const ok = await vscode.workspace.applyEdit(edit);
+            Logger.info(`ftdelete: applyEdit ok=${ok}`);
         } catch (e) {
             error(e);
         }
