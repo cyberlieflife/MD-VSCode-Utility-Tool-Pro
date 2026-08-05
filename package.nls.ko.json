@@ -1,10 +1,10 @@
   
 {
     "hoi4modutilities.locale": "ko-kr",
-    "hoi4modutilities.category": "Millennium Dawn HOI4 모드 개발용 유틸리티",
+    "hoi4modutilities.category": "钢铁雄心4模组工具扩展版",
     "hoi4modutilities.dds.editorName": "DDS 미리보기",
     "hoi4modutilities.tga.editorName": "TGA 미리보기",
-    "hoi4modutilities.displayName": "Millennium Dawn HOI4 모드 개발용 유틸리티",
+    "hoi4modutilities.displayName": "钢铁雄心4模组工具扩展版",
     "hoi4modutilities.useConditionInFocus.title": "중점에서 조건 표시",
     "hoi4modutilities.useConditionInFocus.desc": "중점 계통도 미리보기에서 조건을 표시합니다. 변경 후 다시 로드해야 합니다.",
     "hoi4modutilities.eventTreePreview.title": "이벤트 트리 미리보기",
