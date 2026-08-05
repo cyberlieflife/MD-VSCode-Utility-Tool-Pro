@@ -356,6 +356,45 @@ export function getFocusTree(node: Node, sharedFocusTrees: FocusTree[], filePath
     return getFocusTreeWithFocusFile(file, sharedFocusTrees, filePath, constants);
 }
 
+/**
+ * Lightweight icon-name extraction for the create-focus icon picker. Collects every focus icon
+ * GFX name (workspace + vanilla focus files) without the expensive per-icon resolution.
+ */
+export function extractFocusIcons(node: Node): string[] {
+    const constants = {};
+    const file = convertFocusFileNodeToJson(node, constants);
+    const icons = new Set<string>();
+
+    const collect = (focus: HOIPartial<FocusDef> | undefined): void => {
+        for (const icon of focus?.icon ?? []) {
+            const raw = icon?._raw;
+            const value = raw?.value;
+            if (typeof value === 'string') {
+                icons.add(value);
+            } else if (value && typeof value === 'object' && 'name' in value) {
+                const name = value.name;
+                if (typeof name === 'string') {
+                    icons.add(name);
+                }
+            }
+        }
+    };
+
+    for (const tree of file.focus_tree ?? []) {
+        for (const focus of tree.focus ?? []) {
+            collect(focus);
+        }
+    }
+    for (const focus of file.shared_focus ?? []) {
+        collect(focus);
+    }
+    for (const focus of file.joint_focus ?? []) {
+        collect(focus);
+    }
+
+    return [...icons];
+}
+
 function getFocuses(hoiFocuses: HOIPartial<FocusDef>[], conditionExprs: ConditionItem[], filePath: string, warnings: FocusWarning[], constants: {}): Record<string, Focus> {
     const focuses: Record<string, Focus> = {};
 

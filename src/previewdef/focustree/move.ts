@@ -1,6 +1,7 @@
 // Pure helpers for writing focus drag moves back into the focus file. Import-free on purpose so
 // unit tests can exercise them without pulling in vscode.
 import { Focus } from './schema';
+import { parseHoi4File, Node } from '../../hoiformat/hoiparser';
 
 export interface TextEditSpec {
     start: number;
@@ -54,4 +55,96 @@ function findInsertPosition(documentText: string, focus: Focus): number | undefi
         return undefined;
     }
     return newline + 1;
+}
+
+// Visits every focus block (focus_tree/shared_focus/joint_focus contents) with its parsed id.
+export function forEachFocusBlock(node: Node, cb: (focusNode: Node, id: string | undefined) => void): void {
+    const visit = (n: Node): void => {
+        if (n.name === 'focus' && Array.isArray(n.value)) {
+            let id: string | undefined;
+            for (const child of n.value) {
+                if (child.name === 'id') {
+                    // `id = focus_a` parses as a SymbolNode (bare identifier), `id = "focus_a"` as
+                    // a plain string; both must resolve to the same string.
+                    if (typeof child.value === 'string') {
+                        id = child.value;
+                    } else if (child.value && typeof child.value === 'object' && 'name' in child.value) {
+                        const name = child.value.name;
+                        id = typeof name === 'string' ? name : undefined;
+                    }
+                    break;
+                }
+            }
+            cb(n, id);
+            return;
+        }
+        if (Array.isArray(n.value)) {
+            for (const child of n.value) {
+                visit(child);
+            }
+        }
+    };
+    visit(node);
+}
+
+// Builds the source edits that delete the focus blocks with the given ids, each including its
+// own line (leading indentation and trailing newline) so the file stays tidy. Order of the
+// returned edits is source order.
+export function buildDeleteFocusEdits(documentText: string, ids: string[]): TextEditSpec[] {
+    const idSet = new Set(ids);
+    const edits: TextEditSpec[] = [];
+    const node = parseHoi4File(documentText, '');
+    forEachFocusBlock(node, (focusNode, id) => {
+        if (id === undefined || !idSet.has(id)) {
+            return;
+        }
+        const start = focusNode.nameToken?.start;
+        const end = focusNode.valueEndToken?.end;
+        if (start === undefined || end === undefined) {
+            return;
+        }
+        const lineStart = documentText.lastIndexOf('\n', start - 1) + 1;
+        const lineEnd = documentText.indexOf('\n', end);
+        const endPos = lineEnd === -1 ? documentText.length : lineEnd + 1;
+        edits.push({ start: lineStart, end: endPos, text: '' });
+    });
+    return edits;
+}
+
+// Finds where a new focus block belongs: just before the closing brace of the LAST focus_tree
+// block ("at the bottom of the file"). Returns undefined when the file has no focus tree.
+export function findFocusTreeInsertPosition(documentText: string): number | undefined {
+    let insertPos: number | undefined;
+    const visit = (n: Node): void => {
+        if (n.name === 'focus_tree' && Array.isArray(n.value) && n.valueEndToken) {
+            insertPos = n.valueEndToken.start;
+        }
+        if (Array.isArray(n.value)) {
+            for (const child of n.value) {
+                visit(child);
+            }
+        }
+    };
+    visit(parseHoi4File(documentText, ''));
+    return insertPos;
+}
+
+// Renders the new focus block. The name (and description) are comments only - no localisation
+// entry is created - formatted as `id = XXX    #name` per the requested style; an empty name
+// leaves the id line without a comment.
+export function buildFocusInsertBlock(focus: { id: string; name?: string; desc?: string; icon?: string }): string {
+    const lines: string[] = [];
+    lines.push('\tfocus = {');
+    const idComment = focus.name ? `    #${focus.name}` : '';
+    lines.push(`\t\tid = ${focus.id}${idComment}`);
+    if (focus.desc) {
+        lines.push(`\t\t#${focus.desc}`);
+    }
+    if (focus.icon) {
+        lines.push(`\t\ticon = ${focus.icon}`);
+    }
+    lines.push('\t\tx = 0');
+    lines.push('\t\ty = 0');
+    lines.push('\t}');
+    return lines.join('\n');
 }

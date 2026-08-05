@@ -242,6 +242,292 @@ function bindFocusInteractions() {
     }
 }
 
+// Right-click context menu ---------------------------------------------
+let contextMenuEl: HTMLDivElement | null = null;
+
+function closeContextMenu() {
+    if (contextMenuEl) {
+        contextMenuEl.remove();
+        contextMenuEl = null;
+    }
+}
+
+function showContextMenu(x: number, y: number, items: { label: string; onClick: () => void }[]) {
+    closeContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'ft-context-menu';
+    menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:2000;' +
+        'background:var(--vscode-menu-background);color:var(--vscode-menu-foreground);' +
+        'border:1px solid var(--vscode-menu-border);box-shadow:0 2px 8px rgba(0,0,0,.3);' +
+        'font-size:12px;min-width:160px;';
+    for (const item of items) {
+        const el = document.createElement('div');
+        el.style.cssText = 'padding:4px 12px;cursor:pointer;white-space:nowrap;';
+        el.textContent = item.label;
+        el.addEventListener('pointerdown', (e) => e.stopPropagation());
+        el.addEventListener('click', () => {
+            closeContextMenu();
+            item.onClick();
+        });
+        menu.appendChild(el);
+    }
+    document.body.appendChild(menu);
+    contextMenuEl = menu;
+}
+
+// Delete confirmation flow (two steps on purpose): first a soft confirm, then an explicit
+// "really delete" before anything is sent to the extension host.
+let deleteConfirmId: string | null = null;
+let deleteConfirmStep = 0;
+let deleteConfirmOverlay: HTMLDivElement | null = null;
+
+function closeDeleteConfirm() {
+    deleteConfirmOverlay?.remove();
+    deleteConfirmOverlay = null;
+    deleteConfirmId = null;
+}
+
+function showDeleteConfirm() {
+    closeDeleteConfirm();
+    const overlay = document.createElement('div');
+    overlay.className = 'ft-confirm';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.4);' +
+        'display:flex;align-items:center;justify-content:center;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);' +
+        'border:1px solid var(--vscode-widget-border);padding:16px;min-width:320px;';
+    const msg = document.createElement('div');
+    msg.style.cssText = 'margin-bottom:12px;white-space:pre-wrap;';
+    msg.textContent = deleteConfirmStep === 1
+        ? feLocalize('focustree.deleteconfirm1', 'Delete focus {0}?', deleteConfirmId ?? '')
+        : feLocalize('focustree.deleteconfirm2', 'Really delete? This cannot be undone.');
+    box.appendChild(msg);
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = feLocalize('focustree.cancel', 'Cancel');
+    const okBtn = document.createElement('button');
+    okBtn.textContent = deleteConfirmStep === 1
+        ? feLocalize('focustree.continue', 'Continue')
+        : feLocalize('focustree.deletefocus', 'Delete');
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(okBtn);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    deleteConfirmOverlay = overlay;
+
+    cancelBtn.addEventListener('click', closeDeleteConfirm);
+    okBtn.addEventListener('click', () => {
+        if (deleteConfirmStep === 1) {
+            deleteConfirmStep = 2;
+            showDeleteConfirm();
+        } else {
+            const id = deleteConfirmId;
+            closeDeleteConfirm();
+            if (id !== null) {
+                vscode.postMessage({ command: 'deleteFocuses', ids: [id] });
+            }
+        }
+    });
+}
+
+function startDeleteFocus(id: string) {
+    deleteConfirmId = id;
+    deleteConfirmStep = 1;
+    showDeleteConfirm();
+}
+
+// Create-focus panel ----------------------------------------------
+let createPanelOverlay: HTMLDivElement | null = null;
+
+function closeCreateFocusPanel() {
+    createPanelOverlay?.remove();
+    createPanelOverlay = null;
+}
+
+// Icon picker popup: shows every focus icon used by the workspace and the HOI4 install (names
+// and, when resolvable, images) and hands the picked GFX name back to the create panel.
+let iconPickerOverlay: HTMLDivElement | null = null;
+let iconPickerCallback: ((name: string) => void) | null = null;
+let iconPickerRender: (() => void) | null = null;
+let focusIcons: { name: string; imageUri?: string }[] = [];
+let focusIconsRequested = false;
+
+function closeIconPicker() {
+    iconPickerOverlay?.remove();
+    iconPickerOverlay = null;
+    iconPickerCallback = null;
+    iconPickerRender = null;
+}
+
+function openIconPicker(onPick: (name: string) => void) {
+    closeIconPicker();
+    iconPickerCallback = onPick;
+    if (!focusIconsRequested) {
+        focusIconsRequested = true;
+        vscode.postMessage({ command: 'requestFocusIcons' });
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'ft-iconpicker';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.4);' +
+        'display:flex;align-items:center;justify-content:center;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);' +
+        'border:1px solid var(--vscode-widget-border);padding:16px;min-width:420px;max-width:640px;' +
+        'max-height:70vh;display:flex;flex-direction:column;';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:bold;margin-bottom:8px;';
+    title.textContent = feLocalize('focustree.pickicon', 'Pick icon');
+    box.appendChild(title);
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.placeholder = feLocalize('focustree.search', 'Search: ');
+    search.style.cssText = 'margin-bottom:8px;';
+    box.appendChild(search);
+    const grid = document.createElement('div');
+    grid.style.cssText = 'overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;';
+    box.appendChild(grid);
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = feLocalize('focustree.cancel', 'Cancel');
+    closeBtn.style.cssText = 'margin-top:8px;align-self:flex-end;';
+    box.appendChild(closeBtn);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    iconPickerOverlay = overlay;
+
+    const render = () => {
+        grid.innerHTML = '';
+        const filter = search.value.toLowerCase();
+        const list = focusIcons.filter(i => i.name.toLowerCase().includes(filter));
+        if (list.length === 0) {
+            grid.textContent = feLocalize('focustree.iconloading', 'Loading icons…');
+            return;
+        }
+        for (const icon of list) {
+            const item = document.createElement('div');
+            item.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;' +
+                'padding:4px;border:1px solid transparent;';
+            item.addEventListener('click', () => {
+                const cb = iconPickerCallback;
+                closeIconPicker();
+                cb?.(icon.name);
+            });
+            if (icon.imageUri) {
+                const img = document.createElement('img');
+                img.src = icon.imageUri;
+                img.style.cssText = 'width:48px;height:48px;object-fit:contain;';
+                item.appendChild(img);
+            } else {
+                const placeholder = document.createElement('div');
+                placeholder.style.cssText = 'width:48px;height:48px;display:flex;align-items:center;justify-content:center;' +
+                    'color:var(--vscode-descriptionForeground);font-size:10px;';
+                placeholder.textContent = '?';
+                item.appendChild(placeholder);
+            }
+            const label = document.createElement('div');
+            label.style.cssText = 'font-size:10px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;';
+            label.textContent = icon.name;
+            label.title = icon.name;
+            item.appendChild(label);
+            grid.appendChild(item);
+        }
+    };
+    search.addEventListener('input', render);
+    closeBtn.addEventListener('click', closeIconPicker);
+    iconPickerRender = render;
+    render();
+}
+
+function openCreateFocusPanel() {
+    closeCreateFocusPanel();
+    const overlay = document.createElement('div');
+    overlay.className = 'ft-create';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.4);' +
+        'display:flex;align-items:center;justify-content:center;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);' +
+        'border:1px solid var(--vscode-widget-border);padding:16px;min-width:380px;';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:bold;margin-bottom:12px;';
+    title.textContent = feLocalize('focustree.createfocus', 'Create focus');
+    box.appendChild(title);
+
+    const makeField = (label: string): HTMLInputElement => {
+        const row = document.createElement('div');
+        row.style.cssText = 'margin-bottom:8px;';
+        const lab = document.createElement('label');
+        lab.style.cssText = 'display:block;margin-bottom:2px;';
+        lab.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.style.cssText = 'width:100%;box-sizing:border-box;';
+        row.appendChild(lab);
+        row.appendChild(input);
+        box.appendChild(row);
+        return input;
+    };
+
+    const commentHint = ' (' + feLocalize('focustree.namecomment', 'comment only') + ')';
+    const idInput = makeField('ID');
+    const nameInput = makeField(feLocalize('focustree.name', 'Name') + commentHint);
+    const descInput = makeField(feLocalize('focustree.desc', 'Description') + commentHint);
+
+    const iconRow = document.createElement('div');
+    iconRow.style.cssText = 'margin-bottom:8px;';
+    const iconLab = document.createElement('label');
+    iconLab.style.cssText = 'display:block;margin-bottom:2px;';
+    iconLab.textContent = 'Icon (GFX name)';
+    const iconWrap = document.createElement('div');
+    iconWrap.style.cssText = 'display:flex;gap:4px;';
+    const iconInput = document.createElement('input');
+    iconInput.type = 'text';
+    iconInput.style.cssText = 'flex:1;';
+    const pickBtn = document.createElement('button');
+    pickBtn.textContent = feLocalize('focustree.pickicon', 'Pick…');
+    pickBtn.addEventListener('click', () => openIconPicker((name) => { iconInput.value = name; }));
+    iconWrap.appendChild(iconInput);
+    iconWrap.appendChild(pickBtn);
+    iconRow.appendChild(iconLab);
+    iconRow.appendChild(iconWrap);
+    box.appendChild(iconRow);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = feLocalize('focustree.cancel', 'Cancel');
+    const okBtn = document.createElement('button');
+    okBtn.textContent = feLocalize('focustree.confirm', 'Confirm');
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(okBtn);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    createPanelOverlay = overlay;
+    idInput.focus();
+
+    cancelBtn.addEventListener('click', closeCreateFocusPanel);
+    okBtn.addEventListener('click', () => {
+        const id = idInput.value.trim();
+        if (!id) {
+            return;
+        }
+        const name = nameInput.value.trim();
+        const desc = descInput.value.trim();
+        const icon = iconInput.value.trim();
+        closeCreateFocusPanel();
+        vscode.postMessage({
+            command: 'createFocus',
+            focus: {
+                id,
+                name: name || undefined,
+                desc: desc || undefined,
+                icon: icon || undefined,
+            },
+        });
+    });
+}
+
 // Sends the navigate message for the focus cell with the given id (its source-line tokens).
 function navigateToFocus(id: string) {
     const navigators = document.querySelectorAll<HTMLElement>('.navigator');
@@ -965,6 +1251,15 @@ window.addEventListener('message', async (event) => {
         return;
     }
 
+    // Focus-icon list for the create-focus picker arrived from the extension host.
+    if (msg.type === 'focusIcons') {
+        focusIcons = msg.icons ?? [];
+        if (iconPickerRender) {
+            iconPickerRender();
+        }
+        return;
+    }
+
     // Persisted preview UI state (conditions, toggles, name mode, ...) from the extension host.
     if (msg.type === 'uiState') {
         await applyRestoredUiState(msg.state ?? {});
@@ -1012,6 +1307,30 @@ window.addEventListener('load', tryRun(async function() {
             document.body.setPointerCapture(e.pointerId);
         } catch { /* not supported (jsdom, older engines): mouse events still work */ }
         startPointer(e, 'rubber-band', undefined);
+    });
+
+    // Right-click on a focus cell offers delete; on empty canvas it offers create.
+    document.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const target = e.target as HTMLElement;
+        const nav = target.closest('.navigator') as HTMLElement | null;
+        if (nav) {
+            const id = nav.dataset.focusId;
+            if (id !== undefined) {
+                showContextMenu(e.clientX, e.clientY, [
+                    { label: feLocalize('focustree.deletefocus', 'Delete focus') + '「' + id + '」', onClick: () => startDeleteFocus(id) },
+                ]);
+                return;
+            }
+        }
+        showContextMenu(e.clientX, e.clientY, [
+            { label: feLocalize('focustree.createfocus', 'Create focus'), onClick: () => openCreateFocusPanel() },
+        ]);
+    });
+    document.addEventListener('pointerdown', (e) => {
+        if (contextMenuEl && !contextMenuEl.contains(e.target as Node)) {
+            closeContextMenu();
+        }
     });
 
     // Focus name display: ID (default) or localised name

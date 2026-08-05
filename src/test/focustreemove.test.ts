@@ -1,7 +1,9 @@
 import * as assert from 'assert';
 import { parseHoi4File } from '../hoiformat/hoiparser';
 import { convertFocusFileNodeToJson, getFocusTreeWithFocusFile } from '../previewdef/focustree/schema';
-import { buildFocusMoveEdits, TextEditSpec } from '../previewdef/focustree/move';
+import {
+    buildFocusMoveEdits, TextEditSpec, buildDeleteFocusEdits, findFocusTreeInsertPosition, buildFocusInsertBlock,
+} from '../previewdef/focustree/move';
 
 // Coordinate token support: Focus.xToken/yToken must point at the exact source span of the x/y
 // values so drag-move edits can be written back without re-parsing or text scanning.
@@ -125,6 +127,85 @@ describe('previewdef/focustree/move buildFocusMoveEdits', () => {
         const singleLine = `focus_tree = { id = test focus = { id = focus_d } }`;
         const focus = parseFocusFile(singleLine)[0].focuses['focus_d'];
         assert.deepStrictEqual(buildFocusMoveEdits(singleLine, focus, 2, 2), []);
+    });
+});
+
+describe('previewdef/focustree/move delete & create', () => {
+    function applyEdits(text: string, edits: TextEditSpec[]): string {
+        const sorted = [...edits].sort((a, b) => a.start - b.start || a.end - b.end);
+        let result = '';
+        let pos = 0;
+        for (const e of sorted) {
+            result += text.slice(pos, e.start) + e.text;
+            pos = e.end;
+        }
+        return result + text.slice(pos);
+    }
+
+    const content = `focus_tree = {
+	id = test
+	focus = { id = focus_a x = 3 }
+	focus = { id = focus_b x = 5 }
+}
+focus_tree = {
+	id = second
+	focus = { id = focus_c x = 9 }
+}`;
+
+    describe('buildDeleteFocusEdits', () => {
+        it('deletes a whole focus block including its line', () => {
+            const result = applyEdits(content, buildDeleteFocusEdits(content, ['focus_b']));
+            assert.ok(!result.includes('focus_b'), result);
+            assert.ok(!result.includes('x = 5'), result);
+            assert.ok(result.includes('focus_a') && result.includes('focus_c'), result);
+        });
+
+        it('deletes nothing for an unknown id', () => {
+            assert.deepStrictEqual(buildDeleteFocusEdits(content, ['nope']), []);
+        });
+
+        it('handles multiple ids and keeps order', () => {
+            const edits = buildDeleteFocusEdits(content, ['focus_c', 'focus_a']);
+            assert.strictEqual(edits.length, 2);
+            const result = applyEdits(content, edits);
+            assert.ok(!result.includes('focus_a') && !result.includes('focus_c'), result);
+            assert.ok(result.includes('focus_b'), result);
+        });
+    });
+
+    describe('findFocusTreeInsertPosition', () => {
+        it('points just before the closing brace of the LAST focus_tree block', () => {
+            const pos = findFocusTreeInsertPosition(content);
+            assert.ok(pos !== undefined);
+            // The position is the last `}` of the second focus_tree block.
+            assert.strictEqual(content[pos!], '}');
+            const inserted = content.slice(0, pos) + '\n\tfocus = { id = new_focus }\n' + content.slice(pos);
+            const tree = convertFocusFileNodeToJson(parseHoi4File(inserted), {});
+            assert.strictEqual(getFocusTreeWithFocusFile(tree, [], 't.txt', {})[1].focuses['new_focus'].id, 'new_focus');
+        });
+
+        it('returns undefined for text without a focus tree', () => {
+            assert.strictEqual(findFocusTreeInsertPosition('nothing = { x = 1 }'), undefined);
+        });
+    });
+
+    describe('buildFocusInsertBlock', () => {
+        it('puts the name as a comment on the id line in the requested format', () => {
+            const block = buildFocusInsertBlock({ id: 'NEW_FOCUS', name: 'New Focus' });
+            assert.ok(block.includes('id = NEW_FOCUS    #New Focus'), block);
+        });
+
+        it('omits the comment when the name is empty', () => {
+            const block = buildFocusInsertBlock({ id: 'NEW_FOCUS' });
+            assert.ok(block.includes('id = NEW_FOCUS\n'), block);
+            assert.ok(!block.includes('#'), block);
+        });
+
+        it('adds the description as a comment line and the icon line', () => {
+            const block = buildFocusInsertBlock({ id: 'NEW_FOCUS', desc: 'A new focus', icon: 'GFX_goal_new' });
+            assert.ok(block.includes('#A new focus'), block);
+            assert.ok(block.includes('icon = GFX_goal_new'), block);
+        });
     });
 });
 

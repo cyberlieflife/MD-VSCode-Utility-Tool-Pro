@@ -5,8 +5,11 @@ import { PreviewBase } from '../previewbase';
 import { PreviewProviderDef } from '../previewmanager';
 import { contextContainer } from '../../context';
 import { FocusTreeLoader } from './loader';
-import { FocusTree, Focus } from './schema';
-import { buildFocusMoveEdits } from './move';
+import { FocusTree, Focus, extractFocusIcons } from './schema';
+import { buildFocusMoveEdits, buildDeleteFocusEdits, findFocusTreeInsertPosition, buildFocusInsertBlock } from './move';
+import { listFilesFromModOrHOI4, parseHoi4FileCached } from '../../util/fileloader';
+import { getSpriteByGfxName } from '../../util/image/imagecache';
+import { mapLimit } from '../../util/common';
 import { getRelativePathInWorkspace, getDocumentByUri, getConfiguration } from '../../util/vsccommon';
 import { localize } from '../../util/i18n';
 import { loadingShellHtml } from '../../util/html';
@@ -92,6 +95,18 @@ class FocusTreePreview extends PreviewBase {
                 void sendPreviewUiState(this);
                 return;
             }
+            if (msg?.command === 'requestFocusIcons') {
+                void sendFocusIcons(this);
+                return;
+            }
+            if (msg?.command === 'createFocus') {
+                void this.createFocus(msg.focus);
+                return;
+            }
+            if (msg?.command === 'deleteFocuses') {
+                void this.deleteFocuses(msg.ids);
+                return;
+            }
             if (msg?.command === 'moveFocuses') {
                 void this.applyFocusMoves(msg.moves);
                 return;
@@ -164,6 +179,54 @@ class FocusTreePreview extends PreviewBase {
         } catch (e) {
             error(e);
             this.panel.webview.postMessage({ type: 'focusesMoved', ok: false });
+        }
+    }
+
+    /**
+     * Deletes the focus blocks with the given ids from the previewed document (one undoable
+     * WorkspaceEdit covering the whole line of each block).
+     */
+    private async deleteFocuses(ids: string[]): Promise<void> {
+        try {
+            const document = getDocumentByUri(this.uri);
+            if (!document) {
+                return;
+            }
+            const text = document.getText();
+            const specs = buildDeleteFocusEdits(text, ids ?? []);
+            if (specs.length === 0) {
+                return;
+            }
+            const edit = new vscode.WorkspaceEdit();
+            for (const spec of specs) {
+                edit.delete(this.uri, new vscode.Range(document.positionAt(spec.start), document.positionAt(spec.end)));
+            }
+            await vscode.workspace.applyEdit(edit);
+        } catch (e) {
+            error(e);
+        }
+    }
+
+    /**
+     * Inserts a new focus block just before the closing brace of the last focus_tree block.
+     * The name/description go in as comments (no localisation entries); the id is required.
+     */
+    private async createFocus(focus: { id: string; name?: string; desc?: string; icon?: string }): Promise<void> {
+        try {
+            const document = getDocumentByUri(this.uri);
+            if (!document || !focus?.id) {
+                return;
+            }
+            const text = document.getText();
+            const insertPos = findFocusTreeInsertPosition(text);
+            if (insertPos === undefined) {
+                return;
+            }
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(this.uri, document.positionAt(insertPos), '\n' + buildFocusInsertBlock(focus));
+            await vscode.workspace.applyEdit(edit);
+        } catch (e) {
+            error(e);
         }
     }
 
@@ -548,6 +611,44 @@ async function sendPreviewUiState(preview: FocusTreePreview): Promise<void> {
             return;
         }
         preview.panel.webview.postMessage({ type: 'uiState', state: state ?? {} });
+    } catch (e) {
+        error(e);
+    }
+}
+
+// Collects every focus icon name used by the workspace and vanilla national-focus files and
+// resolves each to its image (data URI) for the create-focus icon picker. Unresolvable icons
+// still appear with their name only.
+async function sendFocusIcons(preview: FocusTreePreview): Promise<void> {
+    try {
+        const files = await listFilesFromModOrHOI4('common/national_focus', { mod: true, hoi4: true, recursively: true });
+        const iconUri = new Map<string, string | undefined>();
+        for (const f of files) {
+            const rel = 'common/national_focus/' + f;
+            try {
+                const node = await parseHoi4FileCached(rel);
+                for (const name of extractFocusIcons(node)) {
+                    if (!iconUri.has(name)) {
+                        iconUri.set(name, undefined);
+                    }
+                }
+            } catch { /* unreadable focus file: skip */ }
+        }
+        await mapLimit([...iconUri.keys()], 8, async (name) => {
+            try {
+                const sprite = await getSpriteByGfxName(name, ['interface/goals.gfx']);
+                if (sprite?.image) {
+                    iconUri.set(name, sprite.image.uri);
+                }
+            } catch { /* icon not resolvable: name-only entry */ }
+        });
+        if (preview.isDisposed) {
+            return;
+        }
+        const icons = [...iconUri.entries()]
+            .map(([name, imageUri]) => ({ name, imageUri }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        preview.panel.webview.postMessage({ type: 'focusIcons', icons });
     } catch (e) {
         error(e);
     }
