@@ -245,6 +245,34 @@ function bindFocusInteractions() {
 // Right-click context menu ---------------------------------------------
 let contextMenuEl: HTMLDivElement | null = null;
 
+// Maps a viewport point (right-click position) to the focus-tree grid cell under it. Uses the
+// same layout math as buildContent: the canvas is the scaled #focustreecontent element, the
+// grid origin sits at (leftPadding, gridbox.position.y), each cell is one slot wide/tall.
+function focusPositionToGrid(clientX: number, clientY: number): { x: number; y: number } | undefined {
+    const content = document.getElementById('focustreecontent');
+    if (!content) {
+        return undefined;
+    }
+    const scale = getState().scale || 1;
+    const rect = content.getBoundingClientRect();
+    const canvasX = (clientX - rect.left) / scale;
+    const canvasY = (clientY - rect.top) / scale;
+    const gb = (window as any).gridBox;
+    if (!gb?.position || !gb?.slotsize) {
+        return undefined;
+    }
+    const num = (v: any): number => (typeof v === 'number' ? v : (v?._value ?? 0));
+    const slotW = (window as any).xGridSize ?? 96;
+    const slotH = num(gb.slotsize.height) || 130;
+    const positions = Object.values(currentFocusPositions());
+    const minX = positions.length ? Math.min(...positions.map(p => p.x)) : 0;
+    const leftPadding = num(gb.position.x) - Math.min(minX * slotW, 0);
+    return {
+        x: Math.round((canvasX - leftPadding) / slotW),
+        y: Math.round((canvasY - num(gb.position.y)) / slotH),
+    };
+}
+
 function closeContextMenu() {
     if (contextMenuEl) {
         contextMenuEl.remove();
@@ -462,7 +490,7 @@ function openIconPicker(onPick: (name: string) => void) {
     render();
 }
 
-function openCreateFocusPanel() {
+function openCreateFocusPanel(gridX: number, gridY: number) {
     closeCreateFocusPanel();
     const overlay = document.createElement('div');
     overlay.className = 'ft-create';
@@ -545,6 +573,8 @@ function openCreateFocusPanel() {
                 name: name || undefined,
                 desc: desc || undefined,
                 icon: icon || undefined,
+                x: gridX,
+                y: gridY,
             },
         });
     });
@@ -1349,7 +1379,13 @@ window.addEventListener('load', tryRun(async function() {
             }
         }
         showContextMenu(e.clientX, e.clientY, [
-            { label: feLocalize('focustree.createfocus', 'Create focus'), onClick: () => openCreateFocusPanel() },
+            {
+                label: feLocalize('focustree.createfocus', 'Create focus'),
+                onClick: () => {
+                    const grid = focusPositionToGrid(e.clientX, e.clientY);
+                    openCreateFocusPanel(grid?.x ?? 0, grid?.y ?? 0);
+                },
+            },
         ]);
     });
     document.addEventListener('pointerdown', (e) => {

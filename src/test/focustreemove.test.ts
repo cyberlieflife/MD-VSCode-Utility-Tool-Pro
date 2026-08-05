@@ -206,6 +206,21 @@ focus_tree = {
             assert.ok(block.includes('#A new focus'), block);
             assert.ok(block.includes('icon = GFX_goal_new'), block);
         });
+
+        it('uses the given grid coordinates (default 0) and ends with a newline so the tree brace stays alone', () => {
+            const block = buildFocusInsertBlock({ id: 'NEW_FOCUS', x: 7, y: -3 });
+            assert.ok(block.includes('\tx = 7\n'), block);
+            assert.ok(block.includes('\ty = -3\n'), block);
+            assert.ok(block.endsWith('\t}\n'), 'block must end with a newline: ' + JSON.stringify(block.slice(-8)));
+        });
+
+        it('inserting the block before the tree closing brace never produces a doubled brace', () => {
+            const text = 'focus_tree = {\n\tid = test\n\tfocus = { id = a x = 1 }\n}';
+            const pos = findFocusTreeInsertPosition(text)!;
+            const inserted = text.slice(0, pos) + buildFocusInsertBlock({ id: 'NEW' }) + text.slice(pos);
+            assert.ok(!inserted.includes('}}\n'), inserted);
+            assert.ok(inserted.includes('\t}\n}'), inserted);
+        });
     });
 });
 

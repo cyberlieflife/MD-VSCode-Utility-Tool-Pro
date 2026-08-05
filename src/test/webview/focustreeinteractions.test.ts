@@ -230,4 +230,41 @@ describe('webview/focustree interactions', function () {
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 100, clientY: 100, button: 0, bubbles: true, pointerId: 1 }));
         assert.ok(messages.some(m => m.command === 'navigate'), 'navigation works again after the modal closes');
     });
+
+    it('create focus sends the grid cell under the right-click as x/y', async function () {
+        // Give the canvas a real rect so focusPositionToGrid can map the viewport point.
+        const content = document.getElementById('focustreecontent') as HTMLElement;
+        Object.defineProperty(content, 'getBoundingClientRect', {
+            value: () => ({ left: 50, top: 50, right: 500, bottom: 500, width: 450, height: 450 }),
+            configurable: true,
+        });
+
+        // Right-click blank canvas at a point that maps to grid cell (2, 3):
+        // canvasX = (200 - 50) / 1 = 150; leftPadding = 50 - min(0*96, 0) = 50;
+        // gridX = (150 - 50) / 96 = 1.04 -> 1; gridY = (200 - 50 - 50) / 130 = 0.77 -> 1.
+        document.body.dispatchEvent(new MouseEvent('contextmenu', { clientX: 200, clientY: 200, bubbles: true, cancelable: true }));
+        const menu = document.querySelector('.ft-context-menu');
+        assert.ok(menu, 'context menu should open');
+        const createItem = [...menu!.querySelectorAll('div')].find(d => d.textContent === 'Create focus');
+        assert.ok(createItem, 'menu should offer Create focus');
+        createItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        assert.ok(document.querySelector('.ft-create'), 'create panel should open');
+
+        const idInput = document.querySelector('.ft-create input[type="text"]') as HTMLInputElement;
+        assert.ok(idInput, 'create panel should have an id input');
+        idInput.value = 'NEW_FOCUS';
+        idInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+        messages.length = 0;
+        const okBtn = [...document.querySelectorAll('.ft-create button')].find(b => b.textContent === 'Confirm');
+        assert.ok(okBtn, 'create panel should have a Confirm button');
+        okBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+        const createMsg = messages.find(m => m.command === 'createFocus');
+        assert.ok(createMsg, 'expected createFocus, got: ' + JSON.stringify(messages));
+        assert.strictEqual(createMsg.focus.id, 'NEW_FOCUS');
+        assert.strictEqual(createMsg.focus.x, 1, 'x must be the grid cell under the cursor, got: ' + JSON.stringify(createMsg.focus));
+        assert.strictEqual(createMsg.focus.y, 1, 'y must be the grid cell under the cursor');
+        assert.ok(!document.querySelector('.ft-create'), 'create panel should close after confirm');
+    });
 });

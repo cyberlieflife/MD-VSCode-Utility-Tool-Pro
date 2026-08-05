@@ -131,8 +131,9 @@ export function findFocusTreeInsertPosition(documentText: string): number | unde
 
 // Renders the new focus block. The name (and description) are comments only - no localisation
 // entry is created - formatted as `id = XXX    #name` per the requested style; an empty name
-// leaves the id line without a comment.
-export function buildFocusInsertBlock(focus: { id: string; name?: string; desc?: string; icon?: string }): string {
+// leaves the id line without a comment. x/y default to 0. The block ends with a newline so the
+// focus_tree closing brace stays on its own line after insertion.
+export function buildFocusInsertBlock(focus: { id: string; name?: string; desc?: string; icon?: string; x?: number; y?: number }): string {
     const lines: string[] = [];
     lines.push('\tfocus = {');
     const idComment = focus.name ? `    #${focus.name}` : '';
@@ -143,8 +144,8 @@ export function buildFocusInsertBlock(focus: { id: string; name?: string; desc?:
     if (focus.icon) {
         lines.push(`\t\ticon = ${focus.icon}`);
     }
-    lines.push('\t\tx = 0');
-    lines.push('\t\ty = 0');
+    lines.push(`\t\tx = ${focus.x ?? 0}`);
+    lines.push(`\t\ty = ${focus.y ?? 0}`);
     lines.push('\t}');
-    return lines.join('\n');
+    return lines.join('\n') + '\n';
 }
