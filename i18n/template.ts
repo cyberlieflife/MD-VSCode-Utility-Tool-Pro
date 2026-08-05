@@ -57,6 +57,8 @@ const table: Partial<typeof __table> = {
     "focustree.names": "Names",
     "focustree.nofocustree": "No focus tree.",
     "focustree.pickicon": "Pick…",
+    "focustree.percolumn": "Per column: ",
+    "focustree.percolumn.n": "Per column: {0}",
     "focustree.reload": "Reload",
     "focustree.resetcheckboxes": "Reset focus checkboxes",
     "focustree.search": "Search: ",

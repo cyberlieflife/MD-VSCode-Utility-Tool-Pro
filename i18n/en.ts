@@ -58,6 +58,8 @@ const internalTable = /* SOT Do not remove this comment */{
     "focustree.names": "Names",
     "focustree.nofocustree": "No focus tree.",
     "focustree.pickicon": "Pick…",
+    "focustree.percolumn": "Per column: ",
+    "focustree.percolumn.n": "Per column: {0}",
     "focustree.reload": "Reload",
     "focustree.resetcheckboxes": "Reset focus checkboxes",
     "focustree.search": "Search: ",

@@ -443,19 +443,43 @@ function openIconPicker(onPick: (name: string) => void) {
         'display:flex;align-items:center;justify-content:center;';
     const box = document.createElement('div');
     box.style.cssText = 'background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);' +
-        'border:1px solid var(--vscode-widget-border);padding:16px;min-width:420px;max-width:640px;' +
+        'border:1px solid var(--vscode-widget-border);padding:16px;min-width:560px;max-width:900px;' +
         'max-height:70vh;display:flex;flex-direction:column;';
     const title = document.createElement('div');
     title.style.cssText = 'font-weight:bold;margin-bottom:8px;';
     title.textContent = feLocalize('focustree.pickicon', 'Pick icon');
     box.appendChild(title);
+    // Search + per-row column count live on one line: the column selector fixes how many
+    // icons fit per grid row (3/4/5/6); the icons themselves scale with the cell width.
+    const toolbarRow = document.createElement('div');
+    toolbarRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
     const search = document.createElement('input');
     search.type = 'text';
     search.placeholder = feLocalize('focustree.search', 'Search: ');
-    search.style.cssText = 'margin-bottom:8px;';
-    box.appendChild(search);
+    search.style.cssText = 'flex:1;min-width:0;';
+    toolbarRow.appendChild(search);
+    const columnsLabel = document.createElement('label');
+    columnsLabel.textContent = feLocalize('focustree.percolumn', 'Per column: ');
+    columnsLabel.style.cssText = 'white-space:nowrap;';
+    toolbarRow.appendChild(columnsLabel);
+    const columnsSelect = document.createElement('select');
+    columnsSelect.style.cssText = 'background:var(--vscode-dropdown-background);color:var(--vscode-dropdown-foreground);' +
+        'border:1px solid var(--vscode-dropdown-border);';
+    // Persisted per-session column count; defaults to 6 per row.
+    const defaultColumns = getState().iconPickerColumns ?? 6;
+    for (const n of [6, 5, 4, 3]) {
+        const option = document.createElement('option');
+        option.value = String(n);
+        option.textContent = feLocalize('focustree.percolumn.n', 'Per column: {0}', n);
+        if (n === defaultColumns) {
+            option.selected = true;
+        }
+        columnsSelect.appendChild(option);
+    }
+    toolbarRow.appendChild(columnsSelect);
+    box.appendChild(toolbarRow);
     const grid = document.createElement('div');
-    grid.style.cssText = 'overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;';
+    grid.style.cssText = 'overflow:auto;display:grid;gap:6px;';
     box.appendChild(grid);
     const closeBtn = makeDialogButton(feLocalize('focustree.cancel', 'Cancel'));
     closeBtn.style.cssText += 'margin-top:8px;align-self:flex-end;';
@@ -463,6 +487,15 @@ function openIconPicker(onPick: (name: string) => void) {
     overlay.appendChild(box);
     document.body.appendChild(overlay);
     iconPickerOverlay = overlay;
+
+    // Applies the selected per-row column count and re-renders the grid. Icons size
+    // themselves to the cell (width 100%, square, contain) so they adapt to the column count.
+    const applyColumns = () => {
+        const columns = parseInt(columnsSelect.value, 10) || 6;
+        setState({ iconPickerColumns: columns });
+        grid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+        render();
+    };
 
     const render = () => {
         grid.innerHTML = '';
@@ -475,7 +508,7 @@ function openIconPicker(onPick: (name: string) => void) {
         for (const icon of list) {
             const item = document.createElement('div');
             item.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;' +
-                'padding:4px;border:1px solid transparent;';
+                'padding:4px;border:1px solid transparent;min-width:0;';
             item.addEventListener('click', () => {
                 const cb = iconPickerCallback;
                 closeIconPicker();
@@ -484,17 +517,17 @@ function openIconPicker(onPick: (name: string) => void) {
             if (icon.imageUri) {
                 const img = document.createElement('img');
                 img.src = icon.imageUri;
-                img.style.cssText = 'width:48px;height:48px;object-fit:contain;';
+                img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:contain;';
                 item.appendChild(img);
             } else {
                 const placeholder = document.createElement('div');
-                placeholder.style.cssText = 'width:48px;height:48px;display:flex;align-items:center;justify-content:center;' +
+                placeholder.style.cssText = 'width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;' +
                     'color:var(--vscode-descriptionForeground);font-size:10px;';
                 placeholder.textContent = '?';
                 item.appendChild(placeholder);
             }
             const label = document.createElement('div');
-            label.style.cssText = 'font-size:10px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;';
+            label.style.cssText = 'font-size:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;';
             label.textContent = icon.name;
             label.title = icon.name;
             item.appendChild(label);
@@ -502,9 +535,10 @@ function openIconPicker(onPick: (name: string) => void) {
         }
     };
     search.addEventListener('input', render);
+    columnsSelect.addEventListener('change', applyColumns);
     closeBtn.addEventListener('click', closeIconPicker);
     iconPickerRender = render;
-    render();
+    applyColumns();
 }
 
 function openCreateFocusPanel(gridX: number, gridY: number) {

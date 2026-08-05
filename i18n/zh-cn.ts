@@ -58,6 +58,8 @@ const table: Partial<typeof __table> = {
     "focustree.names": "名称",
     "focustree.nofocustree": "没有国策树。",
     "focustree.pickicon": "选择…",
+    "focustree.percolumn": "每列：",
+    "focustree.percolumn.n": "每列 {0} 个",
     "focustree.reload": "Reload",
     "focustree.resetcheckboxes": "Reset focus checkboxes",
     "focustree.search": "搜索：",

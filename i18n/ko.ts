@@ -58,6 +58,8 @@ const table: Partial<typeof __table> = {
     "focustree.names": "이름",
     "focustree.nofocustree": "중점 계통도 없음.",
     "focustree.pickicon": "Pick…",
+    "focustree.percolumn": "열당: ",
+    "focustree.percolumn.n": "열당 {0}개",
     "focustree.reload": "Reload",
     "focustree.resetcheckboxes": "Reset focus checkboxes",
     "focustree.search": "검색: ",
