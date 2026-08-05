@@ -1,9 +1,9 @@
 {
     "hoi4modutilities.locale": "zh-cn",
-    "hoi4modutilities.category": "千年黎明 钢四模组工具",
+    "hoi4modutilities.category": "钢铁雄心4模组工具扩展版",
     "hoi4modutilities.dds.editorName": "DDS预览",
     "hoi4modutilities.tga.editorName": "TGA预览",
-    "hoi4modutilities.displayName": "千年黎明 钢四模组工具",
+    "hoi4modutilities.displayName": "钢铁雄心4模组工具扩展版",
     "hoi4modutilities.useConditionInFocus.title": "在国策中显示条件",
     "hoi4modutilities.useConditionInFocus.desc": "在国策树预览中显示条件。更改后需要重启。",
     "hoi4modutilities.eventTreePreview.title": "事件树预览",
