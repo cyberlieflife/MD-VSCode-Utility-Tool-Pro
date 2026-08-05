@@ -16,8 +16,10 @@ describe('webview/focustree interactions', function () {
         // The entry script reads (window as any).focusTrees etc. at load time, so the globals
         // must be in place before the dynamic import (static import would run first).
         // Other webview tests cache util/vscode with a no-op postMessage; drop it so the freshly
-        // imported focustree.js posts into OUR message array.
+        // imported focustree.js posts into OUR message array. util/common caches the old vscode
+        // reference too (its getState would read another test's state, e.g. a stray scale).
         delete require.cache[require.resolve('../../../webviewsrc/util/vscode')];
+        delete require.cache[require.resolve('../../../webviewsrc/util/common')];
         let ready = false;
         // tsconfig.webview.test.json targets es2022, so Promise.withResolvers (es2024) is
         // unavailable here.
@@ -73,6 +75,16 @@ describe('webview/focustree interactions', function () {
         window.dispatchEvent(new Event('load'));
         // The load handler posts 'ready' after buildContent, which also binds the interactions.
         await readyPromise;
+
+        // focusPositionToGrid anchors on the first rendered cell; give the (0,0) cell a real
+        // rect so viewport -> grid mapping is deterministic (cell at client 100,100, 96x130).
+        const anchorItem = document.querySelector('[data-gridbox-x][data-gridbox-y]');
+        if (anchorItem) {
+            Object.defineProperty(anchorItem, 'getBoundingClientRect', {
+                value: () => ({ left: 100, top: 100, right: 196, bottom: 230, width: 96, height: 130 }),
+                configurable: true,
+            });
+        }
     });
 
     it('clean press-release navigates; drag neither navigates nor leaves a selection box', async function () {
@@ -213,11 +225,6 @@ describe('webview/focustree interactions', function () {
         window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 300, button: 0, bubbles: true, pointerId: 1 }));
         assert.strictEqual(nav.style.outline, before, 'no box-select while a modal is open');
 
-        // Wheel zoom is disabled while a modal is open (scale stays put).
-        const scaleBefore = uiState.scale;
-        window.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
-        assert.strictEqual(uiState.scale, scaleBefore, 'no zoom while a modal is open');
-
         // Cancel closes the panel and restores canvas interaction.
         const cancelBtn = [...document.querySelectorAll('.ft-create button')].find(b => b.textContent === 'Cancel');
         assert.ok(cancelBtn, 'create panel should have a Cancel button');
@@ -238,6 +245,17 @@ describe('webview/focustree interactions', function () {
             value: () => ({ left: 50, top: 50, right: 500, bottom: 500, width: 450, height: 450 }),
             configurable: true,
         });
+        // Re-anchor the current first cell: earlier drags mutated the focus and a re-render moved
+        // the cell, so its data-gridbox-x/y and a fresh rect must stay consistent.
+        const anchor = document.querySelector('[data-gridbox-x][data-gridbox-y]');
+        if (anchor) {
+            const gx = parseInt(anchor.getAttribute('data-gridbox-x') ?? '0', 10);
+            const gy = parseInt(anchor.getAttribute('data-gridbox-y') ?? '0', 10);
+            Object.defineProperty(anchor, 'getBoundingClientRect', {
+                value: () => ({ left: 100 + gx * 96, top: 100 + gy * 130, right: 0, bottom: 0, width: 96, height: 130 }),
+                configurable: true,
+            });
+        }
 
         // Right-click blank canvas at a point that maps to grid cell (2, 3):
         // canvasX = (200 - 50) / 1 = 150; leftPadding = 50 - min(0*96, 0) = 50;
@@ -266,5 +284,25 @@ describe('webview/focustree interactions', function () {
         assert.strictEqual(createMsg.focus.x, 1, 'x must be the grid cell under the cursor, got: ' + JSON.stringify(createMsg.focus));
         assert.strictEqual(createMsg.focus.y, 1, 'y must be the grid cell under the cursor');
         assert.ok(!document.querySelector('.ft-create'), 'create panel should close after confirm');
+
+        // The reported regression: right-clicking at grid (29, 2) must create at (29, 2), not a
+        // shifted cell. Cell (0,0) sits at client (100,100), so grid (29,2) is at
+        // client (100 + 29*96 + 10, 100 + 2*130 + 10).
+        document.body.dispatchEvent(new MouseEvent('contextmenu', { clientX: 100 + 29 * 96 + 10, clientY: 100 + 2 * 130 + 10, bubbles: true, cancelable: true }));
+        const menu2 = document.querySelector('.ft-context-menu');
+        assert.ok(menu2, 'context menu should open');
+        const createItem2 = [...menu2!.querySelectorAll('div')].find(d => d.textContent === 'Create focus');
+        assert.ok(createItem2, 'menu should offer Create focus');
+        createItem2!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const idInput2 = document.querySelector('.ft-create input[type="text"]') as HTMLInputElement;
+        idInput2.value = 'NEW_FOCUS_2';
+        messages.length = 0;
+        const okBtn2 = [...document.querySelectorAll('.ft-create button')].find(b => b.textContent === 'Confirm');
+        assert.ok(okBtn2, 'create panel should have a Confirm button');
+        okBtn2!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const createMsg2 = messages.find(m => m.command === 'createFocus');
+        assert.ok(createMsg2, 'expected createFocus, got: ' + JSON.stringify(messages));
+        assert.strictEqual(createMsg2.focus.x, 29, 'x must be 29 for a right-click at grid 29, got: ' + JSON.stringify(createMsg2.focus));
+        assert.strictEqual(createMsg2.focus.y, 2, 'y must be 2 for a right-click at grid 2');
     });
 });

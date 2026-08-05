@@ -254,22 +254,35 @@ function focusPositionToGrid(clientX: number, clientY: number): { x: number; y: 
         return undefined;
     }
     const scale = getState().scale || 1;
-    const rect = content.getBoundingClientRect();
-    const canvasX = (clientX - rect.left) / scale;
-    const canvasY = (clientY - rect.top) / scale;
+    const contentRect = content.getBoundingClientRect();
+    const canvasX = (clientX - contentRect.left) / scale;
+    const canvasY = (clientY - contentRect.top) / scale;
     const gb = (window as any).gridBox;
-    if (!gb?.position || !gb?.slotsize) {
+    if (!gb?.slotsize) {
         return undefined;
     }
     const num = (v: any): number => (typeof v === 'number' ? v : (v?._value ?? 0));
-    const slotW = (window as any).xGridSize ?? 96;
+    const slotW = (window as any).xGridSize ?? (num(gb.slotsize.width) || 96);
     const slotH = num(gb.slotsize.height) || 130;
-    const positions = Object.values(currentFocusPositions());
-    const minX = positions.length ? Math.min(...positions.map(p => p.x)) : 0;
-    const leftPadding = num(gb.position.x) - Math.min(minX * slotW, 0);
+
+    // Anchor the mapping on a rendered cell so it matches the renderer exactly. Rebuilding the
+    // layout math here is fragile: the grid origin is shifted by min-x padding, relative-position
+    // chains move cells, and the renderer's format offset (gridBox.format ?? 'up' centers cells
+    // on the box) is easy to get wrong. One measured cell collapses all of that into a point.
+    // ('gridbox-item' is only a styleTable key, not a real class - select by data attributes.)
+    const item = document.querySelector('[data-gridbox-x][data-gridbox-y]');
+    if (!item) {
+        // Empty tree: nothing is rendered, so fall back to the grid origin (0, 0).
+        return undefined;
+    }
+    const gx = parseInt(item.getAttribute('data-gridbox-x') ?? '0', 10);
+    const gy = parseInt(item.getAttribute('data-gridbox-y') ?? '0', 10);
+    const rect = item.getBoundingClientRect();
+    const originX = (rect.left - contentRect.left) / scale - gx * slotW;
+    const originY = (rect.top - contentRect.top) / scale - gy * slotH;
     return {
-        x: Math.round((canvasX - leftPadding) / slotW),
-        y: Math.round((canvasY - num(gb.position.y)) / slotH),
+        x: Math.round((canvasX - originX) / slotW),
+        y: Math.round((canvasY - originY) / slotH),
     };
 }
 
