@@ -12,6 +12,7 @@ tsconfig.test.json
 tsconfig.webview.test.json
 **/.eslintrc.json
 **/*.map
+**/*.bak_*
 **/*.ts
 **/webpack.config.js
 node_modules/**

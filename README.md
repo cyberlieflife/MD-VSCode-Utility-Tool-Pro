@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="icon.png" alt="Hearts of Iron 4 Utilities Pro" width="128" height="128" />
+  <img src="icon.png" alt="HOI 4 Utilities Pro" width="128" height="128" />
 </p>
 
-<h1 align="center">Hearts of Iron 4 Utilities Pro</h1>
+<h1 align="center">HOI 4 Utilities Pro</h1>
 <p align="center"><b>钢铁雄心4模组工具扩展版</b></p>
 
 <p align="center">

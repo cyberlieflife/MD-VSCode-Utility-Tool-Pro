@@ -1,9 +1,9 @@
 {
     "hoi4modutilities.locale": "en",
-    "hoi4modutilities.category": "Hearts of Iron 4 Utilities 2026",
+    "hoi4modutilities.category": "HOI 4 Utilities Pro",
     "hoi4modutilities.dds.editorName": "Preview DDS",
     "hoi4modutilities.tga.editorName": "Preview TGA",
-    "hoi4modutilities.displayName": "Hearts of Iron 4 Utilities 2026",
+    "hoi4modutilities.displayName": "HOI 4 Utilities Pro",
     "hoi4modutilities.useConditionInFocus.title": "Use Condition In Focus",
     "hoi4modutilities.useConditionInFocus.desc": "Show conditions in the focus tree preview. Reloading is required after changing this.",
     "hoi4modutilities.eventTreePreview.title": "Event Tree Preview",

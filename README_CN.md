@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">钢铁雄心4模组工具扩展版</h1>
-<p align="center"><b>Hearts of Iron 4 Utilities Pro</b></p>
+<p align="center"><b>HOI 4 Utilities Pro</b></p>
 
 <p align="center">
   [English](README.md) | 中文
