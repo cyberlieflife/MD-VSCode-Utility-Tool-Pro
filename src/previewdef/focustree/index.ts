@@ -5,12 +5,10 @@ import { PreviewBase } from '../previewbase';
 import { PreviewProviderDef } from '../previewmanager';
 import { contextContainer } from '../../context';
 import { FocusTreeLoader } from './loader';
-import { FocusTree, Focus, extractFocusIcons } from './schema';
+import { FocusTree, Focus } from './schema';
 import { buildFocusMoveEdits, buildDeleteFocusEdits, findFocusTreeInsertPosition, buildFocusInsertBlock } from './move';
-import { listFilesFromModOrHOI4, parseHoi4FileCached } from '../../util/fileloader';
+import { collectFocusIconNames, getFocusIconPickerImage, resolveFocusIconImages } from './iconpicker';
 import { Logger } from '../../util/logger';
-import { getSpriteByGfxName } from '../../util/image/imagecache';
-import { mapLimit } from '../../util/common';
 import { getRelativePathInWorkspace, getDocumentByUri } from '../../util/vsccommon';
 import { localize } from '../../util/i18n';
 import { loadingShellHtml } from '../../util/html';
@@ -23,6 +21,11 @@ import { computeStructuralFingerprint, computeIconSourceFingerprint, computeTree
 // A render taking longer than this is treated as stuck. The underlying load keeps running
 // in the background, but the user gets a recoverable panel instead of an endless spinner.
 const focusTreeRenderTimeout = 60 * 1000;
+
+// Above this many unique picker icons, the host stops auto-pushing every image (which would decode
+// hundreds of textures in the background) and instead lets the webview pull only the icons its
+// visible window needs. Below it, streaming everything up front is cheaper and smoother.
+const pickerIconPullThreshold = 500;
 
 function canPreviewFocusTree(document: vscode.TextDocument) {
     const uri = document.uri;
@@ -77,6 +80,14 @@ class FocusTreePreview extends PreviewBase {
     // Focus trees of the last successful render, kept for drag-move write-back (the webview only
     // knows ids; the token positions for precise edits live here).
     private lastFocusTrees: FocusTree[] = [];
+    // Session memo of picker icons resolved for the create-focus icon picker (name -> data URI,
+    // undefined = unresolvable) plus the bookkeeping for the debounced resolution stream. The memo
+    // survives webview reloads on the same panel, so a reopened picker never re-decodes; it is
+    // bounded by the picker's unique icon count and dropped when the preview is disposed.
+    private resolvedIconImages = new Map<string, string | undefined>();
+    private pendingIconImageRequests = new Set<string>();
+    private inFlightIconImages = new Map<string, Promise<string | undefined>>();
+    private iconImageFlushTimer: NodeJS.Timeout | undefined;
 
     constructor(uri: vscode.Uri, panel: vscode.WebviewPanel) {
         super(uri, panel);
@@ -102,7 +113,18 @@ class FocusTreePreview extends PreviewBase {
                 return;
             }
             if (msg?.command === 'requestFocusIcons') {
-                void sendFocusIcons(this);
+                // v:2 selects the two-stage icon stream (names first, then batched images); older
+                // webviews (no v) get the legacy single-shot list so a panel that was open before
+                // this extension updated keeps working until it is reloaded.
+                if (msg?.v === 2) {
+                    void this.sendFocusIconNames();
+                } else {
+                    void sendFocusIcons(this);
+                }
+                return;
+            }
+            if (msg?.command === 'requestFocusIconImages') {
+                void this.requestIconImages(msg.names);
                 return;
             }
             if (msg?.command === 'createFocus') {
@@ -236,6 +258,104 @@ class FocusTreePreview extends PreviewBase {
             await vscode.workspace.applyEdit(edit);
         } catch (e) {
             error(e);
+        }
+    }
+
+    /**
+     * Two-stage picker protocol, phase 1: sends just the sorted icon-name list (cheap, served from
+     * the file/parse caches) so the webview can render the grid immediately with placeholders, then
+     * starts the background stream that resolves images in batches and pushes them as they complete.
+     */
+    private async sendFocusIconNames(): Promise<void> {
+        try {
+            const names = await collectFocusIconNames();
+            if (this.isDisposed) {
+                return;
+            }
+            this.panel.webview.postMessage({ type: 'focusIconNames', names, total: names.length });
+            // Few icons: push them all up front so the picker fills progressively without any
+            // per-window request traffic. Many icons: let the webview pull only what its visible
+            // window needs, so the host does not decode hundreds of images the user never scrolls to.
+            if (names.length <= pickerIconPullThreshold) {
+                void this.requestIconImages(names);
+            }
+        } catch (e) {
+            error(e);
+        }
+    }
+
+    /**
+     * Resolves picker icon names to data URIs in batches and streams them to the webview (phase 2
+     * of the two-stage protocol). Names already in the session memo resolve instantly; a short
+     * debounce coalesces bursts of pull requests (e.g. window-scroll driven) into a single flush.
+     */
+    private async requestIconImages(names: string[]): Promise<void> {
+        const missing: string[] = [];
+        for (const name of names ?? []) {
+            if (this.resolvedIconImages.has(name) || this.inFlightIconImages.has(name) || this.pendingIconImageRequests.has(name)) {
+                continue;
+            }
+            this.pendingIconImageRequests.add(name);
+            missing.push(name);
+        }
+        if (missing.length === 0) {
+            return;
+        }
+        if (this.iconImageFlushTimer === undefined) {
+            this.iconImageFlushTimer = setTimeout(() => void this.flushIconImageRequests(), 100);
+        }
+    }
+
+    private async flushIconImageRequests(): Promise<void> {
+        this.iconImageFlushTimer = undefined;
+        const names = [...this.pendingIconImageRequests];
+        this.pendingIconImageRequests.clear();
+        if (names.length === 0 || this.isDisposed) {
+            return;
+        }
+        const missing = names.filter(n => !this.resolvedIconImages.has(n) && !this.inFlightIconImages.has(n));
+        if (missing.length === 0) {
+            return;
+        }
+        await resolveFocusIconImages(missing, {
+            batchSize: 16,
+            resolver: (name) => this.getPickerImageUri(name),
+            onBatch: (batch, done) => {
+                for (const item of batch) {
+                    this.resolvedIconImages.set(item.name, item.imageUri);
+                }
+                if (!this.isDisposed) {
+                    this.panel.webview.postMessage({ type: 'focusIconImages', images: batch, done });
+                }
+            },
+        });
+    }
+
+    // Resolves a single picker icon to its data URI. The in-flight promise is shared so a repeated
+    // request during a flush never double-decodes, and the result (including a negative) is memoized
+    // so a later request for the same name returns instantly.
+    private async getPickerImageUri(name: string): Promise<string | undefined> {
+        if (this.resolvedIconImages.has(name)) {
+            return this.resolvedIconImages.get(name);
+        }
+        const existing = this.inFlightIconImages.get(name);
+        if (existing) {
+            return existing;
+        }
+        const promise = (async () => {
+            try {
+                return (await getFocusIconPickerImage(name))?.uri;
+            } catch {
+                return undefined;
+            }
+        })();
+        this.inFlightIconImages.set(name, promise);
+        try {
+            const uri = await promise;
+            this.resolvedIconImages.set(name, uri);
+            return uri;
+        } finally {
+            this.inFlightIconImages.delete(name);
         }
     }
 
@@ -411,9 +531,28 @@ class FocusTreePreview extends PreviewBase {
             this.lastPushedIconCss = css;
             this.lastPushedIconGeneration = generation;
             this.panel.webview.postMessage({ type: 'iconStyles', css });
+            // Background warm-up for the create-focus picker: resolve a bounded set of picker icons
+            // into the shared imageCache while the preview is idle, so a later picker open (which
+            // reuses that cache) starts warm. Best-effort and low-concurrency so it never competes
+            // with the preview's own icon streaming.
+            void this.prewarmPickerIcons();
         } catch (e) {
             error(e);
         }
+    }
+
+    // Resolves a bounded prefix of the picker icon list into the shared image caches. Only runs when
+    // the picker has not already resolved icons (resolvedIconImages empty), so a picker opened
+    // before the preview finished never triggers a duplicate scan. Fire-and-forget: a failure here
+    // only means the picker opens colder.
+    private async prewarmPickerIcons(): Promise<void> {
+        try {
+            if (this.resolvedIconImages.size > 0) {
+                return;
+            }
+            const names = await collectFocusIconNames();
+            await resolveFocusIconImages(names.slice(0, pickerIconPullThreshold), { limit: 4 });
+        } catch { /* prewarm is best-effort */ }
     }
 
     protected getLoadingShellHtml(): string {
@@ -623,38 +762,17 @@ async function sendPreviewUiState(preview: FocusTreePreview): Promise<void> {
     }
 }
 
-// Collects every focus icon name used by the workspace and vanilla national-focus files and
-// resolves each to its image (data URI) for the create-focus icon picker. Unresolvable icons
-// still appear with their name only.
+// Legacy single-shot picker payload: all icon names with their images resolved in one message.
+// Kept only for webview panels that request without the v:2 flag (loaded before this extension
+// update and not yet reloaded); the two-stage protocol on FocusTreePreview replaces it for new
+// panels.
 async function sendFocusIcons(preview: FocusTreePreview): Promise<void> {
     try {
-        const files = await listFilesFromModOrHOI4('common/national_focus', { mod: true, hoi4: true, recursively: true });
-        const iconUri = new Map<string, string | undefined>();
-        for (const f of files) {
-            const rel = 'common/national_focus/' + f;
-            try {
-                const node = await parseHoi4FileCached(rel);
-                for (const name of extractFocusIcons(node)) {
-                    if (!iconUri.has(name)) {
-                        iconUri.set(name, undefined);
-                    }
-                }
-            } catch { /* unreadable focus file: skip */ }
-        }
-        await mapLimit([...iconUri.keys()], 8, async (name) => {
-            try {
-                const sprite = await getSpriteByGfxName(name, ['interface/goals.gfx']);
-                if (sprite?.image) {
-                    iconUri.set(name, sprite.image.uri);
-                }
-            } catch { /* icon not resolvable: name-only entry */ }
-        });
+        const names = await collectFocusIconNames();
+        const icons = await resolveFocusIconImages(names);
         if (preview.isDisposed) {
             return;
         }
-        const icons = [...iconUri.entries()]
-            .map(([name, imageUri]) => ({ name, imageUri }))
-            .sort((a, b) => a.name.localeCompare(b.name));
         preview.panel.webview.postMessage({ type: 'focusIcons', icons });
     } catch (e) {
         error(e);
