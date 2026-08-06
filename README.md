@@ -15,6 +15,9 @@
 
 ---
 
+> [!IMPORTANT]
+> The main difference between this project and **HOI4 Mod Utilities** / **HOI4 Utilities 2026** is the **graphical editing support** added to the preview features.
+
 ## Features
 
 | Preview | Description |
@@ -27,8 +30,6 @@
 | GUI | Preview |
 | GFX | Preview `.gfx` sprite definitions (all HOI4 sprites are defined here) |
 | Images | Preview `.dds` / `.tga` files |
-
-> The focus tree preview also supports right-click management: **delete focus** (double confirmation) and **create focus**.
 
 ## Getting Started
 
