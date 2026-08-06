@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { parseLocalisation, getLocalisedTextUnchecked, ensureLocalisationIndex } from '../util/localisationIndex';
+import { parseLocalisation, getLocalisedTextUnchecked, ensureLocalisationIndex, notifyFocusTreePreviewOpened } from '../util/localisationIndex';
 import { clearDlcZipCache } from '../util/fileloader';
 
 describe('util/localisationIndex', () => {
@@ -117,6 +117,10 @@ describe('util/localisationIndex on-demand index', function () {
     }
 
     beforeEach(function () {
+        // The build is scheduled lazily: opening a focus-tree preview (which is exactly what this
+        // test simulates for the name toggle) upgrades it to the fast path, so the test is not
+        // subject to the background build's 3s delayed start.
+        notifyFocusTreePreviewOpened();
         (vscode.workspace as any).workspaceFolders = [{ uri: vscode.Uri.parse('file:///mod'), name: 'mod', index: 0 }];
         (vscode.workspace as any).getConfiguration = () => ({
             get: () => undefined, update: () => Promise.resolve(), inspect: () => undefined,

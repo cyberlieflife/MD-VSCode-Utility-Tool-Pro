@@ -10,9 +10,8 @@ import { FocusTreeLoader, ProgressCallback } from './loader';
 import { LoaderSession } from '../../util/loader/loader';
 import { debug, error } from '../../util/debug';
 import { StyleTable, normalizeForStyle } from '../../util/styletable';
-import { useConditionInFocus, localisationIndex } from '../../util/featureflags';
+import { useConditionInFocus } from '../../util/featureflags';
 import { flatMap } from 'lodash';
-import { getLocalisedTextQuick } from "../../util/localisationIndex";
 import { getFocusTitlebarImage, getFocusOverlayImage, loadFocusTitlebarStyles, resolveTitlebarGfxName } from "./titlebar";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
@@ -624,20 +623,10 @@ async function renderFocus(
         `
     );
 
-    let textContent = focus.id;
-    if (localisationIndex){
-        let localizedText = getLocalisedTextQuick(focus.id);
-        if (localizedText === focus.id || !localizedText){
-            if (focus.text){
-                localizedText = getLocalisedTextQuick(focus.text);
-                if (localizedText !== focus.text && localizedText !== null){
-                    textContent += `<br/>${localizedText}`;
-                }
-            }
-        }else {
-            textContent += `<br/>${localizedText}`;
-        }
-    }
+    // The label is always the raw focus id. Localised names are not embedded here: they are resolved
+    // on demand by the webview's ID/name toggle (requestFocusNames -> focusNames) against the
+    // prewarmed localisation index, so the lazy index build only ever serves that toggle.
+    const textContent = focus.id;
 
     return `<div
     class="

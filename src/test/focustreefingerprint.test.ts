@@ -127,8 +127,6 @@ describe('previewdef/focustree/fingerprint', () => {
             gridBox: { position: { x: 50, y: 50 } },
             useConditionInFocus: false,
             xGridSize: 96,
-            localisationIndex: false,
-            previewLocalisation: '',
             ...overrides,
         };
     }
@@ -171,19 +169,6 @@ describe('previewdef/focustree/fingerprint', () => {
                 }],
             }));
             assert.strictEqual(before, after);
-        });
-
-        it('changes when the localisation index flag toggles (same trees)', () => {
-            // A config flip does not reload the preview, so the fingerprint must move to block a stale skip.
-            const before = computeTreeStructuralFingerprint(treeObjectInput({ localisationIndex: false }));
-            const after = computeTreeStructuralFingerprint(treeObjectInput({ localisationIndex: true }));
-            assert.notStrictEqual(before, after);
-        });
-
-        it('changes when the preview localisation language changes (same trees)', () => {
-            const before = computeTreeStructuralFingerprint(treeObjectInput({ localisationIndex: true, previewLocalisation: 'English' }));
-            const after = computeTreeStructuralFingerprint(treeObjectInput({ localisationIndex: true, previewLocalisation: 'French' }));
-            assert.notStrictEqual(before, after);
         });
     });
 

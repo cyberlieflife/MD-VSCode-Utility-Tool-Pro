@@ -44,20 +44,19 @@ export function computeIconSourceFingerprint(styleRecords: Record<string, string
     return JSON.stringify(keys);
 }
 
-// Object-level fingerprint input: the parsed focus trees plus the static grid metadata and the config
-// that changes the RENDER without changing the FocusTree objects (useConditionInFocus, and the two
-// localisation knobs). Used by the partial-update early-out to detect a structural change BEFORE any
-// HTML/style rendering, so it is the focusTrees-only subset of computeStructuralFingerprint's hash (no
-// rendered/styleTable records). localisationIndex/previewLocalisation are PASSED IN (this module stays
-// import-free); folding them here means toggling the localisation index or switching preview language
-// moves the hash, so a config flip -- which does NOT reload the preview -- can never be stale-skipped.
+// Object-level fingerprint input: the parsed focus trees plus the static grid metadata and the
+// config that changes the RENDER without changing the FocusTree objects (useConditionInFocus).
+// Used by the partial-update early-out to detect a structural change BEFORE any HTML/style rendering,
+// so it is the focusTrees-only subset of computeStructuralFingerprint's hash (no rendered/styleTable
+// records). The localisation knobs are intentionally NOT folded in: the focus-tree render never
+// embeds localised text (names are resolved on demand by the webview ID/name toggle), so a
+// localisation-index / preview-language flip cannot change the rendered structure and must not move
+// the hash.
 export interface FocusTreeObjectStructureInput {
     focusTrees: unknown;
     gridBox: unknown;
     useConditionInFocus: boolean;
     xGridSize: number;
-    localisationIndex: boolean;
-    previewLocalisation: string;
 }
 
 export function computeTreeStructuralFingerprint(input: FocusTreeObjectStructureInput): string {
@@ -73,8 +72,6 @@ export function computeTreeStructuralFingerprint(input: FocusTreeObjectStructure
         input.gridBox,
         input.useConditionInFocus,
         input.xGridSize,
-        input.localisationIndex,
-        input.previewLocalisation,
     ], (key, value) => key === 'guiWindow' ? undefined : value);
 }
 

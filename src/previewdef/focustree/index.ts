@@ -11,13 +11,13 @@ import { listFilesFromModOrHOI4, parseHoi4FileCached } from '../../util/fileload
 import { Logger } from '../../util/logger';
 import { getSpriteByGfxName } from '../../util/image/imagecache';
 import { mapLimit } from '../../util/common';
-import { getRelativePathInWorkspace, getDocumentByUri, getConfiguration } from '../../util/vsccommon';
+import { getRelativePathInWorkspace, getDocumentByUri } from '../../util/vsccommon';
 import { localize } from '../../util/i18n';
 import { loadingShellHtml } from '../../util/html';
 import { withTimeout, TimeoutError } from '../../util/common';
 import { error } from '../../util/debug';
-import { useConditionInFocus, localisationIndex } from '../../util/featureflags';
-import { ensureLocalisationIndex, getLocalisedTextUnchecked } from '../../util/localisationIndex';
+import { useConditionInFocus } from '../../util/featureflags';
+import { ensureLocalisationIndex, getLocalisedTextUnchecked, notifyFocusTreePreviewOpened, notifyFocusTreePreviewClosed } from '../../util/localisationIndex';
 import { computeStructuralFingerprint, computeIconSourceFingerprint, computeTreeStructuralFingerprint, computeTreeIconFingerprint, decideFocusTreeUpdate, FocusTreeFingerprints } from './fingerprint';
 
 // A render taking longer than this is treated as stuck. The underlying load keeps running
@@ -80,6 +80,11 @@ class FocusTreePreview extends PreviewBase {
 
     constructor(uri: vscode.Uri, panel: vscode.WebviewPanel) {
         super(uri, panel);
+        // A focus-tree preview is the consumer of the prewarmed localisation index (the webview ID/name
+        // toggle): opening one upgrades a still-pending background index build to the fast path, and
+        // closing it keeps the open-preview count accurate for the next build's fast/slow decision.
+        notifyFocusTreePreviewOpened();
+        this.panel.onDidDispose(() => notifyFocusTreePreviewClosed());
         // Read from the live document so a parallel update clearing `this.content` can never
         // make the loader parse an empty string (which used to flip the preview to "No focus tree").
         this.focusTreeLoader = new FocusTreeLoader(
@@ -241,9 +246,11 @@ class FocusTreePreview extends PreviewBase {
     }
 
     /**
-     * Resolves the localised display names for the given focus ids (using the editor language)
-     * and posts them back to the webview for its ID/name toggle. The localisation index is built
-     * on demand here, so the toggle works without the localisationIndex setting.
+     * Prewarms the localised display names for the given focus ids (using the editor language) and
+     * posts them back to the webview for its ID/name toggle. The localisation index is built on
+     * demand here (and lazily in the background otherwise), so the toggle works without the
+     * localisationIndex setting; opening this preview already upgraded a pending background build
+     * to the fast path, so this await is never subject to the slow build.
      */
     private async sendFocusNames(ids: string[]): Promise<void> {
         try {
@@ -292,9 +299,9 @@ class FocusTreePreview extends PreviewBase {
     // Object-level fingerprints of the parsed trees. gridBox/useConditionInFocus/xGridSize are static, so
     // sourcing them from the shared const here reproduces the exact values a full payload carries, letting
     // the early-out compare against a baseline seeded from structure.focusTrees without a payload in hand.
-    // The live localisation config (index flag + preview language) is folded in too so that a config flip,
-    // which refreshes the module flag but does NOT reload the preview, moves the hash and blocks a stale
-    // skip. Read once here per call so the early-out compare and the baseline seed use the same values.
+    // The localisation config is deliberately NOT folded in: the focus-tree render never embeds localised
+    // text, so a config flip cannot change the rendered structure and must not move the hash. Read the
+    // static inputs once here per call so the early-out compare and the baseline seed use the same values.
     private treeFingerprintsFor(focusTrees: FocusTree[]): { structural: string; icon: string } {
         return {
             structural: computeTreeStructuralFingerprint({
@@ -302,8 +309,6 @@ class FocusTreePreview extends PreviewBase {
                 gridBox: focusTreeGridBox,
                 useConditionInFocus,
                 xGridSize: focusTreeXGridSize,
-                localisationIndex,
-                previewLocalisation: getConfiguration().previewLocalisation ?? '',
             }),
             icon: computeTreeIconFingerprint(focusTrees),
         };
@@ -442,7 +447,7 @@ class FocusTreePreview extends PreviewBase {
                 error(e);
                 trees = null;
             }
-            if (trees !== null && !dependencyChanged && !localisationIndex &&
+            if (trees !== null && !dependencyChanged &&
                 this.lastTreeStructural !== undefined && this.lastTreeIcon !== undefined) {
                 const treeFingerprints = this.treeFingerprintsFor(trees);
                 if (treeFingerprints.structural === this.lastTreeStructural && treeFingerprints.icon === this.lastTreeIcon) {
@@ -450,11 +455,9 @@ class FocusTreePreview extends PreviewBase {
                     // icons already on screen are current, so we can skip the whole render (mirrors the
                     // post-render skip below). !dependencyChanged is required: a dependency (resolved icon
                     // bytes, .gfx sprite swap, .gui window) alters the render without touching the FocusTree
-                    // objects, so its fingerprint would not move. !localisationIndex is required because with
-                    // the localisation index on, renderFocus embeds resolved loc text that changes when a
-                    // .yml is edited, and .yml files are not focus-loader dependencies (so a loc edit never
-                    // arrives as dependencyChanged) -- the object fingerprint cannot see it, so we must not
-                    // early-out in that mode. (See task-07 report.)
+                    // objects, so its fingerprint would not move. Localised names are never embedded in the
+                    // render (they are resolved on demand by the webview ID/name toggle), so a .yml edit
+                    // cannot change the structure and needs no special-case here.
                     this.lastGoodHadFocusTrees = true;
                     return;
                 }

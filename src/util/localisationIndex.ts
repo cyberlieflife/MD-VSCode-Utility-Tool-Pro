@@ -47,12 +47,13 @@ const localeISOMapping: Record<string, string> = {
 export function registerLocalisationIndex(): vscode.Disposable {
     const disposables: vscode.Disposable[] = [];
     if (localisationIndex) {
-        const task = ensureLocalisationIndex();
-        vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('localisationIndex.building', 'Building Localisation index...'), task);
-        void task.then(() => {
-            vscode.window.showInformationMessage(localize('localisationIndex.builddone', 'Building Localisation index done.'));
-            sendEvent('localisationIndex', {size: localisationIndexSize[0].toString()});
-        });
+        // Build the index up-front. If a focus-tree preview is already open in this window (e.g.
+        // restored by the workspace) build it immediately at full speed; otherwise build it lazily
+        // in the background (delayed, low-priority) so a big first build never stalls VSCode startup.
+        // Opening a focus-tree preview later upgrades the background build to the fast path via
+        // notifyFocusTreePreviewOpened (see the FocusTreePreview constructor).
+        buildPriority = hasActiveFocusTreePreview() ? 'fast' : 'slow';
+        void ensureLocalisationIndex();
         disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(onChangeWorkspaceFolders));
         disposables.push(vscode.workspace.onDidChangeTextDocument(onChangeTextDocument));
         disposables.push(vscode.workspace.onDidCloseTextDocument(onCloseTextDocument));
@@ -64,24 +65,126 @@ export function registerLocalisationIndex(): vscode.Disposable {
     return vscode.Disposable.from(...disposables);
 }
 
-// Shared size counter for the telemetry below the lazy build in registerLocalisationIndex.
+// Shared size counter for the telemetry of the fast build. The background slow build stays silent
+// on purpose (it must not interrupt the user during VSCode startup).
 const localisationIndexSize: [number] = [0];
 let localisationIndexBuildPromise: Promise<void> | undefined;
 
-// Builds (once, lazily) the global + workspace localisation indexes. The focus-tree name toggle
-// calls this on demand, so switching a tree to localised names works even without the
-// localisationIndex setting being enabled.
+// --- Lazy build scheduling -----------------------------------------------
+// The index is built once. With no focus-tree preview open it is built as a slow background task
+// (delayed start, one file at a time, yielding to the event loop between files) so a large first
+// build never stalls VSCode startup. Opening a focus-tree preview flips the build to the fast path:
+// a slow build that is still in its start delay is cancelled and restarted immediately, and a slow
+// build already parsing files finishes the remainder at full concurrency. The focus-tree ID/name
+// toggle (sendFocusNames) also drives this build on demand, so switching a tree to localised names
+// works even without the localisationIndex setting being enabled.
+const SLOW_BUILD_START_DELAY_MS = 3000;
+const LOCALISATION_PARSE_CONCURRENCY_FAST = 8;
+
+type BuildPriority = 'fast' | 'slow';
+
+let buildPriority: BuildPriority = 'slow';
+let activeFocusTreePreviewCount = 0;
+let slowStartTimer: NodeJS.Timeout | undefined;
+let slowBuildResolve: (() => void) | undefined;
+let slowBuildReject: ((e: unknown) => void) | undefined;
+
+// Called when a focus-tree preview panel opens: it is the consumer of the prewarmed index (the
+// webview ID/name toggle), so a still-building index must be fast from now on.
+export function notifyFocusTreePreviewOpened(): void {
+    if (activeFocusTreePreviewCount === 0) {
+        buildPriority = 'fast';
+        // A slow background build is scheduled but has not started yet: cancel the delay and start the
+        // fast build right away so the just-opened preview is not kept waiting. A slow build that is
+        // already parsing sees buildPriority === 'fast' in its per-file loop and upgrades itself.
+        if (slowStartTimer !== undefined) {
+            clearTimeout(slowStartTimer);
+            slowStartTimer = undefined;
+            const resolve = slowBuildResolve;
+            const reject = slowBuildReject;
+            slowBuildResolve = undefined;
+            slowBuildReject = undefined;
+            if (resolve) {
+                void buildLocalisationIndexes('fast').then(resolve, reject);
+            }
+        }
+    }
+    activeFocusTreePreviewCount++;
+}
+
+// Called when a focus-tree preview panel closes, keeping the open-preview count accurate (it decides
+// whether a fresh build starts fast or slow).
+export function notifyFocusTreePreviewClosed(): void {
+    if (activeFocusTreePreviewCount > 0) {
+        activeFocusTreePreviewCount--;
+    }
+}
+
+function hasActiveFocusTreePreview(): boolean {
+    return activeFocusTreePreviewCount > 0;
+}
+
+// Read through a function so TypeScript's control-flow analysis never narrows the module-level
+// `buildPriority` (it may be flipped to 'fast' from notifyFocusTreePreviewOpened at any time).
+function isFastBuild(): boolean {
+    return buildPriority === 'fast';
+}
+
+// Builds (once) the global + workspace localisation indexes. Schedules a fast build right away when
+// a focus-tree preview is open, otherwise a delayed slow build (see notifyFocusTreePreviewOpened for
+// the upgrade path).
 export function ensureLocalisationIndex(): Promise<void> {
     if (localisationIndexBuildPromise === undefined) {
-        const estimatedSize: [number] = [0];
-        localisationIndexBuildPromise = Promise.all([
-            buildGlobalLocalisationIndex(estimatedSize),
-            buildWorkspaceLocalisationIndex(estimatedSize),
-        ]).then(() => {
-            localisationIndexSize[0] = estimatedSize[0];
-        });
+        localisationIndexBuildPromise = scheduleBuild();
     }
     return localisationIndexBuildPromise;
+}
+
+function scheduleBuild(): Promise<void> {
+    if (buildPriority === 'fast') {
+        return buildLocalisationIndexes('fast');
+    }
+    // Slow background build: delay the start so VSCode finishes activating first, then run at low
+    // priority (see parseLocalisationFiles). Opening a focus-tree preview cancels the delay and
+    // fast-builds instead.
+    return new Promise<void>((resolve, reject) => {
+        slowBuildResolve = resolve;
+        slowBuildReject = reject;
+        slowStartTimer = setTimeout(() => {
+            slowStartTimer = undefined;
+            slowBuildResolve = undefined;
+            slowBuildReject = undefined;
+            void buildLocalisationIndexes('slow').then(resolve, reject);
+        }, SLOW_BUILD_START_DELAY_MS);
+    });
+}
+
+function buildLocalisationIndexes(priority: BuildPriority): Promise<void> {
+    const estimatedSize: [number] = [0];
+    const task = Promise.all([
+        buildGlobalLocalisationIndex(estimatedSize, priority),
+        buildWorkspaceLocalisationIndex(estimatedSize, priority),
+    ]).then(() => {
+        localisationIndexSize[0] = estimatedSize[0];
+    });
+    if (priority === 'fast') {
+        vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('localisationIndex.building', 'Building Localisation index...'), task);
+        void task.then(() => {
+            vscode.window.showInformationMessage(localize('localisationIndex.builddone', 'Building Localisation index done.'));
+            sendEvent('localisationIndex', {size: localisationIndexSize[0].toString()});
+        });
+    }
+    return task;
+}
+
+function yieldToEventLoop(): Promise<void> {
+    return new Promise(resolve => {
+        if (typeof setImmediate === 'function') {
+            setImmediate(resolve);
+        } else {
+            setTimeout(resolve, 0);
+        }
+    });
 }
 
 export function getLocalisedTextQuick(localisationKey: string | undefined): string | undefined {
@@ -136,16 +239,42 @@ interface LocCacheData {
     fileMap: Record<string, Record<string, string[]>>; // langKey -> filePath -> keys[]
 }
 
-async function buildGlobalLocalisationIndex(estimatedSize: [number]): Promise<void> {
+async function buildGlobalLocalisationIndex(estimatedSize: [number], priority: BuildPriority): Promise<void> {
     const options = {mod: false, hoi4: true, recursively: true};
     const localisationFiles = (await listFilesFromModOrHOI4('localisation', options)).filter(f => localisationFileFilter.test(f)).map(f => 'localisation/' + f);
-    await buildLocalisationIndexWithCache('localisationIndex.global', localisationFiles, globalLocalisationIndex, null, options, estimatedSize);
+    await buildLocalisationIndexWithCache('localisationIndex.global', localisationFiles, globalLocalisationIndex, null, options, estimatedSize, priority);
 }
 
-async function buildWorkspaceLocalisationIndex(estimatedSize: [number]): Promise<void> {
+async function buildWorkspaceLocalisationIndex(estimatedSize: [number], priority: BuildPriority): Promise<void> {
     const options = {mod: true, hoi4: false, recursively: true};
     const localisationFiles = (await listFilesFromModOrHOI4('localisation', options)).filter(f => localisationFileFilter.test(f)).map(f => 'localisation/' + f);
-    await buildLocalisationIndexWithCache('localisationIndex.workspace', localisationFiles, workspaceLocalisationIndex, workspaceLocalisationFileMap, options, estimatedSize);
+    await buildLocalisationIndexWithCache('localisationIndex.workspace', localisationFiles, workspaceLocalisationIndex, workspaceLocalisationFileMap, options, estimatedSize, priority);
+}
+
+// Runs the file-parse phase. Fast: all files in parallel (8-way, like the original eager build).
+// Slow: one file at a time, yielding to the event loop between files so the build never blocks the
+// UI thread; if a focus-tree preview opens mid-build (buildPriority flips to 'fast') the remainder
+// is finished at full concurrency.
+async function parseLocalisationFiles(
+    files: string[],
+    targetIndex: LocalisationData,
+    fileMap: Record<string, Record<string, Set<string>>> | null,
+    options: { mod?: boolean; hoi4?: boolean },
+    estimatedSize: [number],
+    priority: BuildPriority,
+): Promise<void> {
+    if (priority === 'fast' || isFastBuild()) {
+        await mapLimit(files, LOCALISATION_PARSE_CONCURRENCY_FAST, f => fillLocalisationItems(f, targetIndex, fileMap, options, estimatedSize));
+        return;
+    }
+    for (let i = 0; i < files.length; i++) {
+        if (isFastBuild()) {
+            await mapLimit(files.slice(i), LOCALISATION_PARSE_CONCURRENCY_FAST, f => fillLocalisationItems(f, targetIndex, fileMap, options, estimatedSize));
+            return;
+        }
+        await yieldToEventLoop();
+        await fillLocalisationItems(files[i], targetIndex, fileMap, options, estimatedSize);
+    }
 }
 
 async function buildLocalisationIndexWithCache(
@@ -154,7 +283,8 @@ async function buildLocalisationIndexWithCache(
     targetIndex: LocalisationData,
     fileMap: Record<string, Record<string, Set<string>>> | null,
     options: { mod?: boolean; hoi4?: boolean },
-    estimatedSize: [number]
+    estimatedSize: [number],
+    priority: BuildPriority
 ): Promise<void> {
     const timer = new IndexTimer(cacheName);
     const resolveUri = (relativePath: string) => getFilePathFromModOrHOI4(relativePath, options);
@@ -205,7 +335,7 @@ async function buildLocalisationIndexWithCache(
     }
     timer.mark('cache');
 
-    await mapLimit(filesToParse, 8, f => fillLocalisationItems(f, targetIndex, fileMap, options, estimatedSize));
+    await parseLocalisationFiles(filesToParse, targetIndex, fileMap, options, estimatedSize, priority);
     timer.mark('parse');
     timer.log(locFiles.length, filesToParse.length);
 
@@ -318,7 +448,7 @@ function onChangeWorkspaceFolders(_: vscode.WorkspaceFoldersChangeEvent) {
         delete workspaceLocalisationFileMap[langKey];
     }
     const estimatedSize: [number] = [0];
-    const task = buildWorkspaceLocalisationIndex(estimatedSize);
+    const task = buildWorkspaceLocalisationIndex(estimatedSize, 'fast');
     vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('localisationIndex.workspace.building', 'Building workspace Localisation index...'), task);
     void task.then(() => {
         vscode.window.showInformationMessage(localize('localisationIndex.workspace.builddone', 'Building workspace Localisation index done.'));
