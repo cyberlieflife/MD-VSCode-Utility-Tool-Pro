@@ -5,9 +5,9 @@
 <h1 align="center">HOI 4 Utilities Pro</h1>
 <p align="center"><b>钢铁雄心4模组工具扩展版</b></p>
 
-<p align="center">
-  [中文](README_CN.md) | English
-</p>
+<div align="center">
+  <a href="README.md">English</a> | <a href="README_CN.md"><b>中文</b></a>
+</div>
 
 <p align="center">
   All-in-one preview tools for HOI4 mod developers — Focus Tree · Technology Tree · Event Tree · World Map · MIO · GUI · GFX · DDS/TGA

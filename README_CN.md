@@ -5,9 +5,9 @@
 <h1 align="center">钢铁雄心4模组工具扩展版</h1>
 <p align="center"><b>HOI 4 Utilities Pro</b></p>
 
-<p align="center">
-  [English](README.md) | 中文
-</p>
+<div align="center">
+  <a href="README.md">English</a> | <a href="README_CN.md"><b>中文</b></a>
+</div>
 
 <p align="center">
  HOI4 模组开发者的一站式预览工具 —— 国策树 · 科技树 · 事件树 · 世界地图 · MIO · GUI · GFX · DDS/TGA
