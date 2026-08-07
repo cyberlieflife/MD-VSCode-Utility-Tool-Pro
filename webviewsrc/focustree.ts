@@ -855,6 +855,18 @@ function openCreateFocusPanel(gridX: number, gridY: number) {
     costRow.appendChild(costHint);
     box.appendChild(costRow);
 
+    // Temporary memory: pre-fill the panel with only the last created focus's id and duration
+    // (cost) -- session-only, kept across panel open/close via webview state -- because these are
+    // the fields that repeat along a branch. Name/description/icon are per-focus content and stay blank.
+    const lastCreated = getState().lastCreatedFocus as Record<string, unknown> | undefined;
+    if (lastCreated) {
+        if (typeof lastCreated.id === 'string') idInput.value = lastCreated.id;
+        if (typeof lastCreated.cost === 'number' && Number.isFinite(lastCreated.cost)) {
+            costInput.value = String(lastCreated.cost);
+            updateCostHint();
+        }
+    }
+
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px;';
     const cancelBtn = makeDialogButton(feLocalize('focustree.cancel', 'Cancel'));
@@ -878,6 +890,14 @@ function openCreateFocusPanel(gridX: number, gridY: number) {
         const desc = descInput.value.trim();
         const icon = iconInput.value.trim();
         const cost = parseInt(costInput.value, 10);
+        // Session memory: remember only this focus's id and duration (cost) so the next open of
+        // the create panel pre-fills them; name/desc/icon are per-focus content and not remembered.
+        setState({
+            lastCreatedFocus: {
+                id,
+                cost: Number.isFinite(cost) && cost > 0 ? cost : undefined,
+            },
+        });
         closeCreateFocusPanel();
         vscode.postMessage({
             command: 'createFocus',

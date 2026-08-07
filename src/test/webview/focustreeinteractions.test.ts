@@ -337,4 +337,56 @@ describe('webview/focustree interactions', function () {
         assert.deepStrictEqual(del.ids, ['a']);
         assert.ok(!document.querySelector('.ft-confirm'), 'confirm should close after delete');
     });
+
+    it('create panel pre-fills id and cost from the last created focus (session memory)', async function () {
+        // Isolate from any earlier test that confirmed a create (which stores lastCreatedFocus).
+        delete uiState.lastCreatedFocus;
+        const openPanel = () => {
+            document.body.dispatchEvent(new MouseEvent('contextmenu', { clientX: 200, clientY: 200, bubbles: true, cancelable: true }));
+            const menu = document.querySelector('.ft-context-menu');
+            assert.ok(menu, 'context menu should open');
+            const createItem = [...menu!.querySelectorAll('div')].find(d => d.textContent === 'Create focus');
+            assert.ok(createItem, 'menu should offer Create focus');
+            createItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            assert.ok(document.querySelector('.ft-create'), 'create panel should open');
+        };
+
+        // First open: fill every field (id/name/desc/icon are the four text inputs in order) and
+        // confirm. Only id and cost are remembered -- name/desc/icon are per-focus content.
+        openPanel();
+        const textInputs = document.querySelectorAll('.ft-create input[type="text"]');
+        assert.ok(textInputs.length >= 4, 'panel should have id/name/desc/icon text inputs');
+        (textInputs[0] as HTMLInputElement).value = 'MEM_FOCUS';
+        (textInputs[1] as HTMLInputElement).value = 'MEM_NAME';
+        (textInputs[2] as HTMLInputElement).value = 'MEM_DESC';
+        (textInputs[3] as HTMLInputElement).value = 'gfx_focus_mem';
+        const costInput = document.querySelector('.ft-create input[type="number"]') as HTMLInputElement;
+        assert.ok(costInput, 'panel should have a cost input');
+        costInput.value = '7';
+
+        messages.length = 0;
+        let okBtn = [...document.querySelectorAll('.ft-create button')].find(b => b.textContent === 'Confirm');
+        assert.ok(okBtn, 'create panel should have a Confirm button');
+        okBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const createMsg = messages.find(m => m.command === 'createFocus');
+        assert.ok(createMsg, 'expected createFocus, got: ' + JSON.stringify(messages));
+        assert.strictEqual(createMsg.focus.id, 'MEM_FOCUS');
+        assert.strictEqual(createMsg.focus.cost, 7);
+
+        // Second open: only id and cost are pre-filled; the per-focus name/desc/icon stay blank.
+        openPanel();
+        const textInputs2 = document.querySelectorAll('.ft-create input[type="text"]');
+        assert.strictEqual((textInputs2[0] as HTMLInputElement).value, 'MEM_FOCUS', 'id should be pre-filled');
+        assert.strictEqual((textInputs2[1] as HTMLInputElement).value, '', 'name must NOT be pre-filled');
+        assert.strictEqual((textInputs2[2] as HTMLInputElement).value, '', 'desc must NOT be pre-filled');
+        assert.strictEqual((textInputs2[3] as HTMLInputElement).value, '', 'icon must NOT be pre-filled');
+        const costInput2 = document.querySelector('.ft-create input[type="number"]') as HTMLInputElement;
+        assert.strictEqual(costInput2.value, '7', 'cost should be pre-filled');
+
+        // Cleanup: close the panel and drop the memory so later tests start clean.
+        const cancelBtn = [...document.querySelectorAll('.ft-create button')].find(b => b.textContent === 'Cancel');
+        assert.ok(cancelBtn, 'create panel should have a Cancel button');
+        cancelBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        delete uiState.lastCreatedFocus;
+    });
 });
