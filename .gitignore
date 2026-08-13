@@ -67,6 +67,7 @@ jspm_packages/
 .opencode/
 .superpowers/
 .mimosa/
+.zcode/
 
 # IDE and editor files
 .vscode/settings.json
