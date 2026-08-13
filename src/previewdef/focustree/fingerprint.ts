@@ -1,6 +1,30 @@
 // Pure fingerprint / skip-decision helpers for the focus-tree preview's partial-update path.
-// Import-free on purpose so unit tests can exercise them without pulling in the vscode-dependent
-// preview modules.
+// Import-free of vscode-dependent modules on purpose so unit tests can exercise them without
+// pulling in the preview stack (the shared util/hash.ts has no dependencies).
+
+// Delegates to the shared fnv1a in src/util/hash.ts (the same hash drives ContentLoader's reparse
+// decision and UpdateablePreviewBase's hash-skip). Exported here for the text-hash early-out and
+// pinned against the other users in tests.
+import { fnv1a } from '../../util/hash';
+export { fnv1a };
+
+// Pure decision for the sendPartialUpdate text-hash early-out. Unchanged text (same hash AND same
+// length, the length guarding against the 32-bit collision window) plus no dependency change plus a
+// rendered baseline means the parsed FocusTree[] is byte-identical, so the object-level load and
+// its fingerprint serialization can be skipped entirely. `hasBaseline` mirrors the object-level
+// early-out's `lastTreeStructural !== undefined` guard: the hash is only trusted when a successful
+// render seeded it.
+export function shouldSkipTextEarlyOut(input: {
+    textHash: number;
+    lastTextHash: number | undefined;
+    textLength: number;
+    lastTextLength: number;
+    dependencyChanged: boolean;
+    hasBaseline: boolean;
+}): boolean {
+    return !input.dependencyChanged && input.hasBaseline &&
+        input.textHash === input.lastTextHash && input.textLength === input.lastTextLength;
+}
 
 export interface FocusTreeStructureInput {
     focusTrees: unknown;
@@ -27,15 +51,43 @@ function sortedRecordEntries(record: Record<string, string>): [string, string][]
 }
 
 export function computeStructuralFingerprint(input: FocusTreeStructureInput): string {
-    return JSON.stringify([
-        input.focusTrees,
-        sortedRecordEntries(input.renderedFocus),
-        sortedRecordEntries(input.renderedInlayWindows),
-        input.gridBox,
-        input.useConditionInFocus,
-        input.xGridSize,
-        sortedRecordEntries(input.styleRecords),
-    ]);
+    // Hash each block separately and join fixed-width hex digests, instead of one big
+    // JSON.stringify of everything (which materialises a multi-MB string on every structural change
+    // of a large mod). Each record block keeps its sorted key order, so the fingerprint stays
+    // insertion-order independent (the 8-way concurrent render). The output is a short fixed-format
+    // string; decideFocusTreeUpdate only compares it with ===.
+    const h32 = (s: string): string => fnv1a(s).toString(16).padStart(8, '0');
+    // focusTrees is the largest and most safety-critical block (the whole object graph including
+    // conditions and tokens), so it gets a 64-bit digest: two independent 32-bit fnv1a passes over
+    // the SAME string in one traversal (no second full-length copy, unlike a + '\u0000' variant),
+    // folded into two hex halves.
+    const h64 = (s: string): string => fnv1a64Hex(s);
+    return [
+        h64(JSON.stringify(input.focusTrees)),
+        h32(JSON.stringify(sortedRecordEntries(input.renderedFocus))),
+        h32(JSON.stringify(sortedRecordEntries(input.renderedInlayWindows))),
+        h32(JSON.stringify(input.gridBox)),
+        input.useConditionInFocus ? '1' : '0',
+        input.xGridSize.toString(16).padStart(2, '0'),
+        h32(JSON.stringify(sortedRecordEntries(input.styleRecords))),
+    ].join(':');
+}
+
+// 64-bit fnv1a digest as a 16-hex-char string: two 32-bit passes over the same input in a single
+// traversal. The second pass starts from a different offset basis so the halves decorrelate; each
+// half stays a true 32-bit integer (Math.imul), avoiding the Number precision loss of combining
+// them arithmetically (a 2^64 product exceeds Number.MAX_SAFE_INTEGER).
+function fnv1a64Hex(s: string): string {
+    let h1 = 2166136261;
+    let h2 = 2166136261 ^ 0xFFFFFFFF; // decorrelated second offset basis
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        h1 ^= c;
+        h1 = Math.imul(h1, 16777619) >>> 0;
+        h2 ^= c;
+        h2 = Math.imul(h2, 16777619) >>> 0;
+    }
+    return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
 
 export function computeIconSourceFingerprint(styleRecords: Record<string, string>): string {

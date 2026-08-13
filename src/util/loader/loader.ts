@@ -5,7 +5,9 @@ import { error } from '../debug';
 import { UserError } from '../common';
 import { Dependency, getDependenciesFromText } from '../dependency';
 import { sendEvent } from '../telemetry';
+import { fnv1a } from '../hash';
 export { Dependency } from '../dependency';
+export { fnv1a };
 
 export class LoaderSession {
     private loadedLoader: Set<Loader<unknown, unknown>> = new Set();
@@ -243,7 +245,20 @@ export abstract class ContentLoader<T, E={}> extends Loader<T, E> {
     protected loaderDependencies = new LoaderDependencies();
     protected readDependency = true;
     private lastContentHash = 0;
+    private lastContentLength = 0;
     private pendingContent: string | undefined = undefined;
+
+    // The fnv1a hash (and length) of the content last parsed by this loader. Updated by
+    // shouldReloadImpl before every load, so after a load completes they describe exactly the text
+    // the render baseline was built from. Exposed so previews can seed their text-hash early-out
+    // with the parsed text instead of a possibly-stale snapshot taken at event entry.
+    public get parsedContentHash(): number {
+        return this.lastContentHash;
+    }
+
+    public get parsedContentLength(): number {
+        return this.lastContentLength;
+    }
 
     constructor(public file: string, private contentProvider?: () => Promise<string>) {
         super();
@@ -262,6 +277,7 @@ export abstract class ContentLoader<T, E={}> extends Loader<T, E> {
         }
         this.pendingContent = content;
         this.lastContentHash = hash;
+        this.lastContentLength = content.length;
         return true;
     }
 
@@ -373,13 +389,4 @@ function checkLoaderSessionLoadingFile(session: LoaderSession, file: string) {
             throw new UserError('Circular dependency when loading file. Loading loaders: ' + session.loadingLoader);
         }
     }
-}
-
-function fnv1a(s: string): number {
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) {
-        h ^= s.charCodeAt(i);
-        h = (h * 16777619) >>> 0;
-    }
-    return h;
 }

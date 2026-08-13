@@ -7,7 +7,11 @@ import {
     computeTreeStructuralFingerprint,
     computeTreeIconFingerprint,
     decideFocusTreeUpdate,
+    fnv1a,
+    shouldSkipTextEarlyOut,
 } from '../previewdef/focustree/fingerprint';
+import { hashHtml } from '../previewdef/updateablepreview';
+import { fnv1a as loaderFnv1a } from '../util/loader/loader';
 
 function structureInput(overrides: Partial<FocusTreeStructureInput> = {}): FocusTreeStructureInput {
     return {
@@ -32,7 +36,93 @@ function fingerprints(input: FocusTreeStructureInput) {
     };
 }
 
+// The pre-optimization implementation: one JSON.stringify of the whole input. Used to verify that
+// the hashed per-block fingerprint agrees with the full-serialization one on equality/inequality
+// for the same input pairs (the hash must not collapse distinct structures together, and must not
+// split identical ones apart).
+function computeStructuralFingerprintReference(input: FocusTreeStructureInput): string {
+    const sortedRecordEntries = (record: Record<string, string>): [string, string][] =>
+        Object.keys(record).sort().map(k => [k, record[k]] as [string, string]);
+    return JSON.stringify([
+        input.focusTrees,
+        sortedRecordEntries(input.renderedFocus),
+        sortedRecordEntries(input.renderedInlayWindows),
+        input.gridBox,
+        input.useConditionInFocus,
+        input.xGridSize,
+        sortedRecordEntries(input.styleRecords),
+    ]);
+}
+
 describe('previewdef/focustree/fingerprint', () => {
+    describe('shouldSkipTextEarlyOut', () => {
+        function input(overrides: Partial<Parameters<typeof shouldSkipTextEarlyOut>[0]> = {}) {
+            return {
+                textHash: 111,
+                lastTextHash: 111,
+                textLength: 5,
+                lastTextLength: 5,
+                dependencyChanged: false,
+                hasBaseline: true,
+                ...overrides,
+            };
+        }
+
+        it('skips when text is unchanged and a baseline exists', () => {
+            assert.strictEqual(shouldSkipTextEarlyOut(input()), true);
+        });
+
+        it('does not skip when the text hash changed', () => {
+            assert.strictEqual(shouldSkipTextEarlyOut(input({ textHash: 222 })), false);
+        });
+
+        it('does not skip on the first event (no last hash)', () => {
+            assert.strictEqual(shouldSkipTextEarlyOut(input({ lastTextHash: undefined })), false);
+        });
+
+        it('does not skip when the text length differs (collision guard)', () => {
+            assert.strictEqual(shouldSkipTextEarlyOut(input({ textLength: 6 })), false);
+            assert.strictEqual(shouldSkipTextEarlyOut(input({ lastTextLength: 6 })), false);
+        });
+
+        it('does not skip when a dependency changed', () => {
+            assert.strictEqual(shouldSkipTextEarlyOut(input({ dependencyChanged: true })), false);
+        });
+
+        it('does not skip when no rendered baseline exists', () => {
+            assert.strictEqual(shouldSkipTextEarlyOut(input({ hasBaseline: false })), false);
+        });
+    });
+
+    describe('fnv1a', () => {
+        it('is stable for identical text', () => {
+            assert.strictEqual(fnv1a('focus_tree = { a = b }'), fnv1a('focus_tree = { a = b }'));
+        });
+
+        it('changes when text changes', () => {
+            assert.notStrictEqual(fnv1a('focus_tree = { a = b }'), fnv1a('focus_tree = { a = c }'));
+        });
+
+        it('handles non-ASCII and empty text', () => {
+            // Token positions come from the same text, so hashing must cover multi-byte content.
+            assert.notStrictEqual(fnv1a(''), fnv1a(' '));
+            assert.notStrictEqual(fnv1a('国策'), fnv1a('国策 '));
+            assert.strictEqual(fnv1a('国策'), fnv1a('国策'));
+        });
+
+        it('matches the hashHtml mirror and the loader source (same fnv1a)', () => {
+            // All three are the same fnv1a (loader.ts is the source of truth, updateablepreview and
+            // fingerprint mirror it); this pins all three together so a drift in any of them is
+            // caught here.
+            const texts = ['', ' ', 'focus_tree = { a = b }', '国策', '\u0000null\u0000'];
+            for (const t of texts) {
+                assert.strictEqual(fnv1a(t), hashHtml(t));
+                assert.strictEqual(fnv1a(t), loaderFnv1a(t));
+                assert.strictEqual(hashHtml(t), loaderFnv1a(t));
+            }
+        });
+    });
+
     describe('computeStructuralFingerprint', () => {
         it('is stable for identical inputs', () => {
             assert.strictEqual(computeStructuralFingerprint(structureInput()), computeStructuralFingerprint(structureInput()));
@@ -70,6 +160,61 @@ describe('previewdef/focustree/fingerprint', () => {
                 styleRecords: { 'st-focus-icon-goal_a': 'x', 'st-focus-common': 'position: relative;' },
             }));
             assert.strictEqual(inOrder, reversed);
+        });
+
+        it('agrees with the reference (full serialization) on equality for every input pair', () => {
+            // The hashed fingerprint must be an exact proxy of the reference: identical inputs must
+            // hash equal and distinct inputs must hash different (no collapse, no split).
+            const cases: FocusTreeStructureInput[] = [
+                structureInput(),
+                structureInput(),
+                structureInput({ renderedFocus: { a: '<div start="1" end="2">a renamed</div>' } }),
+                structureInput({ focusTrees: [{ id: 'tree', focuses: { a: { id: 'a', x: 3, y: 0 } } }] }),
+                structureInput({
+                    styleRecords: { 'st-focus-common': 'position: absolute;', 'st-focus-icon-goal_a': 'background-color: rgba(127, 127, 127, 0.25);' },
+                }),
+                structureInput({
+                    renderedFocus: { b: 'B', a: 'A' },
+                    renderedInlayWindows: { w2: 'W2', w1: 'W1' },
+                    styleRecords: { 'st-focus-icon-goal_a': 'x', 'st-focus-common': 'position: relative;' },
+                }),
+                structureInput({ useConditionInFocus: true }),
+                structureInput({ xGridSize: 128 }),
+                structureInput({ gridBox: { position: { x: 60, y: 60 } } }),
+                structureInput({ renderedFocus: {}, renderedInlayWindows: {}, styleRecords: {} }),
+                structureInput({ focusTrees: [{ id: 'tree', focuses: { a: { id: 'a', x: 0, y: 0, icon: [{ icon: 'GFX_a' }], textIcon: 'GFX_t', overlay: 'GFX_o', token: { start: 10, end: 20 } } } }] }),
+            ];
+            for (let i = 0; i < cases.length; i++) {
+                for (let j = 0; j < cases.length; j++) {
+                    const hashedEqual = computeStructuralFingerprint(cases[i]) === computeStructuralFingerprint(cases[j]);
+                    const referenceEqual = computeStructuralFingerprintReference(cases[i]) === computeStructuralFingerprintReference(cases[j]);
+                    assert.strictEqual(hashedEqual, referenceEqual, `pair (${i}, ${j}) mismatch`);
+                }
+            }
+        });
+
+        it('produces a short fixed-format fingerprint (bounded length)', () => {
+            // 64-bit focusTrees block + three 32-bit blocks + two scalars + separators.
+            const fp = computeStructuralFingerprint(structureInput({
+                renderedFocus: { a: 'A'.repeat(2000) },
+                styleRecords: { 'st-focus-common': 'position: relative;', 'st-focus-icon-goal_a': 'x' },
+            }));
+            assert.ok(fp.length < 200, `fingerprint too long: ${fp.length} chars`);
+        });
+
+        it('handles non-ASCII and NUL-containing records stably', () => {
+            const withUnicode = structureInput({
+                renderedFocus: { a: '国策: <div>测试</div>' },
+                styleRecords: { 'st-focus-common': 'content: "\u0000";', 'st-focus-icon-goal_a': 'x' },
+            });
+            assert.strictEqual(computeStructuralFingerprint(withUnicode), computeStructuralFingerprint(withUnicode));
+            assert.strictEqual(
+                computeStructuralFingerprint(withUnicode),
+                computeStructuralFingerprint(structureInput({
+                    renderedFocus: { a: '国策: <div>测试</div>' },
+                    styleRecords: { 'st-focus-common': 'content: "\u0000";', 'st-focus-icon-goal_a': 'x' },
+                })),
+            );
         });
     });
 

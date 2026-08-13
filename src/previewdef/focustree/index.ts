@@ -16,7 +16,7 @@ import { withTimeout, TimeoutError } from '../../util/common';
 import { error } from '../../util/debug';
 import { useConditionInFocus } from '../../util/featureflags';
 import { ensureLocalisationIndex, getLocalisedTextUnchecked, notifyFocusTreePreviewOpened, notifyFocusTreePreviewClosed } from '../../util/localisationIndex';
-import { computeStructuralFingerprint, computeIconSourceFingerprint, computeTreeStructuralFingerprint, computeTreeIconFingerprint, decideFocusTreeUpdate, FocusTreeFingerprints } from './fingerprint';
+import { computeStructuralFingerprint, computeIconSourceFingerprint, computeTreeStructuralFingerprint, computeTreeIconFingerprint, decideFocusTreeUpdate, fnv1a, shouldSkipTextEarlyOut, FocusTreeFingerprints } from './fingerprint';
 
 // A render taking longer than this is treated as stuck. The underlying load keeps running
 // in the background, but the user gets a recoverable panel instead of an endless spinner.
@@ -55,6 +55,14 @@ class FocusTreePreview extends PreviewBase {
     // lockstep with the rendered fingerprints above (seeded/reset at exactly the same points).
     private lastTreeStructural: string | undefined = undefined;
     private lastTreeIcon: string | undefined = undefined;
+    // fnv1a hash + length of the last seen document text, used to short-circuit the
+    // sendPartialUpdate early-out entirely: unchanged text (and no dependency change) means the
+    // parsed FocusTree[] is identical, so neither the object-level load nor its fingerprint
+    // serialization needs to run. Seeded/reset at the same points as the fingerprints above.
+    // The length component guards against the 32-bit fnv1a collision/float-precision window (the
+    // same hash also drives ContentLoader's reparse decision; here it gates render too).
+    private lastTextHash: number | undefined = undefined;
+    private lastTextLength = -1;
     private lastToolbarFlags: ToolbarFlags | undefined = undefined;
     private lastGoodHadFocusTrees = false;
     // Bug #36: the most recent real-icon CSS pushed to the webview, re-posted when the webview is
@@ -434,6 +442,14 @@ class FocusTreePreview extends PreviewBase {
         };
     }
 
+    // Seeds the text-hash early-out state. Only ever called with a hash/length that is paired with
+    // the rendered baseline (the text the structure on screen was built from); failure paths must
+    // not call it, so a later identical-text event retries instead of being swallowed.
+    private seedTextState(hash: number, length: number): void {
+        this.lastTextHash = hash;
+        this.lastTextLength = length;
+    }
+
     public onDocumentChange(document: vscode.TextDocument, dependencyChanged = false): Promise<void> {
         // Chain onto the previous update so renders are serialized. By the time a queued
         // render runs it reads the live document text, coalescing intermediate edits.
@@ -444,6 +460,12 @@ class FocusTreePreview extends PreviewBase {
 
     protected async getContent(document: vscode.TextDocument): Promise<string> {
         this.content = document.getText();
+        // Captured synchronously at entry: the loader's content provider reads the same text (the
+        // parse starts in the same sync slice), so this is the text the rendered baseline was built
+        // from. Using it (not a later document.getText(), which could reflect an edit that landed
+        // during the await) keeps lastTextHash/lastTextLength paired with lastTreeStructural.
+        const contentHash = fnv1a(this.content);
+        const contentLength = this.content.length;
         const generation = ++this.iconRenderGeneration;
         // A full (re)render embeds the current structure directly in the returned html, so any cached
         // in-place update belongs to a superseded page and must never be re-posted over this render.
@@ -472,6 +494,7 @@ class FocusTreePreview extends PreviewBase {
                 const treeFingerprints = this.treeFingerprintsFor(structure.focusTrees);
                 this.lastTreeStructural = treeFingerprints.structural;
                 this.lastTreeIcon = treeFingerprints.icon;
+                this.seedTextState(contentHash, contentLength);
                 this.lastToolbarFlags = structure.toolbarFlags;
                 this.lastGoodHadFocusTrees = true;
                 this.lastFocusTrees = structure.focusTrees;
@@ -485,6 +508,8 @@ class FocusTreePreview extends PreviewBase {
             this.lastIconSourceFingerprint = undefined;
             this.lastTreeStructural = undefined;
             this.lastTreeIcon = undefined;
+            this.lastTextHash = undefined;
+            this.lastTextLength = -1;
             this.lastToolbarFlags = undefined;
             this.lastGoodHadFocusTrees = false;
             this.lastFocusTrees = [];
@@ -501,6 +526,8 @@ class FocusTreePreview extends PreviewBase {
             this.lastIconSourceFingerprint = undefined;
             this.lastTreeStructural = undefined;
             this.lastTreeIcon = undefined;
+            this.lastTextHash = undefined;
+            this.lastTextLength = -1;
             this.lastToolbarFlags = undefined;
             this.lastGoodHadFocusTrees = false;
             this.lastFocusTrees = [];
@@ -572,6 +599,26 @@ class FocusTreePreview extends PreviewBase {
             return;
         }
         this.content = document.getText();
+        const textHash = fnv1a(this.content);
+        // Text-hash early-out (cheaper than the object-level one below): unchanged text and no
+        // dependency change means the parsed FocusTree[] is byte-identical, so skip the object-level
+        // load and its fingerprint serialization entirely. This fires on the common while-typing
+        // pattern where an edit is undone back to a previously-seen document (identical fnv1a).
+        // The baseline guard mirrors the object-level early-out below: the hash is only trusted when
+        // a successful render seeded it at the same point as lastTreeStructural. lastTextHash is
+        // advanced only on success paths (below), so a failed pass leaves it stale and the next
+        // identical-text event retries instead of being swallowed.
+        if (shouldSkipTextEarlyOut({
+            textHash,
+            lastTextHash: this.lastTextHash,
+            textLength: this.content.length,
+            lastTextLength: this.lastTextLength,
+            dependencyChanged,
+            hasBaseline: this.lastTreeStructural !== undefined,
+        })) {
+            this.lastGoodHadFocusTrees = true;
+            return;
+        }
         try {
             // Object-level early-out (bug #37): parse the focus trees only and, before paying for any
             // per-focus HTML/style rendering, skip when the parsed structure and icon set are both
@@ -598,6 +645,12 @@ class FocusTreePreview extends PreviewBase {
                     // render (they are resolved on demand by the webview ID/name toggle), so a .yml edit
                     // cannot change the structure and needs no special-case here.
                     this.lastGoodHadFocusTrees = true;
+                    // The text changed (otherwise the text-hash early-out above would have fired), but
+                    // the parsed structure did not: re-seed the text state so a later identical-text
+                    // event can use the cheaper text-hash early-out. The entry hash is safe here: the
+                    // object-level fingerprints matched, so the structure for this text is already on
+                    // screen.
+                    this.seedTextState(textHash, this.content.length);
                     return;
                 }
             }
@@ -657,6 +710,11 @@ class FocusTreePreview extends PreviewBase {
             if (!decision.postUpdate && !decision.pushIcons && !forceIcons) {
                 // Nothing the webview renders changed (the common while-typing case): skip entirely.
                 this.lastGoodHadFocusTrees = true;
+                // The rendered structure is current for this text (the fingerprints matched), so the
+                // text state can be seeded for the cheaper text-hash early-out on a later event.
+                // Seed from the loader's parsed-content hash: it is the text the structure pass
+                // actually parsed (the entry snapshot may be stale after the load's IO window).
+                this.seedTextState(this.focusTreeLoader.parsedContentHash, this.focusTreeLoader.parsedContentLength);
                 return;
             }
 
@@ -665,6 +723,11 @@ class FocusTreePreview extends PreviewBase {
             const treeFingerprints = this.treeFingerprintsFor(structure.focusTrees);
             this.lastTreeStructural = treeFingerprints.structural;
             this.lastTreeIcon = treeFingerprints.icon;
+            // The render baseline now matches the text the structure pass parsed (the loader's
+            // parsed-content hash/length, updated by shouldReloadImpl before the load and read back
+            // with no await between the load and here), so the text state is seeded together with
+            // it. Failure paths above never reach here, keeping the seed paired with a real baseline.
+            this.seedTextState(this.focusTreeLoader.parsedContentHash, this.focusTreeLoader.parsedContentLength);
             this.lastToolbarFlags = structure.toolbarFlags;
             this.lastGoodHadFocusTrees = true;
             this.lastFocusTrees = structure.focusTrees;

@@ -9,7 +9,7 @@ import { DefaultMapLoader } from "./provincemap";
 import { StatesLoader } from "./states";
 import { LoaderSession } from "../../../util/loader/loader";
 import { flatMap } from "lodash";
-import { UserError } from '../../../util/common';
+import { UserError } from "../../../util/common";
 
 interface SupplyAreaFile {
     supply_area: SupplyAreaDefinition[];
@@ -247,36 +247,119 @@ function validateStatesInSupplyAreas(
     }
 }
 
-function checkStatesContiguous(states: State[], provinces: (Province | undefined | null)[]): [number, number] | undefined {
+// Adjacency index built once per supply area: maps each state to the set of states it touches
+// through at least one non-impassable province edge. Building it is O(P * E) under the loader's
+// single-owner invariant (a province id belongs to exactly one state, enforced by sortItems/sortItems
+// dense arrays), plus the BFS below walks only the actual adjacency lists — replacing the previous
+// O(S^2 * P^2 * E) worst case (every candidate state pair re-scanning all provinces/edges). Should a
+// province id ever appear in several states' lists, each such edge costs O(k1 * k2) owner pairs
+// (still bounded, and the Set dedupes the adjacency).
+//
+// Two invariants of the original scan are preserved exactly:
+// 1. Only provinces that actually exist in the `provinces` array take part (the reference checked
+//    `provinces[p] && e.to === p2` on both endpoints, so a state referencing a non-existent
+//    province id must not become an adjacency bridge).
+// 2. Reachability follows the reference's in-edge direction: a candidate state A is adjacent to
+//    the current state B when some province of A owns an edge whose target belongs to B
+//    (`stateA.provinces.some(p => provinces[p]?.edges.some(e => stateB.provinces.some(p2 => e.to === p2)))`).
+//    The index therefore records target-owner -> source-owner edges, so the BFS expands from B
+//    towards A exactly like the reference loop did.
+interface StateAdjacencyIndex {
+    stateById: Map<number, State>;
+    stateAdjacency: Map<number, Set<number>>;
+}
+
+function buildStateAdjacencyIndex(states: State[], provinces: (Province | undefined | null)[]): StateAdjacencyIndex {
+    const stateById = new Map<number, State>();
+    const provinceToStates = new Map<number, number[]>();
+    for (const state of states) {
+        stateById.set(state.id, state);
+        for (const p of state.provinces) {
+            // Skip province ids that do not exist in the map: the reference never reached through
+            // them (`provinces[p] && ...`), so they must not bridge two states here either.
+            if (!provinces[p]) {
+                continue;
+            }
+            let owners = provinceToStates.get(p);
+            if (owners === undefined) {
+                provinceToStates.set(p, owners = []);
+            }
+            owners.push(state.id);
+        }
+    }
+
+    const stateAdjacency = new Map<number, Set<number>>();
+    const addAdjacency = (from: number, to: number) => {
+        let neighbors = stateAdjacency.get(from);
+        if (neighbors === undefined) {
+            stateAdjacency.set(from, neighbors = new Set());
+        }
+        neighbors.add(to);
+    };
+    for (const province of provinces) {
+        if (!province) {
+            continue;
+        }
+        const sourceOwners = provinceToStates.get(province.id);
+        if (sourceOwners === undefined) {
+            continue;
+        }
+        for (const edge of province.edges) {
+            if (edge.type === 'impassable') {
+                continue;
+            }
+            const targetOwners = provinceToStates.get(edge.to);
+            if (targetOwners === undefined) {
+                continue;
+            }
+            // In-edge direction: the reference's `statesAreAdjacent(stateA, stateB)` scans stateA's
+            // provinces for an edge whose target belongs to stateB, so BFS from currentState (B)
+            // expands towards every candidate A whose province points at B. The adjacency list of
+            // the target owner must therefore contain the source owner: record target -> source.
+            for (const sourceOwner of sourceOwners) {
+                for (const targetOwner of targetOwners) {
+                    if (sourceOwner !== targetOwner) {
+                        addAdjacency(targetOwner, sourceOwner);
+                    }
+                }
+            }
+        }
+    }
+
+    return { stateById, stateAdjacency };
+}
+
+export function checkStatesContiguous(states: State[], provinces: (Province | undefined | null)[]): [number, number] | undefined {
     if (states.length === 0) {
         return undefined;
     }
-    
+
+    const { stateById, stateAdjacency } = buildStateAdjacencyIndex(states, provinces);
     const accessedStates: Record<number, boolean> = {};
     const stack: State[] = [states[0]];
     accessedStates[stack[0].id] = true;
 
     while (stack.length) {
         const currentState = stack.pop()!;
-        for (const state of states) {
-            if (accessedStates[state.id]) {
+        const neighbors = stateAdjacency.get(currentState.id);
+        if (neighbors === undefined) {
+            continue;
+        }
+        for (const neighborId of neighbors) {
+            if (accessedStates[neighborId]) {
                 continue;
             }
-
-            if (statesAreAdjacent(state, currentState, provinces)) {
-                stack.push(state);
-                accessedStates[state.id] = true;
+            const neighborState = stateById.get(neighborId);
+            if (neighborState === undefined) {
+                continue;
             }
+            stack.push(neighborState);
+            accessedStates[neighborId] = true;
         }
     }
 
     const inAccessedState = states.find(state => !accessedStates[state.id]);
+    // Object.keys on an integer-keyed object enumerates in ascending numeric order, so this is the
+    // smallest *visited* state id, not necessarily states[0] — preserved from the original scan.
     return inAccessedState === undefined ? undefined : [inAccessedState.id, parseInt(Object.keys(accessedStates)[0])];
-}
-
-function statesAreAdjacent(stateA: State, stateB: State, provinces: (Province | undefined | null)[]): boolean {
-    return stateA.provinces.some(p =>
-        provinces[p]?.edges
-            .some(e => e.type !== 'impassable' && stateB.provinces.some(p2 => provinces[p2] && e.to === p2)) ?? false
-        );
 }
