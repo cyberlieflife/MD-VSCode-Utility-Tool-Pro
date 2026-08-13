@@ -961,47 +961,266 @@ function toColor(colorNum: number) {
     return '#' + colorNum.toString(16).padStart(6, '0');
 }
 
-function findNearestPoints(start: Point | undefined, end: Point | undefined, a: Province, b: Province | undefined): [Point, Point] {
+// --- L2: provincial boundary point spatial hash index ---
+// Boundary points are collected from province.edges once per province object and memoized in a
+// WeakMap; incremental data updates replace province objects, so stale indexes are dropped
+// automatically. Cell size is a map-pixel heuristic: large enough to keep buckets few, small
+// enough that the expansion visits only nearby cells.
+const SPATIAL_GRID_CELL_SIZE = 64;
+
+interface SpatialGrid {
+    cellSize: number;
+    cells: Map<string, Point[]>;
+    // Occupied cell coordinates as a flat [x0, y0, x1, y1, ...] array. Kept as numbers so the
+    // per-query nearest search builds its min-heap without parsing string keys back into
+    // coordinates.
+    cellCoords: number[];
+}
+
+interface ProvinceSpatialIndex {
+    grid: SpatialGrid;
+    points: Point[]; // flattened boundary points, used by the two-set nearest pair search
+}
+
+const provinceSpatialIndexCache = new WeakMap<Province, ProvinceSpatialIndex>();
+// --- L1: nearest-pair result cache ---
+// Keyed by province object pairs (then by the start/end coordinates) *after* the start/end
+// normalization inside findNearestPoints, so the "end-only" and "start-only" call shapes share one
+// entry. Rendering frames repeatedly call findNearestPoints with the same arguments; the result is
+// stable within one loaded map, so the first frame pays the search and all later frames hit this
+// cache. Province object replacement (incremental updates) invalidates the WeakMap keys
+// automatically.
+const nearestPairResultCache = new WeakMap<Province, WeakMap<Province, Map<string, [Point, Point]>>>();
+
+function spatialCellKey(cx: number, cy: number): string {
+    return cx + ',' + cy;
+}
+
+function collectBoundaryPoints(province: Province): Point[] {
+    const points: Point[] = [];
+    for (const edge of province.edges) {
+        for (const path of edge.path) {
+            for (const p of path) {
+                points.push(p);
+            }
+        }
+    }
+    return points;
+}
+
+function buildSpatialIndex(province: Province): ProvinceSpatialIndex {
+    const points = collectBoundaryPoints(province);
+    const cells = new Map<string, Point[]>();
+    const cellCoords: number[] = [];
+    for (const p of points) {
+        const cellX = Math.floor(p.x / SPATIAL_GRID_CELL_SIZE);
+        const cellY = Math.floor(p.y / SPATIAL_GRID_CELL_SIZE);
+        const key = spatialCellKey(cellX, cellY);
+        let bucket = cells.get(key);
+        if (bucket === undefined) {
+            cells.set(key, bucket = []);
+            cellCoords.push(cellX, cellY);
+        }
+        bucket.push(p);
+    }
+    return {
+        grid: { cellSize: SPATIAL_GRID_CELL_SIZE, cells, cellCoords },
+        points,
+    };
+}
+
+function getSpatialIndex(province: Province): ProvinceSpatialIndex {
+    let index = provinceSpatialIndexCache.get(province);
+    if (index === undefined) {
+        index = buildSpatialIndex(province);
+        provinceSpatialIndexCache.set(province, index);
+    }
+    return index;
+}
+
+// Lower bound on the squared distance from p to any point inside the given cell. The upper bound is
+// exclusive (xMax = (cellX+1)*cellSize, not -1) and the "p.x >= xMax" branch takes p.x - xMax, so
+// the bound stays valid for fractional coordinates too, not only integer pixels.
+function cellMinDistanceSqr(p: Point, cellSize: number, cellX: number, cellY: number): number {
+    const xMin = cellX * cellSize;
+    const xMax = (cellX + 1) * cellSize;
+    const yMin = cellY * cellSize;
+    const yMax = (cellY + 1) * cellSize;
+    const dx = p.x < xMin ? xMin - p.x : p.x >= xMax ? p.x - xMax : 0;
+    const dy = p.y < yMin ? yMin - p.y : p.y >= yMax ? p.y - yMax : 0;
+    return dx * dx + dy * dy;
+}
+
+// --- Nearest neighbour via a min-heap over cells ---
+// All occupied cells are heapified by their distance lower bound to p (O(C) build), then popped
+// smallest-first. The first popped cell already yields a concrete bestD (any bucket is non-empty),
+// and since every later cell has a lower bound >= the heap top, the scan stops as soon as the heap
+// top's bound cannot beat bestD. Exact (equivalent to a full scan, verified by property tests), and
+// in sparse/separated layouts only a handful of cells are popped - no full sort, no string parsing.
+interface CellEntry {
+    cellX: number;
+    cellY: number;
+    minD: number;
+}
+
+function heapifyMin(heap: CellEntry[]): void {
+    for (let i = (heap.length >> 1) - 1; i >= 0; i--) {
+        siftDown(heap, i);
+    }
+}
+
+function siftDown(heap: CellEntry[], i: number): void {
+    const length = heap.length;
+    while (true) {
+        let smallest = i;
+        const left = 2 * i + 1;
+        const right = 2 * i + 2;
+        if (left < length && heap[left].minD < heap[smallest].minD) {
+            smallest = left;
+        }
+        if (right < length && heap[right].minD < heap[smallest].minD) {
+            smallest = right;
+        }
+        if (smallest === i) {
+            return;
+        }
+        const tmp = heap[i];
+        heap[i] = heap[smallest];
+        heap[smallest] = tmp;
+        i = smallest;
+    }
+}
+
+function heapPopMin(heap: CellEntry[]): CellEntry | undefined {
+    if (heap.length === 0) {
+        return undefined;
+    }
+    const top = heap[0];
+    const last = heap.pop()!;
+    if (heap.length > 0) {
+        heap[0] = last;
+        siftDown(heap, 0);
+    }
+    return top;
+}
+
+// Exact nearest neighbor in a spatial grid (see the min-heap note above). The heap is rebuilt per
+// query because each lower bound depends on the query point p; C is the occupied-cell count, which
+// is small (boundary points of one province cluster into few cells) and the loop usually exits
+// after one pop.
+function findNearestInGrid(grid: SpatialGrid, p: Point): Point | undefined {
+    const cells = grid.cells;
+    if (cells.size === 0) {
+        return undefined;
+    }
+    const cs = grid.cellSize;
+    const coords = grid.cellCoords;
+    const heap: CellEntry[] = new Array(coords.length >> 1);
+    for (let i = 0, j = 0; i < coords.length; i += 2, j++) {
+        const cellX = coords[i];
+        const cellY = coords[i + 1];
+        heap[j] = { cellX, cellY, minD: cellMinDistanceSqr(p, cs, cellX, cellY) };
+    }
+    heapifyMin(heap);
+
+    let best: Point | undefined = undefined;
+    let bestD = Infinity;
+    let entry = heapPopMin(heap);
+    while (entry !== undefined && bestD > entry.minD) {
+        const bucket = cells.get(spatialCellKey(entry.cellX, entry.cellY));
+        if (bucket !== undefined) {
+            for (const q of bucket) {
+                const d = distanceSqr(p, q);
+                if (d < bestD) {
+                    bestD = d;
+                    best = q;
+                }
+            }
+        }
+        entry = heapPopMin(heap);
+    }
+
+    return best;
+}
+
+function pointKey(p: Point | undefined): string {
+    return p === undefined ? '' : `${p.x},${p.y}`;
+}
+
+export function findNearestPoints(start: Point | undefined, end: Point | undefined, a: Province, b: Province | undefined): [Point, Point] {
     if (start && end) { return [start, end]; }
     if (!b) { return [bboxCenter(a.boundingBox), bboxCenter(a.boundingBox)]; };
-    if (!start) { const t = start, u = a; start = end; a = b; end = t; b = u; }
+    // Normalize an "end-only" call to the "start-only" shape: keep the known endpoint in `start`
+    // (moving it from `end`) and swap the two provinces so the search still targets the "other"
+    // province. Note this swap also fires when *both* endpoints are missing, which decides which
+    // province's bounding-box center the empty-point-set fallback below uses (see test
+    // 'falls back to bounding-box center when the other province has no boundary points').
     if (!start) {
-        let nearestPair: [Point, Point] | undefined = undefined;
-        let nearestPairDistance = 1e10;
-        for (const ape of a.edges) {
-            for (const ap of ape.path) {
-                for (const app of ap) {
-                    for (const bpe of b.edges) {
-                        for (const bp of bpe.path) {
-                            for (const bpp of bp) {
-                                const disSqr = distanceSqr(app, bpp);
-                                if (disSqr < nearestPairDistance) {
-                                    nearestPairDistance = disSqr;
-                                    nearestPair = [app, bpp];
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return nearestPair ?? [bboxCenter(a.boundingBox), bboxCenter(a.boundingBox)];
-    } else {
-        let nearestPair: [Point, Point] | undefined = undefined;
-        let nearestPairDistance = 1e10;
-        for (const bpe of b.edges) {
-            for (const bp of bpe.path) {
-                for (const bpp of bp) {
-                    const disSqr = distanceSqr(start, bpp);
-                    if (disSqr < nearestPairDistance) {
-                        nearestPairDistance = disSqr;
-                        nearestPair = [start, bpp];
-                    }
-                }
-            }
-        }
-        return nearestPair ?? [bboxCenter(a.boundingBox), bboxCenter(a.boundingBox)];
+        const savedEndpoint = end;
+        const savedProvince = a;
+        start = savedEndpoint;
+        a = b;
+        end = undefined;
+        b = savedProvince;
     }
+
+    // L1: the result is stable within one loaded map, memoize per province pair. The key is formed
+    // *after* the normalization above, so the "end-only" shape and the equivalent "start-only"
+    // shape (provinces swapped by the caller) share one cache entry.
+    let cacheByB = nearestPairResultCache.get(a);
+    if (cacheByB === undefined) {
+        nearestPairResultCache.set(a, cacheByB = new WeakMap());
+    }
+    let cacheByKey = cacheByB.get(b);
+    if (cacheByKey === undefined) {
+        cacheByB.set(b, cacheByKey = new Map());
+    }
+    const key = `${pointKey(start)}|${pointKey(end)}`;
+    const cached = cacheByKey.get(key);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    let result: [Point, Point];
+    if (!start) {
+        // Two-set nearest pair: iterate the smaller point set and query the other set's grid. The
+        // nearest grid hit for the true pair partner is exact, so the global minimum is found.
+        const indexA = getSpatialIndex(a);
+        const indexB = getSpatialIndex(b);
+        let bestPair: [Point, Point] | undefined = undefined;
+        let bestD = Infinity;
+        if (indexA.points.length <= indexB.points.length) {
+            for (const p of indexA.points) {
+                const q = findNearestInGrid(indexB.grid, p);
+                if (q !== undefined) {
+                    const d = distanceSqr(p, q);
+                    if (d < bestD) {
+                        bestD = d;
+                        bestPair = [p, q];
+                    }
+                }
+            }
+        } else {
+            for (const p of indexB.points) {
+                const q = findNearestInGrid(indexA.grid, p);
+                if (q !== undefined) {
+                    const d = distanceSqr(p, q);
+                    if (d < bestD) {
+                        bestD = d;
+                        bestPair = [p, q];
+                    }
+                }
+            }
+        }
+        result = bestPair ?? [bboxCenter(a.boundingBox), bboxCenter(a.boundingBox)];
+    } else {
+        // Single-point nearest neighbor on the other province's boundary.
+        const nearest = findNearestInGrid(getSpatialIndex(b).grid, start);
+        result = nearest !== undefined ? [start, nearest] : [bboxCenter(a.boundingBox), bboxCenter(a.boundingBox)];
+    }
+
+    cacheByKey.set(key, result);
+    return result;
 }
 
 function getColorByColorSet(
