@@ -576,6 +576,13 @@ async function renderInlayOverrideChild<T extends keyof RenderChildTypeMap>(
         </div>`;
 }
 
+// Per-focus rendered-HTML cache. The structure pass (resolveIcons=false) and the icon pass
+// (resolveIcons=true) render the same focus object twice per load, and the markup is identical
+// either way: icons/titlebars/overlays are styleTable rules referenced by {{iconClass}}, only the
+// styleTable contents differ between passes. Keyed by the focus object, so a re-parse (new
+// objects, also on dependency changes) invalidates automatically; a WeakMap never leaks.
+const renderedFocusHtmlCache = new WeakMap<Focus, string>();
+
 async function renderFocus(
     focus: Focus,
     styleTable: StyleTable,
@@ -623,6 +630,88 @@ async function renderFocus(
         `
     );
 
+    // Layout classes are registered on every pass (the styleTable is fresh per render), then the
+    // markup assembly reuses the cached string when this focus object was already rendered.
+    const focusCommonClass = styleTable.style('focus-common', () => `
+        position: relative;
+        width: 100%;
+        height: 100%;
+        text-align: center;
+        cursor: pointer;
+    `);
+    const focusIconLayerClass = styleTable.style('focus-icon-layer', () => `
+        position: absolute;
+        left: 50%;
+        top: calc(50% - 18px);
+        transform: translate(-50%, -50%);
+        background-position-x: center;
+        background-position-y: center;
+        background-repeat: no-repeat;
+        z-index: 1;
+    `);
+    const focusTitlebarLayerClass = styleTable.style('focus-titlebar-layer', () => `
+        position: absolute;
+        left: 50%;
+        top: 70px;
+        transform: translateX(-50%);
+        background-repeat: no-repeat;
+        z-index: 0;
+    `);
+    const focusOverlayLayerClass = styleTable.style('focus-overlay-layer', () => `
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, calc(-50% - 3px));
+        background-repeat: no-repeat;
+        z-index: 2;
+    `);
+    const focusCheckboxClass = styleTable.style('focus-checkbox', () => `position: absolute; top: 1px; z-index: 3;`);
+    const focusSpanClass = styleTable.style('focus-span', () => `
+        position: relative;
+        z-index: 3;
+        margin: 10px -400px;
+        margin-top: 85px;
+        text-align: center;
+        display: inline-block;
+        pointer-events: none;
+    `);
+
+    const cachedHtml = renderedFocusHtmlCache.get(focus);
+    if (cachedHtml !== undefined) {
+        return cachedHtml;
+    }
+    const html = assembleFocusHtml(focus, file, {
+        titlebarClass,
+        overlayClass,
+        hasCustomTitlebar: titlebarObject !== undefined,
+        hasFocusOverlay: overlayObject !== undefined,
+        focusCommonClass,
+        focusIconLayerClass,
+        focusTitlebarLayerClass,
+        focusOverlayLayerClass,
+        focusCheckboxClass,
+        focusSpanClass,
+    });
+    renderedFocusHtmlCache.set(focus, html);
+    return html;
+}
+
+export interface FocusHtmlClasses {
+    titlebarClass: string;
+    overlayClass: string;
+    hasCustomTitlebar: boolean;
+    hasFocusOverlay: boolean;
+    focusCommonClass: string;
+    focusIconLayerClass: string;
+    focusTitlebarLayerClass: string;
+    focusOverlayLayerClass: string;
+    focusCheckboxClass: string;
+    focusSpanClass: string;
+}
+
+// Pure markup assembly for one focus cell. Deterministic per (focus, classes), so renderFocus can
+// cache it across passes over the same focus object. Exported for unit tests of the cache contract.
+export function assembleFocusHtml(focus: Focus, file: string, classes: FocusHtmlClasses): string {
     // The label is always the raw focus id. Localised names are not embedded here: they are resolved
     // on demand by the webview's ID/name toggle (requestFocusNames -> focusNames) against the
     // prewarmed localisation index, so the lazy index build only ever serves that toggle.
@@ -631,13 +720,7 @@ async function renderFocus(
     return `<div
     class="
         navigator
-        ${styleTable.style('focus-common', () => `
-            position: relative;
-            width: 100%;
-            height: 100%;
-            text-align: center;
-            cursor: pointer;
-        `)}
+        ${classes.focusCommonClass}
     "
     data-focus-id="${focus.id}"
     start="${focus.token?.start}"
@@ -645,37 +728,14 @@ async function renderFocus(
     ${file === focus.file ? '' : `file="${focus.file}"`}
     title="${focus.id}\n({{position}})">
         <div
-        class="{{iconClass}} ${styleTable.style('focus-icon-layer', () => `
-            position: absolute;
-            left: 50%;
-            top: calc(50% - 18px);
-            transform: translate(-50%, -50%);
-            background-position-x: center;
-            background-position-y: center;
-            background-repeat: no-repeat;
-            z-index: 1;
-        `)}"></div>
+        class="{{iconClass}} ${classes.focusIconLayerClass}"></div>
         <div
-        class="focus-titlebar-layer ${titlebarClass} ${styleTable.style('focus-titlebar-layer', () => `
-            position: absolute;
-            left: 50%;
-            top: 70px;
-            transform: translateX(-50%);
-            background-repeat: no-repeat;
-            z-index: 0;
-        `)}"
-        data-has-custom-titlebar="${titlebarObject ? 'true' : 'false'}"></div>
+        class="focus-titlebar-layer ${classes.titlebarClass} ${classes.focusTitlebarLayerClass}"
+        data-has-custom-titlebar="${classes.hasCustomTitlebar ? 'true' : 'false'}"></div>
         <div
-        class="focus-overlay-layer ${overlayClass} ${styleTable.style('focus-overlay-layer', () => `
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, calc(-50% - 3px));
-            background-repeat: no-repeat;
-            z-index: 2;
-        `)}"
-        data-has-focus-overlay="${overlayObject ? 'true' : 'false'}"></div>
-        <div class="focus-checkbox ${styleTable.style('focus-checkbox', () => `position: absolute; top: 1px; z-index: 3;`)}">
+        class="focus-overlay-layer ${classes.overlayClass} ${classes.focusOverlayLayerClass}"
+        data-has-focus-overlay="${classes.hasFocusOverlay ? 'true' : 'false'}"></div>
+        <div class="focus-checkbox ${classes.focusCheckboxClass}">
             <input id="checkbox-${normalizeForStyle(focus.id)}" type="checkbox"/>
         </div>
         <!-- The outer span only provides the layout (the negative margins extend it far past the
@@ -683,15 +743,7 @@ async function renderFocus(
              label hit area, so clicking the text counts as the focus body (move/navigate) while
              clicking anywhere else in the cell passes through to the navigator (box-select). -->
         <span
-        class="${styleTable.style('focus-span', () => `
-            position: relative;
-            z-index: 3;
-            margin: 10px -400px;
-            margin-top: 85px;
-            text-align: center;
-            display: inline-block;
-            pointer-events: none;
-        `)}"
+        class="${classes.focusSpanClass}"
         data-focus-id="${focus.id}">
         <span style="pointer-events: auto;">${textContent}</span>
         </span>
