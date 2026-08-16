@@ -212,42 +212,9 @@ function currentFocusPositions(): Record<string, { x: number; y: number }> {
     return positions;
 }
 
-// Focus-cell interactions: a clean press-release on a focus cell navigates to the source line
-// (original behavior), dragging a focus cell moves the selection (dragging an unselected cell
-// selects it first), and dragging on empty canvas rubber-band box-selects every intersected
-// focus. Pointer events with pointer capture guarantee the release is always delivered, so
-// navigation cannot be lost to mouseup suppression.
-function bindFocusInteractions() {
-    const navigators = document.querySelectorAll<HTMLElement>('.navigator');
-    for (let i = 0; i < navigators.length; i++) {
-        const nav = navigators[i];
-        nav.addEventListener('pointerdown', (e) => {
-            if (e.button !== 0 || uiModalOpen) {
-                return;
-            }
-            // Clicks on the completion checkbox (or other inputs) never start a drag.
-            const target = e.target as HTMLElement;
-            if (target.closest('input, .focus-checkbox')) {
-                return;
-            }
-            const id = nav.dataset.focusId;
-            if (id === undefined) {
-                return;
-            }
-            // The icon/titlebar/overlay layers and the label are the focus body and are
-            // pointer-events: auto, so pressing them resolves to a child element (drag = move,
-            // press-release = navigate). Pressing the cell's visual gaps resolves to the
-            // navigator itself (everything else passes through), which box-selects instead.
-            const mode = target === nav ? 'rubber-band' : 'move';
-            // Capture guarantees the matching pointerup reaches us even if the pointer leaves the
-            // cell or the webview frame before release (the mouseup that used to be lost).
-            try {
-                nav.setPointerCapture(e.pointerId);
-            } catch { /* not supported (jsdom, older engines): mouse events still work */ }
-            startPointer(e, mode, id);
-        });
-    }
-}
+// Focus-cell interactions (navigate on press-release, drag to move, rubber-band box-select) are
+// handled by the delegated document pointerdown bound on load (see below), so cells reused across
+// incremental DOM updates keep working without re-binding.
 
 // Right-click context menu ---------------------------------------------
 let contextMenuEl: HTMLDivElement | null = null;
@@ -1264,10 +1231,8 @@ async function buildContent() {
     const inlayWindowPlaceholder = document.getElementById('inlaywindowplaceholder') as HTMLDivElement;
     inlayWindowPlaceholder.innerHTML = renderInlayWindows(focusTree, exprs);
 
-    bindFocusInteractions();
     setupCheckedFocuses(focuses, focusTree);
-    applyCustomTitlebarVisibility();
-    applyFocusOverlayVisibility();
+    applyCustomTitlebarVisibility();    applyFocusOverlayVisibility();
     // The rebuild replaced every focus label, so cached originals are stale. Re-apply the name
     // mode (no-op in ID mode) and the selection highlight after the fresh render.
     focusSpanOriginalHtml.clear();
@@ -1484,45 +1449,65 @@ function clearCheckedFocuses() {
     checkedFocuses = {};
 }
 
+// Handles a focus-completion checkbox toggle: enforces exclusive mutual exclusion, persists the
+// state, rebuilds (incrementally) and restores the scroll position. Invoked from the delegated
+// document change handler, so reused cells across incremental updates never need re-binding.
+async function onFocusCheckboxChange(checkbox: HTMLInputElement, focusId: string, focus: Focus): Promise<void> {
+    const focusCheckState = getState().checkedFocuses ?? {};
+    if (checkbox.checked) {
+        for (const exclusiveFocus of focus.exclusive) {
+            const exclusiveCheckbox = checkedFocuses[exclusiveFocus];
+            if (exclusiveCheckbox) {
+                exclusiveCheckbox.input.checked = false;
+                focusCheckState[exclusiveFocus] = false;
+            }
+        }
+    }
+    focusCheckState[focusId] = checkbox.checked;
+    setState({ checkedFocuses: focusCheckState });
+    saveUiState();
+
+    const rect = checkbox.getBoundingClientRect();
+    const oldLeft = rect.left, oldTop = rect.top;
+    await buildContent();
+
+    const newCheckbox = document.getElementById(`checkbox-${normalizeForStyle(focusId)}`) as HTMLInputElement;
+    if (newCheckbox) {
+        const rect = newCheckbox.getBoundingClientRect();
+        const newLeft = rect.left, newTop = rect.top;
+        window.scrollBy(newLeft - oldLeft, newTop - oldTop);
+    }
+
+    retriggerSearch();
+}
+
+// Syncs the completion-checkbox rows with the current tree. Wraps only newly-present checkboxes
+// (Checkbox inserts a visual container per wrap, so re-wrapping a reused cell would duplicate it)
+// and disposes rows that are no longer present. Change events are handled by the delegated
+// document handler via onFocusCheckboxChange.
 function setupCheckedFocuses(focuses: Focus[], focusTree: FocusTree) {
     const focusCheckState = getState().checkedFocuses ?? {};
+    const existing = new Set(Object.keys(checkedFocuses));
+    const wanted = new Set<string>();
     for (const focus of focuses) {
         const checkbox = document.getElementById(`checkbox-${normalizeForStyle(focus.id)}`) as HTMLInputElement;
-        if (checkbox) {
-            if (focusTree.conditionExprs.some(e => e.scopeName === '' && e.nodeContent === 'has_completed_focus = ' + focus.id)) {
-                checkbox.checked = !!focusCheckState[focus.id];
-                const checkboxItem = new Checkbox(checkbox);
-                checkedFocuses[focus.id] = checkboxItem;
-                checkbox.addEventListener('change', async () => {
-                    if (checkbox.checked) {
-                        for (const exclusiveFocus of focus.exclusive) {
-                            const exclusiveCheckbox = checkedFocuses[exclusiveFocus];
-                            if (exclusiveCheckbox) {
-                                exclusiveCheckbox.input.checked = false;
-                                focusCheckState[exclusiveFocus] = false;
-                            }
-                        }
-                    }
-                    focusCheckState[focus.id] = checkbox.checked;
-                    setState({ checkedFocuses: focusCheckState });
-                    saveUiState();
-
-                    const rect = checkbox.getBoundingClientRect();
-                    const oldLeft = rect.left, oldTop = rect.top;
-                    await buildContent();
-
-                    const newCheckbox = document.getElementById(`checkbox-${normalizeForStyle(focus.id)}`) as HTMLInputElement;
-                    if (newCheckbox) {
-                        const rect = newCheckbox.getBoundingClientRect();
-                        const newLeft = rect.left, newTop = rect.top;
-                        window.scrollBy(newLeft - oldLeft, newTop - oldTop);
-                    }
-                    
-                    retriggerSearch();
-                });
-            } else {
-                checkbox.parentElement?.remove();
+        if (!checkbox) {
+            continue;
+        }
+        if (focusTree.conditionExprs.some(e => e.scopeName === '' && e.nodeContent === 'has_completed_focus = ' + focus.id)) {
+            wanted.add(focus.id);
+            checkbox.checked = !!focusCheckState[focus.id];
+            if (!checkedFocuses[focus.id]) {
+                checkedFocuses[focus.id] = new Checkbox(checkbox);
             }
+        } else {
+            checkbox.parentElement?.remove();
+        }
+    }
+    for (const focusId of existing) {
+        if (!wanted.has(focusId)) {
+            checkedFocuses[focusId].dispose();
+            delete checkedFocuses[focusId];
         }
     }
 }
@@ -1698,25 +1683,70 @@ window.addEventListener('message', async (event) => {
 });
 
 window.addEventListener('load', tryRun(async function() {
-    // Empty canvas anywhere (outside focus cells and controls) starts a rubber-band box select.
-    // Bound on document so blank areas outside the tree container also work; registered once.
+    // Focus-cell and blank-canvas pointer handling, delegated on document (registered once). A
+    // clean press-release on a focus cell navigates to the source line, dragging a focus cell
+    // moves the selection, and dragging on empty canvas rubber-band box-selects every intersected
+    // focus. Delegation keeps interactions working across incremental DOM updates, where cells are
+    // reused instead of rebuilt and re-bound.
     document.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || uiModalOpen) {
             return;
         }
         const target = e.target as HTMLElement;
-        // Focus cells handle their own press (body vs gap); toolbar controls (buttons, selects,
-        // dropdowns, inputs), dropdown popups and the warnings textarea keep their own behavior;
-        // only blank canvas starts a box-select.
-        if (target.closest('.navigator') || target.closest('.toolbar, .toolbar-outer') ||
+        // Toolbar controls (buttons, selects, dropdowns, inputs), dropdown popups and the warnings
+        // textarea keep their own behavior.
+        if (target.closest('.toolbar, .toolbar-outer') ||
             target.closest('.select-dropdown') ||
             target.closest('input, select, textarea, button, label')) {
             return;
         }
+        const nav = target.closest('.navigator') as HTMLElement | null;
+        if (nav) {
+            const id = nav.dataset.focusId;
+            if (id === undefined) {
+                return;
+            }
+            // Clicks on the completion checkbox (or other inputs) never start a drag.
+            if (target.closest('input, .focus-checkbox')) {
+                return;
+            }
+            // The icon/titlebar/overlay layers and the label are the focus body and are
+            // pointer-events: auto, so pressing them resolves to a child element (drag = move,
+            // press-release = navigate). Pressing the cell's visual gaps resolves to the
+            // navigator itself (everything else passes through), which box-selects instead.
+            const mode = target === nav ? 'rubber-band' : 'move';
+            // Capture guarantees the matching pointerup reaches us even if the pointer leaves the
+            // cell or the webview frame before release (the mouseup that used to be lost).
+            try {
+                nav.setPointerCapture(e.pointerId);
+            } catch { /* not supported (jsdom, older engines): mouse events still work */ }
+            startPointer(e, mode, id);
+            return;
+        }
+        // Blank canvas anywhere (outside focus cells and controls) starts a rubber-band box select.
         try {
             document.body.setPointerCapture(e.pointerId);
         } catch { /* not supported (jsdom, older engines): mouse events still work */ }
         startPointer(e, 'rubber-band', undefined);
+    });
+
+    // Focus-completion checkboxes: one delegated change handler instead of per-cell bindings, so
+    // reused cells across incremental DOM updates keep working without re-binding.
+    document.addEventListener('change', (e) => {
+        const input = e.target as HTMLInputElement;
+        if (input.type !== 'checkbox') {
+            return;
+        }
+        const nav = input.closest('.navigator') as HTMLElement | null;
+        const focusId = nav?.dataset.focusId;
+        if (focusId === undefined) {
+            return;
+        }
+        const focus = focusTrees[selectedFocusTreeIndex]?.focuses[focusId];
+        if (!focus) {
+            return;
+        }
+        void onFocusCheckboxChange(input, focusId, focus);
     });
 
     // Right-click on a focus cell offers delete; on empty canvas it offers create.
