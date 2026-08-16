@@ -14,6 +14,7 @@ import { feLocalize } from './util/i18n';
 import { Checkbox } from "./util/checkbox";
 import { vscode } from "./util/vscode";
 import { substituteInlaySlots } from "./inlayslots";
+import { propagateAllowBranches, AllowBranchFocus } from "./focusbranch";
 
 initCommon();
 
@@ -1277,39 +1278,14 @@ async function buildContent() {
 }
 
 function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Record<string, boolean>) {
-    const focuses = focusTree.focuses;
-
-    let changed = true;
-    while (changed) {
-        changed = false;
-        for (const key in focuses) {
-            const focus = focuses[key];
-            if (focus.prerequisite.length === 0) {
-                continue;
-            }
-
-            if (focus.id in allowBranchOptionsValue) {
-                continue;
-            }
-
-            let allow = true;
-            for (const andPrerequests of focus.prerequisite) {
-                if (andPrerequests.length === 0) {
-                    continue;
-                }
-                allow = allow && andPrerequests.some(p => allowBranchOptionsValue[p] === true);
-                const deny = andPrerequests.every(p => allowBranchOptionsValue[p] === false);
-                if (deny) {
-                    allowBranchOptionsValue[focus.id] = false;
-                    changed = true;
-                    break;
-                }
-            }
-            if (allow) {
-                allowBranchOptionsValue[focus.id] = true;
-                changed = true;
-            }
-        }
+    // Dependency-driven queue propagation (O(V + E)) replaces the while-changed full rescan
+    // (worst case O(V^2)); the pure helper reproduces the scan's fixed point exactly.
+    const propagated = propagateAllowBranches(
+        focusTree.focuses as unknown as Record<string, AllowBranchFocus>,
+        allowBranchOptionsValue,
+    );
+    for (const key in propagated) {
+        allowBranchOptionsValue[key] = propagated[key];
     }
 }
 
