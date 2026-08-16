@@ -1,7 +1,7 @@
 import { Province, Point, State, Zone, Terrain, StrategicRegion, SupplyArea } from "../../src/previewdef/worldmap/definitions";
 import { FEWorldMap, Loader } from "./loader";
 import { ViewPoint } from "./viewpoint";
-import { bboxCenter, distanceSqr, distanceHamming } from "./graphutils";
+import { bboxCenter, distanceSqr, distanceHamming, mergeRiverRuns, RiverPixel } from "./graphutils";
 import { TopBar, topBarHeight, ColorSet, ViewMode } from "./topbar";
 import { Subscriber } from "../util/event";
 import { arrayToMap } from "../util/common";
@@ -548,13 +548,21 @@ export class Renderer extends Subscriber {
             }
 
             const hasWarning = showRiverWarning && worldMap.getRiverWarnings(i).length > 0;
+            // Batch per-pixel fills into horizontal same-color runs (mergeRiverRuns). The canvas
+            // scale is an integer >= 1 here (isRiverVisible gates on scale >= 1), so a run's
+            // fillRect covers exactly the pixels it merged, with the same snap as per-pixel fills.
+            const pixels: RiverPixel[] = [];
             for (const key in river.colors) {
                 const index = parseInt(key, 10);
-                const x = index % river.boundingBox.w + river.boundingBox.x;
-                const y = Math.floor(index / river.boundingBox.w) + river.boundingBox.y;
-                const color = river.colors[key];
-                context.fillStyle = hasWarning && color >= 3 ? warningColor : riverColors[color];
-                context.fillRect(viewPoint.convertX(x + xOffset), viewPoint.convertY(y), viewPoint.scale, viewPoint.scale);
+                pixels.push({
+                    x: index % river.boundingBox.w + river.boundingBox.x,
+                    y: Math.floor(index / river.boundingBox.w) + river.boundingBox.y,
+                    color: river.colors[key],
+                });
+            }
+            for (const run of mergeRiverRuns(pixels)) {
+                context.fillStyle = hasWarning && run.color >= 3 ? warningColor : riverColors[run.color];
+                context.fillRect(viewPoint.convertX(run.x + xOffset), viewPoint.convertY(run.y), run.w * viewPoint.scale, viewPoint.scale);
             }
         }
     }
