@@ -389,4 +389,58 @@ describe('webview/focustree interactions', function () {
         cancelBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         delete uiState.lastCreatedFocus;
     });
+
+    it('incremental rebuild keeps completion-checkbox wrappers unique', async function () {
+        // A focus whose tree carries a completion condition, so setupCheckedFocuses wraps its
+        // checkbox (the toolbar's own checkbox lives outside the placeholder and is unrelated).
+        const focusWithCheckbox = {
+            id: 'a', x: 0, y: 0, icon: [], textIcon: undefined, overlay: undefined,
+            prerequisite: [], exclusive: [], hasAllowBranch: false, inAllowBranch: [],
+            allowBranch: undefined, relativePositionId: undefined, offset: [],
+            token: { start: 10, end: 20 }, xToken: undefined, yToken: undefined, file: 'x.txt',
+        };
+        const tree = {
+            id: 'test', focuses: { a: focusWithCheckbox },
+            inlayWindowRefs: [], inlayWindows: [], inlayConditionExprs: [],
+            allowBranchOptions: [], conditionExprs: [{ scopeName: '', nodeContent: 'has_completed_focus = a' }],
+            isSharedFocues: false, warnings: [],
+        };
+        const rendered = {
+            a: '<div class="navigator" data-focus-id="a" start="10" end="20">' +
+                '<div class="focus-checkbox"><input id="checkbox-a" type="checkbox"/></div>' +
+                '<span data-focus-id="a">{{iconClass}} {{position}}</span></div>',
+        };
+        const postUpdate = (focus: any) => {
+            window.dispatchEvent(new MessageEvent('message', {
+                data: {
+                    type: 'update',
+                    focusTrees: [{ ...tree, focuses: { a: focus } }],
+                    renderedFocus: rendered,
+                    renderedInlayWindows: {},
+                    gridBox: { position: { x: 50, y: 50 }, slotsize: { width: 96, height: 130 } },
+                    useConditionInFocus: false,
+                    xGridSize: 96,
+                },
+            }));
+        };
+        const flush = async () => {
+            for (let i = 0; i < 30; i++) { await Promise.resolve(); }
+        };
+        const countWrappers = () => document.querySelectorAll('#focustreeplaceholder .checkbox-container-out').length;
+
+        // First incremental render with the checkbox row: wrapped exactly once.
+        postUpdate(focusWithCheckbox);
+        await flush();
+        assert.strictEqual(countWrappers(), 1, 'checkbox wrapped exactly once on the first render');
+
+        // Identical re-render: the cell is kept, the wrapper must not duplicate.
+        postUpdate({ ...focusWithCheckbox });
+        await flush();
+        assert.strictEqual(countWrappers(), 1, 'kept cell must not re-wrap its checkbox');
+
+        // Cell moves: the patch replaces the cell, and the fresh checkbox is wrapped exactly once.
+        postUpdate({ ...focusWithCheckbox, x: 1 });
+        await flush();
+        assert.strictEqual(countWrappers(), 1, 'replaced cell must wrap its checkbox exactly once');
+    });
 });

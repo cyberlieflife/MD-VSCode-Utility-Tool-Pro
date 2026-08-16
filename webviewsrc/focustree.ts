@@ -15,6 +15,7 @@ import { Checkbox } from "./util/checkbox";
 import { vscode } from "./util/vscode";
 import { substituteInlaySlots } from "./inlayslots";
 import { propagateAllowBranches, AllowBranchFocus } from "./focusbranch";
+import { patchFocusTreeContent } from "./focustreepatch";
 
 initCommon();
 
@@ -1181,7 +1182,6 @@ async function buildContent() {
     const checkedFocusesExprs = Object.keys(focusCheckState)
         .filter(fid => focusCheckState[fid])
         .map(fid => ({ scopeName: '', nodeContent: 'has_completed_focus = ' + fid }));
-    clearCheckedFocuses();
 
     const focustreeplaceholder = document.getElementById('focustreeplaceholder') as HTMLDivElement;
     
@@ -1227,12 +1227,13 @@ async function buildContent() {
         cornerPosition: 0.5,
     });
 
-    focustreeplaceholder.innerHTML = focusTreeContent + styleTable.toStyleElement((window as any).styleNonce);
+    patchFocusTreeContent(focustreeplaceholder, focusTreeContent, styleTable, (window as any).styleNonce);
     const inlayWindowPlaceholder = document.getElementById('inlaywindowplaceholder') as HTMLDivElement;
     inlayWindowPlaceholder.innerHTML = renderInlayWindows(focusTree, exprs);
 
     setupCheckedFocuses(focuses, focusTree);
-    applyCustomTitlebarVisibility();    applyFocusOverlayVisibility();
+    applyCustomTitlebarVisibility();
+    applyFocusOverlayVisibility();
     // The rebuild replaced every focus label, so cached originals are stale. Re-apply the name
     // mode (no-op in ID mode) and the selection highlight after the fresh render.
     focusSpanOriginalHtml.clear();
@@ -1442,13 +1443,6 @@ function focusToGridItem(
     };
 }
 
-function clearCheckedFocuses() {
-    for (const focusId in checkedFocuses) {
-        checkedFocuses[focusId].dispose();
-    }
-    checkedFocuses = {};
-}
-
 // Handles a focus-completion checkbox toggle: enforces exclusive mutual exclusion, persists the
 // state, rebuilds (incrementally) and restores the scroll position. Invoked from the delegated
 // document change handler, so reused cells across incremental updates never need re-binding.
@@ -1497,7 +1491,10 @@ function setupCheckedFocuses(focuses: Focus[], focusTree: FocusTree) {
         if (focusTree.conditionExprs.some(e => e.scopeName === '' && e.nodeContent === 'has_completed_focus = ' + focus.id)) {
             wanted.add(focus.id);
             checkbox.checked = !!focusCheckState[focus.id];
-            if (!checkedFocuses[focus.id]) {
+            // Re-wrap when the row is new OR its previous input left the DOM (an incremental patch
+            // replaced that cell); a stale wrapper would leave the fresh checkbox unwrapped.
+            if (!checkedFocuses[focus.id] || !document.contains(checkedFocuses[focus.id].input)) {
+                checkedFocuses[focus.id]?.dispose();
                 checkedFocuses[focus.id] = new Checkbox(checkbox);
             }
         } else {
