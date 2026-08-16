@@ -13,6 +13,7 @@ import { toNumberLike } from "../src/hoiformat/schema";
 import { feLocalize } from './util/i18n';
 import { Checkbox } from "./util/checkbox";
 import { vscode } from "./util/vscode";
+import { substituteInlaySlots } from "./inlayslots";
 
 initCommon();
 
@@ -1578,10 +1579,13 @@ function renderInlayWindows(focusTree: FocusTree, exprs: ConditionItem[]): strin
 
     const renderedInlayWindows: Record<string, string> = (window as any).renderedInlayWindows ?? {};
     const template = renderedInlayWindows[selectedInlayWindow.id] ?? '';
-    return selectedInlayWindow.scriptedImages.reduce((content, slot) => {
+    const slotClasses: Record<string, string> = {};
+    for (const slot of selectedInlayWindow.scriptedImages) {
         const activeOption = getActiveInlayOption(slot.gfxOptions, exprs);
-        return content.split(`{{inlay_slot_class:${slot.id}}}`).join(activeOption ? getInlayGfxClassName(activeOption.gfxName, activeOption.gfxFile) : '');
-    }, template);
+        slotClasses[slot.id] = activeOption ? getInlayGfxClassName(activeOption.gfxName, activeOption.gfxFile) : '';
+    }
+    // One regex pass over the template instead of a split/join per slot (O(slots * length) -> O(length)).
+    return substituteInlaySlots(template, slotClasses);
 }
 
 function getActiveInlayOption<T extends { condition: any }>(options: T[], exprs: ConditionItem[]): T | undefined {
