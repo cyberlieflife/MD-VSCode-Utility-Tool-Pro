@@ -13,6 +13,7 @@ import { WorldMapLoader } from './loader/worldmaploader';
 import { isEqual } from 'lodash';
 import { LoaderSession } from '../../util/loader/loader';
 import { TelemetryMessage, sendByMessage } from '../../util/telemetry';
+import { itemFingerprints, collectChangeRanges } from './itemfingerprint';
 
 export class WorldMap {
     public panel: vscode.WebviewPanel | undefined;
@@ -279,36 +280,26 @@ export class WorldMap {
         const changeMessagesCountLimit = 30;
         const messageCountLimit = 300;
 
-        let lastDifferenceStart: number | undefined = undefined;
-        for (let i = listStart; i <= listEnd; i++) {
-            if (i === listEnd || isEqual(list[i], cachedList[i])) {
-                if (lastDifferenceStart !== undefined) {
-                    changeMessages.push({
-                        command,
-                        data: JSON.stringify(slice(list, lastDifferenceStart, i)),
-                        start: lastDifferenceStart,
-                        end: i,
-                    });
-                    if (changeMessages.length > changeMessagesCountLimit) {
-                        return false;
-                    }
-                    lastDifferenceStart = undefined;
-                }
-            } else {
-                if (lastDifferenceStart === undefined) {
-                    lastDifferenceStart = i;
-                } else if (i - lastDifferenceStart >= messageCountLimit) {
-                    changeMessages.push({
-                        command,
-                        data: JSON.stringify(slice(list, lastDifferenceStart, i)),
-                        start: lastDifferenceStart,
-                        end: i,
-                    });
-                    if (changeMessages.length > changeMessagesCountLimit) {
-                        return false;
-                    }
-                    lastDifferenceStart = i;
-                }
+        // Fast path: the sub-loader did not reload, so its result array is the same object as the
+        // cached one and nothing in this list changed.
+        if (list === cachedList) {
+            return true;
+        }
+
+        // Fingerprint comparison replaces the per-item isEqual deep walk. Ranges come back relative
+        // to the compared slice and map to absolute indices (listStart + relative) for the messages.
+        const newFps = itemFingerprints(list, listStart, listEnd);
+        const oldFps = itemFingerprints(cachedList, listStart, listEnd);
+        const ranges = collectChangeRanges(i => newFps[i] === oldFps[i], listEnd - listStart, messageCountLimit);
+        for (const range of ranges) {
+            changeMessages.push({
+                command,
+                data: JSON.stringify(slice(list, listStart + range.start, listStart + range.end)),
+                start: listStart + range.start,
+                end: listStart + range.end,
+            });
+            if (changeMessages.length > changeMessagesCountLimit) {
+                return false;
             }
         }
 
