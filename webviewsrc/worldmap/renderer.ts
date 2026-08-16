@@ -1239,7 +1239,9 @@ function getColorByColorSet(
         case 'country':
             {
                 const stateId = provinceToState[province.id];
-                return worldMap.countries.find(c => c && c.tag === worldMap.getStateById(stateId)?.owner)?.color ?? defaultColor(province);
+                const owner = worldMap.getStateById(stateId)?.owner;
+                // O(1) tag -> color lookup replaces a per-province countries.find() scan.
+                return owner === undefined ? defaultColor(province) : worldMap.getCountryColorByTag()[owner] ?? defaultColor(province);
             }
         case 'terrain':
             {

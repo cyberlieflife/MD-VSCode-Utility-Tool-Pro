@@ -6,6 +6,7 @@ import { WorldMapWarning, Terrain, StrategicRegion, SupplyArea, Railway, SupplyN
 import { vscode } from "../util/vscode";
 import { BehaviorSubject, fromEvent, Observable, ObservedValueOf, Subject } from 'rxjs';
 import { buildProvinceSpatialIndex, defaultCellSize, ProvinceSpatialIndex, queryPointCandidates } from "./spatialindex";
+import { buildWarningIndex, WarningIndex, queryProvinceWarnings, queryStateWarnings, queryStrategicRegionWarnings, querySupplyAreaWarnings, queryRiverWarnings } from "./warningindex";
 
 interface ExtraMapData {
     provincesCount: number;
@@ -35,6 +36,8 @@ interface FEWorldMapClassExtra {
     getSupplyNodeByProvinceId(provinceId: number): SupplyNode | undefined;
 
     getProvinceByPosition(x: number, y: number): Province | undefined;
+
+    getCountryColorByTag(): Record<string, number>;
 
     getProvinceWarnings(province?: Province, state?: State, strategicRegion?: StrategicRegion, supplyArea?: SupplyArea): string[];
     getStateWarnings(state: State, supplyArea?: SupplyArea): string[];
@@ -285,6 +288,10 @@ export class FEWorldMapClass implements FEWorldMap {
     // region-label background queries). Memoized per instance like the reverse maps above, so a
     // mid-load emit discards a half-built index and the final instance builds against complete data.
     private provinceSpatialIndexMemo: ProvinceSpatialIndex | undefined = undefined;
+    // Reverse warning index and country tag -> color map, built lazily for the render hot path
+    // (per-province coloring / tooltips). Same per-instance lifetime as the other memos.
+    private warningIndexMemo: WarningIndex | undefined = undefined;
+    private countryColorByTagMemo: Record<string, number> | undefined = undefined;
 
     constructor(worldMap?: WorldMapData & ExtraMapData) {
         Object.assign(this, worldMap ?? ({
@@ -472,35 +479,44 @@ export class FEWorldMapClass implements FEWorldMap {
         }
     }
 
+    public getWarningIndex(): WarningIndex {
+        if (this.warningIndexMemo === undefined) {
+            this.warningIndexMemo = buildWarningIndex(this.warnings);
+        }
+        return this.warningIndexMemo;
+    }
+
+    public getCountryColorByTag(): Record<string, number> {
+        if (this.countryColorByTagMemo === undefined) {
+            const result: Record<string, number> = {};
+            for (const country of this.countries) {
+                // Keep the FIRST country of a duplicated tag, mirroring countries.find().
+                if (country && result[country.tag] === undefined) {
+                    result[country.tag] = country.color;
+                }
+            }
+            this.countryColorByTagMemo = result;
+        }
+        return this.countryColorByTagMemo;
+    }
+
     public getProvinceWarnings(province?: Province, state?: State, strategicRegion?: StrategicRegion, supplyArea?: SupplyArea): string[] {
-        return this.warnings
-            .filter(v => v.source.some(s =>
-                (province && s.type === 'province' && (s.id === province.id || s.color === province.color)) || 
-                (state && s.type === 'state' && s.id === state.id) ||
-                (strategicRegion && s.type === 'strategicregion' && s.id === strategicRegion.id) ||
-                (supplyArea && s.type === 'supplyarea' && s.id === supplyArea.id)
-                ))
-            .map(v => v.text);
+        return queryProvinceWarnings(this.getWarningIndex(), this.warnings, province, state, strategicRegion, supplyArea);
     }
 
     public getStateWarnings(state: State, supplyArea?: SupplyArea): string[] {
-        return this.warnings
-            .filter(v => v.source.some(s =>
-                (s.type === 'state' && s.id === state.id) ||
-                (supplyArea && s.type === 'supplyarea' && s.id === supplyArea.id)
-                ))
-            .map(v => v.text);
+        return queryStateWarnings(this.getWarningIndex(), this.warnings, state, supplyArea);
     }
 
     public getStrategicRegionWarnings(strategicRegion: StrategicRegion): string[] {
-        return this.warnings.filter(v => v.source.some(s => s.type === 'strategicregion' && s.id === strategicRegion.id)).map(v => v.text);
+        return queryStrategicRegionWarnings(this.getWarningIndex(), this.warnings, strategicRegion);
     }
     
     public getSupplyAreaWarnings(supplyArea: SupplyArea): string[] {
-        return this.warnings.filter(v => v.source.some(s => s.type === 'supplyarea' && s.id === supplyArea.id)).map(v => v.text);
+        return querySupplyAreaWarnings(this.getWarningIndex(), this.warnings, supplyArea);
     }
 
     public getRiverWarnings(riverIndex: number): string[] {
-        return this.warnings.filter(v => v.source.some(s => s.type === 'river' && s.index === riverIndex)).map(v => v.text);
+        return queryRiverWarnings(this.getWarningIndex(), this.warnings, riverIndex);
     }
 }
