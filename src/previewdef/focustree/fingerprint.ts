@@ -46,9 +46,8 @@ const iconKeyPrefixes = ['st-focus-icon-', 'st-focus-titlebar-', 'st-focus-overl
 
 // Serialize a record with its keys in sorted order so insertion order (which varies under the
 // 8-way concurrent render) does not change the fingerprint.
-function sortedRecordEntries(record: Record<string, string>): [string, string][] {
-    return Object.keys(record).sort().map(k => [k, record[k]] as [string, string]);
-}
+// (The structural fingerprint now folds each record via hashStringRecord below; key sorting is
+// preserved there.)
 
 export function computeStructuralFingerprint(input: FocusTreeStructureInput): string {
     // Hash each block separately and join fixed-width hex digests, instead of one big
@@ -64,13 +63,41 @@ export function computeStructuralFingerprint(input: FocusTreeStructureInput): st
     const h64 = (s: string): string => fnv1a64Hex(s);
     return [
         h64(JSON.stringify(input.focusTrees)),
-        h32(JSON.stringify(sortedRecordEntries(input.renderedFocus))),
-        h32(JSON.stringify(sortedRecordEntries(input.renderedInlayWindows))),
+        hashStringRecord(input.renderedFocus),
+        hashStringRecord(input.renderedInlayWindows),
         h32(JSON.stringify(input.gridBox)),
         input.useConditionInFocus ? '1' : '0',
         input.xGridSize.toString(16).padStart(2, '0'),
-        h32(JSON.stringify(sortedRecordEntries(input.styleRecords))),
+        hashStringRecord(input.styleRecords),
     ].join(':');
+}
+
+// 64-bit fold over the sorted (key, value-hash) pairs of a string record, without materialising
+// the whole record as one JSON string (renderedFocus/renderedInlayWindows carry thousands of HTML
+// fragments and the styleTable records all per-focus rules). Each value is reduced to a fixed-width
+// 32-bit hash first, so the fold input stays tiny; the key, a ':' separator and the fixed-width
+// digest keep the pair serialization unambiguous. Key order is sorted, matching the previous
+// sortedRecordEntries behavior.
+function hashStringRecord(record: Record<string, string>): string {
+    const keys = Object.keys(record).sort();
+    let h1 = 2166136261;
+    let h2 = 2166136261 ^ 0xFFFFFFFF;
+    const fold = (s: string): void => {
+        for (let i = 0; i < s.length; i++) {
+            const c = s.charCodeAt(i);
+            h1 ^= c;
+            h1 = Math.imul(h1, 16777619) >>> 0;
+            h2 ^= c;
+            h2 = Math.imul(h2, 16777619) >>> 0;
+        }
+    };
+    for (const key of keys) {
+        fold(key);
+        fold(':');
+        fold(fnv1a(record[key]).toString(16).padStart(8, '0'));
+        fold(';');
+    }
+    return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
 
 // 64-bit fnv1a digest as a 16-hex-char string: two 32-bit passes over the same input in a single
