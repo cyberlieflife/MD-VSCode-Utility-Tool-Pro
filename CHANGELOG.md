@@ -1,3 +1,20 @@
+## [v1.1.22] - 2026-08-16
+
+### Performance
+
+- [World Map] Province hover and region-label background lookups now go through a spatial index over bounding boxes instead of scanning every province per query.
+- [World Map] Country colors and warning lookups in the render path are precomputed maps instead of per-province scans.
+- [World Map] River pixels are batched into horizontal same-color runs before drawing, cutting fillRect calls by orders of magnitude.
+- [World Map] The supply pass iterates only the visible provinces (railway checks short-circuit) and resize repaints are rAF-coalesced.
+- [World Map] Incremental reloads diff items by stable 64-bit fingerprints and skip untouched arrays by reference instead of deep-comparing every item.
+- [Focus Tree] The rendered-focus/inlay/style fingerprints fold each record per entry instead of serializing large HTML blobs on every edit.
+- [Focus Tree] Rendered focus markup is cached per parsed focus object and reused across the structure and icon passes.
+- [Focus Tree] Grid rebuilds apply incrementally: unchanged cells keep their DOM nodes (selection, scroll and checkbox state survive), and cell/checkbox events are delegated on document so reused cells never re-bind.
+- [Focus Tree] Search is debounced and reuses cached focus elements.
+- [Focus Tree] Inlay placeholder substitution is a single regex pass over the template.
+- [Focus Tree] Allow-branch state propagates through a dependency-driven queue instead of a while-changed rescan.
+- [Focus Tree] The new propagation and incremental grid patch are locked by property tests against the previous algorithms.
+
 v1.1.15
 
   Functionality:
