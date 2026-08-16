@@ -62,10 +62,41 @@ jobs:
         fi
         echo "vsix=$vsix" >> "$GITHUB_OUTPUT"
 
+    # Release notes = 仓库 CHANGELOG.md 中当前版本的小节（人工维护的详细变更）+
+    # GitHub 自动生成的 commit/PR 变更列表（含 Full Changelog 对比链接）。
+    # gh 不允许 --generate-notes 与自定义 notes 同时使用，因此先以自动 notes 创建 release，
+    # 再把 CHANGELOG 小节拼到自动 notes 之前，最后用 --notes-file 覆盖 body。
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
-      with:
-        tag_name: ${{ steps.version.outputs.tag }}
-        name: ${{ steps.version.outputs.tag }}
-        generate_release_notes: true
-        files: ${{ steps.find_vsix.outputs.vsix }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        TAG="${{ steps.version.outputs.tag }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        VSIX="${{ steps.find_vsix.outputs.vsix }}"
+
+        # 提取 CHANGELOG 中当前版本的小节；兼容 ## [vX.Y.Z]（新格式）与 vX.Y.Z 行（历史格式）。
+        # 标题判定用 index() 字面子串（部分 awk 对正则 \[ 的转义处理不一致），sub(/\r$/, "")
+        # 剔除 Windows 行尾，避免精确比较失败。
+        section_file="$(mktemp)"
+        awk -v v="$VERSION" '
+          { sub(/\r$/, "") }
+          index($0, "## [v") == 1 || $0 ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ {
+            if (in_section) exit
+            if (index($0, "## [v" v "]") == 1 || $0 == "v" v) in_section = 1
+            next
+          }
+          in_section { print }
+        ' CHANGELOG.md > "$section_file"
+
+        # 以 GitHub 自动生成的 notes 创建 release，再读取其 body 用于拼接。
+        gh release create "$TAG" "$VSIX" --title "$TAG" --generate-notes
+        auto_body="$(gh release view "$TAG" --json body -q .body)"
+
+        body_file="$(mktemp)"
+        if [ -s "$section_file" ]; then
+          { cat "$section_file"; printf '\n---\n\n%s\n' "$auto_body"; } > "$body_file"
+        else
+          printf '%s\n' "$auto_body" > "$body_file"
+        fi
+        gh release edit "$TAG" --notes-file "$body_file"
