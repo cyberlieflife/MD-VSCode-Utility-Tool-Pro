@@ -33,12 +33,17 @@ function showBranch(visibility: boolean, optionClass: string) {
     }
 };
 
+// Cached .focus elements refreshed by buildContent, so search() never re-queries the DOM on every
+// keystroke; the debounce below coalesces burst input into a single pass.
+let focusElementsCache: HTMLDivElement[] = [];
+let searchDebounceTimer: number | undefined;
+
 function search(searchContent: string, navigate: boolean = true) {
-    const focuses = document.getElementsByClassName('focus');
+    const focuses = focusElementsCache;
     const searchedFocus: HTMLDivElement[] = [];
     let navigated = false;
     for (let i = 0; i < focuses.length; i++) {
-        const focus = focuses[i] as HTMLDivElement;
+        const focus = focuses[i];
         if (searchContent && focus.id.toLowerCase().replace(/^focus_/, '').includes(searchContent)) {
             focus.style.outline = '1px solid #E33';
             focus.style.background = 'rgba(255, 0, 0, 0.5)';
@@ -1266,6 +1271,8 @@ async function buildContent() {
     focusSpanOriginalHtml.clear();
     updateFocusNameDisplay();
     updateFocusSelectionHighlight();
+    // Refresh the search element cache against the rebuilt DOM.
+    focusElementsCache = Array.from(document.getElementsByClassName('focus')) as HTMLDivElement[];
 }
 
 function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Record<string, boolean>) {
@@ -1881,20 +1888,36 @@ window.addEventListener('load', tryRun(async function() {
 
     searchbox.value = oldSearchboxValue;
 
+    // Debounced search: burst input (keyup/keypress/paste/cut) coalesces into one pass 200ms after
+    // the last keystroke. Enter always flushes first so navigation acts on the current value.
+    const flushSearch = () => {
+        if (searchDebounceTimer === undefined) {
+            return;
+        }
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = undefined;
+        currentNavigatedIndex = 0;
+        searchedFocus = search(oldSearchboxValue);
+        setState({ searchboxValue: oldSearchboxValue });
+        saveUiState();
+    };
     const searchboxChangeFunc = function(this: HTMLInputElement) {
         const searchboxValue = this.value.toLowerCase();
-        if (oldSearchboxValue !== searchboxValue) {
-            currentNavigatedIndex = 0;
-            searchedFocus = search(searchboxValue);
-            oldSearchboxValue = searchboxValue;
-            setState({ searchboxValue });
-            saveUiState();
+        if (oldSearchboxValue === searchboxValue) {
+            return;
         }
+        // Advance the tracked value immediately so repeated keys coalesce onto the latest text.
+        oldSearchboxValue = searchboxValue;
+        if (searchDebounceTimer !== undefined) {
+            clearTimeout(searchDebounceTimer);
+        }
+        searchDebounceTimer = window.setTimeout(flushSearch, 200);
     };
 
     searchbox.addEventListener('change', searchboxChangeFunc);
     searchbox.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
+            flushSearch();
             const visibleSearchedFocus = searchedFocus.filter(f => f.style.display !== 'none');
             if (visibleSearchedFocus.length > 0) {
                 currentNavigatedIndex = (currentNavigatedIndex + (e.shiftKey ? visibleSearchedFocus.length - 1 : 1)) % visibleSearchedFocus.length;
