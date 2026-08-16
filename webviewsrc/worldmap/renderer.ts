@@ -158,7 +158,9 @@ export class Renderer extends Subscriber {
     private resizeCanvas = () => {
         this.canvasWidth = this.mainCanvas.width = this.mapCanvas.width = this.backCanvas.width = window.innerWidth;
         this.canvasHeight = this.mainCanvas.height = this.mapCanvas.height = this.backCanvas.height = window.innerHeight;
-        this.renderCanvas();
+        // Coalesce the repaint into the rAF render like every other trigger; a resize storm (window
+        // drag) otherwise renders once per resize event.
+        this.scheduleRender();
     };
 
     private oldMapState: any = undefined;
@@ -477,7 +479,9 @@ export class Renderer extends Subscriber {
         
         context.strokeStyle = 'rgb(200, 0, 0)';
         worldMap.forEachRailway(railway => {
-            if (railway.provinces.every(id => !renderedProvincesById[id])) {
+            // Short-circuit: skip a railway only when NO province of it is on screen (the previous
+            // every() scanned the whole list; some() stops at the first hit).
+            if (!railway.provinces.some(id => renderedProvincesById[id])) {
                 return;
             }
 
@@ -505,14 +509,16 @@ export class Renderer extends Subscriber {
 
         context.fillStyle = 'rgb(200, 0, 0)';
         const size = Math.min(30, viewPoint.scale * 10);
-        worldMap.forEachSupplyNode(supplyNode => {
-            const province = renderedProvincesById[supplyNode.province];
-            if (province) {
+        // Iterate the rendered provinces and probe the O(1) supply-node memo instead of scanning
+        // every supply node per frame (nodes are sparse; rendered provinces are the visible set).
+        for (const province of Object.values(renderedProvincesById)) {
+            const supplyNode = worldMap.getSupplyNodeByProvinceId(province.id);
+            if (supplyNode) {
                 const x = viewPoint.convertX(province.centerOfMass.x + xOffset);
                 const y = viewPoint.convertY(province.centerOfMass.y);
                 context.fillRect(x - size / 2, y - size / 2, size, size);
             }
-        });
+        }
     }
 
     private static renderRivers(
