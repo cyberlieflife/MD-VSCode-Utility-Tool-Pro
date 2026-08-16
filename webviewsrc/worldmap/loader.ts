@@ -5,6 +5,7 @@ import { Subscriber } from "../util/event";
 import { WorldMapWarning, Terrain, StrategicRegion, SupplyArea, Railway, SupplyNode, Resource, River } from "../../src/previewdef/worldmap/definitions";
 import { vscode } from "../util/vscode";
 import { BehaviorSubject, fromEvent, Observable, ObservedValueOf, Subject } from 'rxjs';
+import { buildProvinceSpatialIndex, defaultCellSize, ProvinceSpatialIndex, queryPointCandidates } from "./spatialindex";
 
 interface ExtraMapData {
     provincesCount: number;
@@ -280,6 +281,10 @@ export class FEWorldMapClass implements FEWorldMap {
     private stateToSupplyAreaMemo: Record<number, number | undefined> | undefined = undefined;
     private provinceToRailwayLevelMemo: Record<number, number | undefined> | undefined = undefined;
     private provinceToSupplyNodeMemo: Record<number, SupplyNode | undefined> | undefined = undefined;
+    // Spatial index over province bounding boxes, built lazily for point lookups (hover and
+    // region-label background queries). Memoized per instance like the reverse maps above, so a
+    // mid-load emit discards a half-built index and the final instance builds against complete data.
+    private provinceSpatialIndexMemo: ProvinceSpatialIndex | undefined = undefined;
 
     constructor(worldMap?: WorldMapData & ExtraMapData) {
         Object.assign(this, worldMap ?? ({
@@ -347,16 +352,25 @@ export class FEWorldMapClass implements FEWorldMap {
         return this.provinceToSupplyNodeMemo[provinceId];
     }
     
+    public getProvinceSpatialIndex(): ProvinceSpatialIndex {
+        if (this.provinceSpatialIndexMemo === undefined) {
+            this.provinceSpatialIndexMemo = buildProvinceSpatialIndex(this.provinces, this.width, defaultCellSize(this.width));
+        }
+        return this.provinceSpatialIndexMemo;
+    }
+
     public getProvinceByPosition(x: number, y: number): Province | undefined {
         const point: Point = { x, y };
-        let resultProvince: Province | undefined = undefined;
-        this.forEachProvince(province => {
-            if (inBBox(point, province.boundingBox) && province.coverZones.some(z => inBBox(point, z))) {
-                resultProvince = province;
-                return true;
+        // Spatial index narrows the scan to the single grid cell the point falls into; the exact
+        // bounding-box + coverZones test is unchanged, so the result is identical to a full scan.
+        const candidates = queryPointCandidates(this.getProvinceSpatialIndex(), x, y);
+        for (const id of candidates) {
+            const province = this.provinces[id];
+            if (province && inBBox(point, province.boundingBox) && province.coverZones.some(z => inBBox(point, z))) {
+                return province;
             }
-        });
-        return resultProvince;
+        }
+        return undefined;
     }
 
     public getProvinceToStateMap(): Record<number, number | undefined> {
