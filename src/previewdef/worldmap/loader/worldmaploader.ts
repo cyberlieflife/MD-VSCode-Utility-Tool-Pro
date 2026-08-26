@@ -10,6 +10,10 @@ import { LoaderSession } from "../../../util/loader/loader";
 import { getConfiguration } from "../../../util/vsccommon";
 import { RailwayLoader, SupplyNodeLoader } from "./railway";
 import { ResourceDefinitionLoader } from "./resource";
+import { getImageByPath } from "../../../util/image/imagecache";
+
+const civilianFactoryImageFile = 'gfx/interface/conversion_mapicon_industry.dds';
+const militaryFactoryImageFile = 'gfx/interface/conversion_mapicon_arms.dds';
 
 export class WorldMapLoader extends Loader<WorldMapData> {
     private defaultMapLoader: DefaultMapLoader;
@@ -87,6 +91,14 @@ export class WorldMapLoader extends Loader<WorldMapData> {
         const resources = await this.resourcesLoader.load(session);
         session.throwIfCancelled();
 
+        // The civilian/military factory icons are plain DDS files shipped with the game; decode
+        // them to data URIs once per load so the webview can draw them next to the quantities.
+        const [civilianFactoryImage, militaryFactoryImage] = await Promise.all([
+            getImageByPath(civilianFactoryImageFile),
+            getImageByPath(militaryFactoryImageFile),
+        ]);
+        session.throwIfCancelled();
+
         const loadedLoaders = Array.from((session as any).loadedLoader).map<string>(v => (v as any).toString());
         debug('Loader session', loadedLoaders);
 
@@ -101,6 +113,10 @@ export class WorldMapLoader extends Loader<WorldMapData> {
             ...railways.result,
             ...supplyNodes.result,
             resources: resources.result,
+            factoryImages: {
+                civilian: civilianFactoryImage?.uri ?? '',
+                military: militaryFactoryImage?.uri ?? '',
+            },
             provincesCount: provinceMap.result.provinces.length,
             statesCount: stateMap.result.states.length,
             countriesCount: countries.result.length,
@@ -115,6 +131,7 @@ export class WorldMapLoader extends Loader<WorldMapData> {
         delete (worldMap as unknown as Partial<ProvinceMap>)['colorByPosition'];
 
         const dependencies = mergeInLoadResult(subLoaderResults, 'dependencies');
+        dependencies.push(civilianFactoryImageFile, militaryFactoryImageFile);
         debug('World map dependencies', dependencies);
 
         return {

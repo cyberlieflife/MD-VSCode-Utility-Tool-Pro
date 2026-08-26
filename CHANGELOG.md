@@ -1,3 +1,10 @@
+## [v1.1.24] - 2026-08-26
+
+### Functionality
+
+- [World Map] The display settings now include "Show Resources" and "Show Factories" toggles (both enabled by default). When the preview mode is set to State, the centre of each state shows its resource icons with quantities, and civilian/military factory icons with quantities loaded from the game's own assets (conversion_mapicon_industry / conversion_mapicon_arms). State buildings are read from the `history` block where HOI4 defines them, keeping both the current named keys and the legacy numeric ones.
+- [World Map] The state hover tooltip now lists the same resource and civilian/military factory rows with quantities beneath the state details.
+
 ## [v1.1.23] - 2026-08-26
 
 ### Functionality

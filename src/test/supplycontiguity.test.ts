@@ -33,6 +33,7 @@ function makeState(id: number, provinces: number[]): State {
         impassableIgnoredLinks: [],
         victoryPoints: {},
         resources: {},
+        buildings: {},
         boundingBox: { x: 0, y: 0, w: 0, h: 0 },
         centerOfMass: { x: 0, y: 0 },
         mass: 0,

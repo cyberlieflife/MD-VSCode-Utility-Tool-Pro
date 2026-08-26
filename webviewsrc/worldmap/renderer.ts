@@ -51,6 +51,46 @@ export class Renderer extends Subscriber {
     private cursorY = 0;
 
     private static resourceImages: Record<string, HTMLImageElement | undefined> = {};
+    private static factoryImages: { civilian?: HTMLImageElement, military?: HTMLImageElement } = {};
+
+    // Vertical gap between the factory row and the resource row when both are present.
+    private static readonly ICON_ROW_GAP = 5;
+    // Shared icon scale and number-slot width for factory/resource rows drawn over the map.
+    private static readonly ICON_ROW_SCALE = 0.7;
+    private static readonly ICON_ROW_LABEL_WIDTH = 16;
+    // Tooltip rows keep the pre-icon-row defaults (full-size icons, wider number slots).
+    private static readonly TOOLTIP_ICON_ROW_SCALE = 1;
+    private static readonly TOOLTIP_ICON_ROW_LABEL_WIDTH = 30;
+
+    // Single source of truth for laying out the factory and resource rows under a state label or
+    // inside its tooltip: row sizes, the gap between them, and whether each row exists. Callers
+    // pass the same layout object back to drawFactoryResourceRows so the frame and its content
+    // can never disagree about the geometry.
+    private static getFactoryResourceRowsLayout(state: State, scale: number, labelWidth: number) {
+        const factories = Renderer.getFactoriesSize(state, scale, labelWidth);
+        const resources = Renderer.getResourcesSize(state, scale, labelWidth);
+        const gap = factories.height > 0 && resources.height > 0 ? Renderer.ICON_ROW_GAP : 0;
+        return {
+            factories,
+            resources,
+            gap,
+            totalWidth: Math.max(factories.width, resources.width),
+            totalHeight: factories.height + gap + resources.height,
+        };
+    }
+
+    // Draws the factory row (civilian then military) and the resource row laid out by
+    // getFactoryResourceRowsLayout, left-aligned at (x, y).
+    private static drawFactoryResourceRows(context: CanvasRenderingContext2D, state: State, layout: ReturnType<typeof Renderer.getFactoryResourceRowsLayout>, x: number, y: number, scale: number, labelWidth: number) {
+        let iconY = y;
+        if (layout.factories.height > 0) {
+            Renderer.renderFactories(context, state, x, iconY, scale, labelWidth);
+            iconY += layout.factories.height + layout.gap;
+        }
+        if (layout.resources.height > 0) {
+            Renderer.renderResources(context, state, x, iconY, scale, labelWidth);
+        }
+    }
 
     constructor(private mainCanvas: HTMLCanvasElement, private viewPoint: ViewPoint, private loader: Loader, private topBar: TopBar) {
         super();
@@ -114,6 +154,21 @@ export class Renderer extends Subscriber {
             };
             image.src = resource.imageUri;
         }
+
+        const { civilian, military } = this.loader.worldMap.factoryImages;
+        const loadFactoryImage = (uri: string, set: (image: HTMLImageElement) => void) => {
+            if (!uri) {
+                return;
+            }
+            const image = new Image();
+            image.onload = () => {
+                set(image);
+                this.scheduleRender();
+            };
+            image.src = uri;
+        };
+        loadFactoryImage(civilian, image => Renderer.factoryImages.civilian = image);
+        loadFactoryImage(military, image => Renderer.factoryImages.military = image);
     };
 
     public renderCanvas = () => {
@@ -190,6 +245,8 @@ export class Renderer extends Subscriber {
             fastRendering: displayOptions.includes('fastrending'),
             supplyVisible: displayOptions.includes('supply'),
             riverVisible: displayOptions.includes('river'),
+            resourceVisible: displayOptions.includes('resource'),
+            factoryVisible: displayOptions.includes('factory'),
             ...this.viewPoint.toJson(),
         };
 
@@ -325,6 +382,14 @@ export class Renderer extends Subscriber {
         return topBar.display.selectedValues$.value.includes('supply');
     }
 
+    private static isResourceVisible(topBar: TopBar) {
+        return topBar.display.selectedValues$.value.includes('resource');
+    }
+
+    private static isFactoryVisible(topBar: TopBar) {
+        return topBar.display.selectedValues$.value.includes('factory');
+    }
+
     private static isRiverVisible(topBar: TopBar, viewPoint: ViewPoint) {
         if (topBar.display.selectedValues$.value.includes('adaptzooming')) {
             return 1 <= viewPoint.scale && topBar.display.selectedValues$.value.includes('river');
@@ -387,9 +452,22 @@ export class Renderer extends Subscriber {
                         const provinceColor = getColorByColorSet(colorSet, provinceAtLabel ?? province, worldMap, renderContext);
                         context.fillStyle = toColor(getHighConstrastColor(provinceColor));
                         context.fillText(region.id.toString(), viewPoint.convertX(labelPosition.x + xOffset), viewPoint.convertY(labelPosition.y));
-                        if (viewMode === 'state' && colorSet === 'resources') {
-                            const { width } = Renderer.getResourcesSize(region as State, 0.7, 16);
-                            Renderer.renderResources(context, region as State, viewPoint.convertX(labelPosition.x + xOffset) - width / 2, viewPoint.convertY(labelPosition.y) + 5, 0.7, 16);
+                        if (viewMode === 'state') {
+                            const state = region as State;
+                            const showFactories = Renderer.isFactoryVisible(topBar);
+                            const showResources = Renderer.isResourceVisible(topBar);
+                            if (showFactories || showResources) {
+                                const layout = Renderer.getFactoryResourceRowsLayout(state, Renderer.ICON_ROW_SCALE, Renderer.ICON_ROW_LABEL_WIDTH);
+                                const centerX = viewPoint.convertX(labelPosition.x + xOffset);
+                                let y = viewPoint.convertY(labelPosition.y) + 5;
+                                if (showFactories && layout.factories.width > 0) {
+                                    Renderer.renderFactories(context, state, centerX - layout.factories.width / 2, y, Renderer.ICON_ROW_SCALE, Renderer.ICON_ROW_LABEL_WIDTH);
+                                    y += layout.factories.height + Renderer.ICON_ROW_GAP;
+                                }
+                                if (showResources && layout.resources.width > 0) {
+                                    Renderer.renderResources(context, state, centerX - layout.resources.width / 2, y, Renderer.ICON_ROW_SCALE, Renderer.ICON_ROW_LABEL_WIDTH);
+                                }
+                            }
                         }
                     }
                 }
@@ -846,11 +924,11 @@ ${feLocalize('worldmap.tooltip.supplyvalue', 'Supply value')}=${supplyArea.value
 ${feLocalize('worldmap.tooltip.provinces', 'Provinces')}=${state.provinces.join(',')}
 ${worldMap.getStateWarnings(state, supplyArea).map(v => '|r|' + v).join('\n')}`,
             (width, height) => {
-                const { width: w, height: h } = Renderer.getResourcesSize(state);
-                return { width: Math.max(width, w), height: height + h };
+                const layout = Renderer.getFactoryResourceRowsLayout(state, Renderer.TOOLTIP_ICON_ROW_SCALE, Renderer.TOOLTIP_ICON_ROW_LABEL_WIDTH);
+                return { width: Math.max(width, layout.totalWidth), height: height + layout.totalHeight };
             },
             (x, y) => {
-                Renderer.renderResources(this.backCanvasContext, state, x, y);
+                Renderer.drawFactoryResourceRows(this.backCanvasContext, state, Renderer.getFactoryResourceRowsLayout(state, Renderer.TOOLTIP_ICON_ROW_SCALE, Renderer.TOOLTIP_ICON_ROW_LABEL_WIDTH), x, y, Renderer.TOOLTIP_ICON_ROW_SCALE, Renderer.TOOLTIP_ICON_ROW_LABEL_WIDTH);
             });
     }
 
@@ -976,6 +1054,77 @@ ${worldMap.getSupplyAreaWarnings(supplyArea).map(v => '|r|' + v).join('\n')}`);
         Renderer.renderAllOffsets(this.viewPoint, boundingBox, step, callback, minimalRenderCount);
     }
 
+    private static getFactoriesSize(state: State, scale: number = 1, labelWidth: number = 30): { width: number, height: number } {
+        let fullWidth = 0;
+        let maxHeight = 0;
+        if (Renderer.getCivilianFactories(state) > 0) {
+            const width = (Renderer.factoryImages.civilian?.naturalWidth ?? 24) * scale;
+            const height = (Renderer.factoryImages.civilian?.naturalHeight ?? 24) * scale;
+            maxHeight = Math.max(maxHeight, height);
+            fullWidth += width + labelWidth;
+        }
+        if (Renderer.getMilitaryFactories(state) > 0) {
+            const width = (Renderer.factoryImages.military?.naturalWidth ?? 24) * scale;
+            const height = (Renderer.factoryImages.military?.naturalHeight ?? 24) * scale;
+            maxHeight = Math.max(maxHeight, height);
+            fullWidth += width + labelWidth;
+        }
+        return { width: fullWidth, height: maxHeight };
+    }
+
+    private static renderFactories(context: CanvasRenderingContext2D, state: State, x: number, y: number, scale: number = 1, labelWidth: number = 30) {
+        // Reuse the region label's high-contrast color for the numbers next to each icon, and
+        // restore the alignment state afterwards so callers keep their own text layout intact.
+        const numberColor = context.fillStyle;
+        const previousTextAlign = context.textAlign;
+        const previousTextBaseline = context.textBaseline;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        const civilian = Renderer.getCivilianFactories(state);
+        const military = Renderer.getMilitaryFactories(state);
+        const civilianImage = Renderer.factoryImages.civilian;
+        const militaryImage = Renderer.factoryImages.military;
+        if (civilian > 0) {
+            const width = (civilianImage?.naturalWidth ?? 24) * scale;
+            const height = (civilianImage?.naturalHeight ?? 24) * scale;
+            if (civilianImage) {
+                context.drawImage(civilianImage, x, y, width, height);
+            } else {
+                context.fillStyle = 'rgb(52, 152, 219)';
+                context.fillRect(x, y, width, height);
+            }
+            context.fillStyle = numberColor;
+            context.fillText(civilian.toString(), x + width + labelWidth / 2, y + height / 2);
+            x += width + labelWidth;
+        }
+        if (military > 0) {
+            const width = (militaryImage?.naturalWidth ?? 24) * scale;
+            const height = (militaryImage?.naturalHeight ?? 24) * scale;
+            if (militaryImage) {
+                context.drawImage(militaryImage, x, y, width, height);
+            } else {
+                context.fillStyle = 'rgb(231, 76, 60)';
+                context.fillRect(x, y, width, height);
+            }
+            context.fillStyle = numberColor;
+            context.fillText(military.toString(), x + width + labelWidth / 2, y + height / 2);
+            x += width + labelWidth;
+        }
+        context.textAlign = previousTextAlign;
+        context.textBaseline = previousTextBaseline;
+    }
+
+    private static getCivilianFactories(state: State): number {
+        // Current HOI4 names the buildings; older mods use numeric ids (1 = civilian, 4 = military).
+        const buildings = state.buildings ?? {};
+        return buildings['industrial_complex'] ?? buildings['1'] ?? 0;
+    }
+
+    private static getMilitaryFactories(state: State): number {
+        const buildings = state.buildings ?? {};
+        return buildings['arms_factory'] ?? buildings['4'] ?? 0;
+    }
+
     private static getResourcesSize(state: State, scale: number = 1, labelWidth: number = 30): { width: number, height: number } {
         let fullWidth = 0;
         let maxHeight = 0;
@@ -997,6 +1146,8 @@ ${worldMap.getSupplyAreaWarnings(supplyArea).map(v => '|r|' + v).join('\n')}`);
     }
 
     private static renderResources(context: CanvasRenderingContext2D, state: State, x: number, y: number, scale: number = 1, labelWidth: number = 30) {
+        // Keep the caller's fill style for the quantity text; the gray fallback box must not leak it.
+        const numberColor = context.fillStyle;
         context.textAlign = 'center';
         context.textBaseline = 'middle';
         for (const resource in state.resources) {
@@ -1008,11 +1159,13 @@ ${worldMap.getSupplyAreaWarnings(supplyArea).map(v => '|r|' + v).join('\n')}`);
             const image = Renderer.resourceImages[resource];
             if (image) {
                 context.drawImage(image, x, y, image.naturalWidth * scale, image.naturalHeight * scale);
+                context.fillStyle = numberColor;
                 context.fillText(resourceNumber.toString(), x + (image?.naturalWidth ?? 0) * scale + labelWidth / 2, y + Math.max(0, image?.naturalHeight ?? 0) * scale / 2);
                 x += (image?.naturalWidth ?? 0) * scale + labelWidth;
             } else {
                 context.fillStyle = 'gray';
                 context.fillRect(x, y, 24 * scale, 24 * scale);
+                context.fillStyle = numberColor;
                 context.fillText(resourceNumber.toString(), x + 24 * scale + labelWidth / 2, y + 24 * scale / 2);
                 x += 24 * scale + labelWidth;
             }

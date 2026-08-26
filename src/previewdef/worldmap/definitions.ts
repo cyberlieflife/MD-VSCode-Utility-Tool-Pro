@@ -25,6 +25,7 @@ export interface WorldMapData {
     continents: string[];
     terrains: Terrain[];
     resources: Resource[];
+    factoryImages: FactoryImages;
     rivers: River[];
     warnings: WorldMapWarning[];
 }
@@ -97,6 +98,7 @@ export interface State extends Region, TokenInFile {
     impassableIgnoredLinks: number[];
     victoryPoints: Record<number, number | undefined>;
     resources: Record<string, number | undefined>;
+    buildings: Record<string, number | undefined>;
 }
 
 export interface Railway {
@@ -158,6 +160,11 @@ export interface Resource {
     iconFrame: number;
     imageUri: string;
     file: string;
+}
+
+export interface FactoryImages {
+    civilian: string;
+    military: string;
 }
 
 export interface StrategicRegion extends Region, TokenInFile {

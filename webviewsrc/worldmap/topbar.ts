@@ -2,6 +2,7 @@ import { Subscriber, toBehaviorSubject } from "../util/event";
 import { Loader, FEWorldMap } from "./loader";
 import { ViewPoint } from "./viewpoint";
 import { vscode } from "../util/vscode";
+import { setState } from "../util/common";
 import { WorldMapMessage, WorldMapWarning } from "../../src/previewdef/worldmap/definitions";
 import { feLocalize } from "../util/i18n";
 import { DivDropdown } from "../util/dropdown";
@@ -12,6 +13,16 @@ import { sendEvent } from '../util/telemetry';
 export type ViewMode = 'province' | 'state' | 'strategicregion' | 'supplyarea' | 'warnings';
 export type ColorSet = 'provinceid' | 'provincetype' | 'terrain' | 'country' | 'stateid' | 'manpower' |
     'victorypoint' | 'continent' | 'warnings' | 'strategicregionid' | 'supplyareaid' | 'supplyvalue' | 'resources';
+
+// Display options added after the initial release. They are merged into a previously saved display
+// selection exactly once (before the migration flag is persisted) so existing users get them
+// enabled by default while later changes to the selection are respected.
+export function mergeDisplayMigration(display: readonly string[], migrated: boolean): readonly string[] {
+    if (migrated) {
+        return display;
+    }
+    return [...new Set([...display, 'resource', 'factory'])];
+}
 
 export const topBarHeight = 40;
 
@@ -65,7 +76,12 @@ export class TopBar extends Subscriber {
             this.warningFilter.selectAll();
         }
         if (state.display) {
-            this.display.selectedValues$.next(state.display);
+            // The merge is one-time: once displayMigrated is persisted, the saved selection is
+            // used verbatim so disabling the new options sticks across panel reloads.
+            this.display.selectedValues$.next(mergeDisplayMigration(state.display, state.displayMigrated));
+            if (!state.displayMigrated) {
+                setState({ displayMigrated: true });
+            }
         } else {
             this.display.selectAll();
         }

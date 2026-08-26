@@ -28,10 +28,12 @@ interface StateDefinition {
     _token: Token;
 }
 
+// Buildings live inside the history block in HOI4 state files (vanilla and mods alike).
 interface StateHistory {
     owner: string;
     victory_points: Enum[];
     add_core_of: string[];
+    buildings: CustomMap<number>;
 }
 
 const stateFileSchema: SchemaDef<StateFile> = {
@@ -50,6 +52,10 @@ const stateFileSchema: SchemaDef<StateFile> = {
                 add_core_of: {
                     _innerType: "string",
                     _type: "array",
+                },
+                buildings: {
+                    _innerType: "number",
+                    _type: "map",
                 },
             },
             provinces: "enum",
@@ -256,6 +262,12 @@ export function loadStateFromContent(content: string, stateFile: string, globalW
             const victoryPoints = arrayToMap(victoryPointsArray, "0", v => v[1]);
             const resources = arrayToMap(
                 Object.values(state.resources._map), '_key', v => v._value);
+            // Buildings may use named keys (industrial_complex / arms_factory) in current HOI4 or
+            // numeric keys (1 = civilian, 4 = military) in older mods; both are kept as-is so the
+            // webview can read either spelling. Provincial buildings (e.g. 3838 = { naval_base = 3 })
+            // convert to undefined values and are ignored by the renderer.
+            const buildings = arrayToMap(
+                Object.values(state.history?.buildings?._map ?? {}), '_key', v => v._value);
 
             if (provinces.length === 0) {
                 globalWarnings.push({
@@ -278,7 +290,7 @@ export function loadStateFromContent(content: string, stateFile: string, globalW
             })));
 
             result.push({
-                id, name, manpower, category, owner, provinces, cores, impassable, impassableIgnoredLinks, victoryPoints, resources,
+                id, name, manpower, category, owner, provinces, cores, impassable, impassableIgnoredLinks, victoryPoints, resources, buildings,
                 file: stateFile,
                 token: state._token ?? null,
             });

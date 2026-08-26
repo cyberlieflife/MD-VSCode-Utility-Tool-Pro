@@ -153,6 +153,50 @@ describe('previewdef/worldmap/loader loadStateFromContent', () => {
         assert.deepStrictEqual(states[0].provinces, [10, 20]);
         assert.strictEqual(states[0].victoryPoints[10], 5);
     });
+
+    it('parses buildings with named keys (current HOI4 format)', () => {
+        const content = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n\thistory = {\n\t\tbuildings = {\n\t\t\tindustrial_complex = 2\n\t\t\tarms_factory = 3\n\t\t}\n\t}\n}\n';
+        const states = loadStateFromContent(content, 'history/states/42.txt', []);
+        assert.strictEqual(states.length, 1);
+        assert.strictEqual(states[0].buildings['industrial_complex'], 2);
+        assert.strictEqual(states[0].buildings['arms_factory'], 3);
+    });
+
+    it('parses buildings with numeric keys (legacy mod format)', () => {
+        const content = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n\thistory = {\n\t\tbuildings = {\n\t\t\t1 = 5\n\t\t\t4 = 4\n\t\t}\n\t}\n}\n';
+        const states = loadStateFromContent(content, 'history/states/42.txt', []);
+        assert.strictEqual(states.length, 1);
+        assert.strictEqual(states[0].buildings['1'], 5);
+        assert.strictEqual(states[0].buildings['4'], 4);
+    });
+
+    it('ignores provincial building objects without crashing', () => {
+        const content = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n\thistory = {\n\t\tbuildings = {\n\t\t\tindustrial_complex = 2\n\t\t\t3838 = {\n\t\t\t\tnaval_base = 3\n\t\t\t}\n\t\t}\n\t}\n}\n';
+        const states = loadStateFromContent(content, 'history/states/42.txt', []);
+        assert.strictEqual(states.length, 1);
+        assert.strictEqual(states[0].buildings['industrial_complex'], 2);
+        // Provincial building objects produce undefined values — they are ignored by the renderer.
+        assert.strictEqual(states[0].buildings['3838'], undefined);
+    });
+
+    it('parses buildings from a vanilla-shaped state with owner, victory points and dockyard', () => {
+        const content = 'state = {\n\tid = 171\n\tname = "STATE_171"\n\tmanpower = 2295085\n\tstate_category = city\n\thistory = {\n\t\towner = SPR\n\t\tvictory_points = {\n\t\t\t758 5\n\t\t}\n\t\tbuildings = {\n\t\t\tinfrastructure = 3\n\t\t\tdockyard = 2\n\t\t\tarms_factory = 1\n\t\t\tair_base = 2\n\t\t\t758 = {\n\t\t\t\tnaval_base = 6\n\t\t\t}\n\t\t}\n\t}\n\tprovinces = { 729 758 }\n}\n';
+        const states = loadStateFromContent(content, 'history/states/171.txt', []);
+        assert.strictEqual(states.length, 1);
+        assert.strictEqual(states[0].owner, 'SPR');
+        assert.strictEqual(states[0].victoryPoints[758], 5);
+        assert.strictEqual(states[0].buildings['arms_factory'], 1);
+        assert.strictEqual(states[0].buildings['dockyard'], 2);
+        assert.strictEqual(states[0].buildings['758'], undefined);
+    });
+
+    it('produces empty buildings when the history block has none', () => {
+        const content = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n\thistory = {\n\t\towner = SPR\n\t}\n}\n';
+        const states = loadStateFromContent(content, 'history/states/42.txt', []);
+        assert.strictEqual(states.length, 1);
+        assert.strictEqual(states[0].buildings['industrial_complex'], undefined);
+        assert.strictEqual(states[0].buildings['1'], undefined);
+    });
 });
 
 describe('previewdef/worldmap/loader loadStrategicRegionFromContent', () => {
