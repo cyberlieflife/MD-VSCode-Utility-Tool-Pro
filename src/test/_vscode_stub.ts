@@ -100,6 +100,12 @@ function buildStub() {
         ViewColumn,
         Position,
         Range,
+        WorkspaceEdit: class {
+            public ops: { kind: string; pos?: any; range?: any; text?: string }[] = [];
+            public insert(_uri: any, pos: any, text: string) { this.ops.push({ kind: 'insert', pos, text }); }
+            public delete(_uri: any, range: any) { this.ops.push({ kind: 'delete', range }); }
+            public replace(_uri: any, range: any, text: string) { this.ops.push({ kind: 'replace', range, text }); }
+        },
         Disposable: { from: (...d: any[]) => ({ dispose: () => d.forEach(x => x && x.dispose && x.dispose()) }) },
         EventEmitter: class { event: any; fire: any; dispose: any; constructor() { this.event = () => undefined; this.fire = noop; this.dispose = noop; } },
         TreeItem: class { label: any; constructor(label: any) { this.label = label; } },

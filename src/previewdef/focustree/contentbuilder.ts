@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { FocusTree, Focus } from './schema';
-import { getSpriteByGfxName, Image, getImageByPath, iconResolveStats, resetIconResolveStats } from '../../util/image/imagecache';
+import { FocusTree, Focus, getGfxNameForSearchFilter } from './schema';
+import { getSpriteByGfxName, Image, getImageByPath, iconResolveStats, resetIconResolveStats, Sprite } from '../../util/image/imagecache';
 import { localize, i18nTableAsScript } from '../../util/i18n';
 import { forceError, randomString, mapLimit } from '../../util/common';
 import { HOIPartial, toNumberLike, toStringAsSymbolIgnoreCase } from '../../hoiformat/schema';
@@ -11,12 +11,13 @@ import { LoaderSession } from '../../util/loader/loader';
 import { debug, error } from '../../util/debug';
 import { StyleTable, normalizeForStyle } from '../../util/styletable';
 import { useConditionInFocus } from '../../util/featureflags';
-import { flatMap } from 'lodash';
+import { flatMap, chain } from 'lodash';
 import { getFocusTitlebarImage, getFocusOverlayImage, loadFocusTitlebarStyles, resolveTitlebarGfxName } from "./titlebar";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
 import { renderInstantTextBox } from "../../util/hoi4gui/instanttextbox";
 import { renderSprite } from "../../util/hoi4gui/nodecommon";
+import { getLocalisedTextQuick } from "../../util/localisationIndex";
 
 const defaultFocusIcon = 'gfx/interface/goals/goal_unknown.dds';
 
@@ -36,6 +37,7 @@ export interface FocusTreePayload extends FocusTreeUpdatePayload {
     styleTable: StyleTable;
     styleNonce: string;
     toolbarFlags: ToolbarFlags;
+    gfxFiles: string[];
 }
 
 export type { ToolbarFlags };
@@ -124,6 +126,7 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             styleTable,
             styleNonce,
             toolbarFlags,
+            gfxFiles: loadResult.result.gfxFiles,
         };
     } catch (e) {
         error(e);
@@ -151,7 +154,7 @@ export async function loadFocusTreesOnly(loader: FocusTreeLoader): Promise<Focus
  * focuses/inlays rendered by buildFocusTreePayload instead of rendering them a second
  * time, halving the heavy image work on the initial load.
  */
-export function buildFocusTreeHtml(payload: FocusTreePayload, webview: vscode.Webview, uri: vscode.Uri): string {
+export async function buildFocusTreeHtml(payload: FocusTreePayload, webview: vscode.Webview, uri: vscode.Uri): Promise<string> {
     const jsCodes: string[] = [];
     jsCodes.push('window.focusTrees = ' + JSON.stringify(payload.focusTrees));
     jsCodes.push('window.renderedFocus = ' + JSON.stringify(payload.renderedFocus));
@@ -162,7 +165,7 @@ export function buildFocusTreeHtml(payload: FocusTreePayload, webview: vscode.We
     jsCodes.push('window.xGridSize = ' + payload.xGridSize);
     jsCodes.push(i18nTableAsScript());
 
-    const baseContent = renderFocusTreeShell(payload.focusTrees, payload.styleTable, payload.toolbarFlags, payload.styleNonce);
+    const baseContent = await renderFocusTreeShell(payload.focusTrees, payload.styleTable, payload.toolbarFlags, payload.styleNonce, payload.gfxFiles);
 
     return html(
         webview,
@@ -232,7 +235,7 @@ export const focusTreeGridBox: HOIPartial<GridBoxType> = {
  * toolbar). Focuses and inlays themselves are rendered separately into the payload and
  * injected by the webview, so this is a cheap synchronous step.
  */
-function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string): string {
+async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string, gfxFiles: string[]): Promise<string> {
     // CSP-nonced <style> element the webview later fills with the resolved focus-icon background CSS.
     const progressiveIconStyles = `<style id="ft-progressive-icons" nonce="${styleNonce}"></style>`;
     const continuousFocusContent =
@@ -255,13 +258,13 @@ function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, t
             left:0;
             top:0;
         `)}"></div>` +
-        `<div id="focustreecontent" class="${styleTable.oneTimeStyle('focustreecontent', () => `top:52px;left:-20px;position:relative;user-select:none;-webkit-user-select:none;`)}">
+        `<div id="focustreecontent" class="${styleTable.oneTimeStyle('focustreecontent', () => `top:80px;left:-20px;position:relative;user-select:none;-webkit-user-select:none;`)}">
             <div id="focustreeplaceholder"></div>
             <div id="inlaywindowplaceholder"></div>
             ${continuousFocusContent}
         </div>` +
         renderWarningContainer(styleTable) +
-        renderToolBar(focusTrees, styleTable, toolbarFlags)
+        await renderToolBar(focusTrees, styleTable, toolbarFlags, gfxFiles)
     );
 }
 
@@ -280,7 +283,7 @@ function renderWarningContainer(styleTable: StyleTable) {
         position: fixed;
         top: 0;
         left: 0;
-        padding-top: 52px;
+        padding-top: 80px;
         background: var(--vscode-editor-background);
         box-sizing: border-box;
         display: none;
@@ -300,7 +303,7 @@ function renderWarningContainer(styleTable: StyleTable) {
     </div>`;
 }
 
-function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, flags: ToolbarFlags): string {
+async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, flags: ToolbarFlags, gfxFiles: string[]): Promise<string> {
     const focuses = focusTrees.length <= 1 ? '' : `
         <label for="focuses" class="${styleTable.style('focusesLabel', () => `margin-right:5px`)}">${localize('focustree.focustree', 'Focus tree: ')}</label>
         <div class="select-container ${styleTable.style('marginRight10', () => `margin-right:10px`)}">
@@ -378,7 +381,7 @@ function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, flags: T
         <div id="condition-container">
             <label for="conditions" class="${styleTable.style('conditionsLabel', () => `margin-right:5px`)}">${localize('focustree.focusconditions', 'Focus conditions: ')}</label>
             <div class="select-container ${styleTable.style('marginRight10', () => `margin-right:10px`)}">
-                <div id="conditions" class="select multiple-select" tabindex="0" role="combobox" class="${styleTable.style('conditionsLabel', () => `max-width:400px`)}">
+                <div id="conditions" class="select multiple-select ${styleTable.style('conditions', () => `max-width:400px`)}" tabindex="0" role="combobox">
                     <span class="value"></span>
                 </div>
             </div>
@@ -405,18 +408,56 @@ function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, flags: T
             <i class="codicon codicon-clear-all"></i>
         </button>`;
 
-    return `<div class="toolbar-outer ${styleTable.style('toolbar-height', () => `box-sizing: border-box; height: 52px;`)}">
-        <div class="toolbar">
-            ${useConditionInFocus ? conditions + inlayConditions : allowbranch}
-            ${focuses}
-            ${searchbox}
-            ${nameToggle}
-            ${customTitlebars}
-            ${focusOverlays}
-            ${inlayWindowsToggle}
-            ${inlayWindows}
-            ${warningsButton}
-            ${resetCheckboxesButton}
+    // Search filters: one dropdown entry per distinct search_filters value across all focus trees,
+    // each carrying the GFX_<filter> sprite as its icon. Selecting entries dims all focuses that do
+    // not carry any of the selected filters.
+    const searchFilterNames = chain(focusTrees).flatMap(ft => ft.searchFilters).uniq().value();
+    const searchFilterSprites: Record<string, Sprite | undefined> = {};
+    await Promise.all(searchFilterNames.map(async searchFilter => {
+        searchFilterSprites[searchFilter] = await getSpriteByGfxName(getGfxNameForSearchFilter(searchFilter), gfxFiles);
+    }));
+
+    const searchFilters = searchFilterNames.length === 0 ? '' : `
+        <div id="search-filters-container">
+            <label for="search-filters" class="${styleTable.style('searchFiltersLabel', () => `margin-right:5px`)}">${localize('focustree.searchfilters', 'Filters: ')}</label>
+            <div class="select-container ${styleTable.style('marginRight10', () => `margin-right:10px`)}">
+                <div id="search-filters" class="select multiple-select" tabindex="0" role="combobox">
+                    <span class="value"></span>
+                    ${
+                        searchFilterNames.map(filter =>
+                            `<div class="option" value="${htmlEscape(filter)}">
+                                <span class="${styleTable.oneTimeStyle('searchFilterIcon', () =>
+                                    `background-image: url(${searchFilterSprites[filter]?.image.uri});`
+                                )}
+                                ${styleTable.style('searchFilterIcon', () =>
+                                    `display: inline-block; width: 16px; height: 16px; background-size: 16px 16px;`
+                                )}"></span>
+                                ${htmlEscape(getLocalisedTextQuick(filter) ?? '')}
+                            </div>`)
+                        .join('')
+                    }
+                </div>
+            </div>
+        </div>
+    `;
+
+    return `<div class="toolbar-outer ${styleTable.style('toolbar-padding', () => `padding-top:5px; padding-bottom:5px; box-sizing: border-box; height: 80px;`)}">
+        <div class="toolbar ${styleTable.style('toolbar', () => `flex-direction: column;top:0;transform:none;`)}">
+            <div id="toolbar-row-1" class="toolbar-row">
+                ${focuses}
+                ${useConditionInFocus ? conditions + inlayConditions : allowbranch}
+                ${inlayWindows}
+                ${warningsButton}
+                ${resetCheckboxesButton}
+            </div>
+            <div class="toolbar-row">
+                ${nameToggle}
+                ${customTitlebars}
+                ${focusOverlays}
+                ${inlayWindowsToggle}
+                ${searchbox}
+                ${searchFilters}
+            </div>
         </div>
     </div>`;
 }

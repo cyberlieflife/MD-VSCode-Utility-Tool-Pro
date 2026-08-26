@@ -1,3 +1,18 @@
+## [v1.1.23] - 2026-08-26
+
+### Functionality
+
+- [World Map] Provinces of states and strategic regions can now be edited directly on the preview: enter edit mode (pencil) with a region selected, then click a province to move it into the selected region. The state/strategic region files are rewritten in place (copied from the HOI4 install into the workspace first when the mod does not override them), with automatic indentation detection and a victory point that follows its province across the move. Middle-click selects the hovered item, and the "Selected" button navigates to the current selection.
+- [World Map] New states and strategic regions can be added from the toolbar: a template file is created in the workspace (named after the next free id), selected, and entered into edit mode so provinces can be dropped into it right away.
+- [World Map] The victory point color set now uses a green-yellow-red ramp (blue for provinces without a state, green for zero-point provinces), replacing the old greyscale ramp.
+- [Focus Tree] A search filter dropdown lists the distinct `search_filters` values across the tree (with their GFX icons); selecting entries dims every focus that does not carry any of them.
+- [Focus Tree] The conditions dropdown lists condition expressions sorted by value, and focus trees are listed sorted by name.
+- [Toolbar] Preview toolbars are vertically centered and scroll horizontally when the window is too narrow (focus tree, world map and MIO previews).
+
+### Bugfixes
+
+- [Focus Tree] The conditions dropdown options are built as text-only DOM nodes, so condition strings from mod files can no longer inject markup into the preview.
+
 ## [v1.1.22] - 2026-08-16
 
 ### Performance

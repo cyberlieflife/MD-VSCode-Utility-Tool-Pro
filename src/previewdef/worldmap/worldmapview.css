@@ -70,3 +70,26 @@ span.divider {
 #warnings:focus {
     outline: none;
 }
+
+/* The world map toolbar stays a single top-anchored row: the focus-tree preview centers its own
+   toolbar via the shared .toolbar rule, which must not shift the world map's topbar. */
+#topbar.toolbar {
+    position: static;
+    top: auto;
+    transform: none;
+}
+
+#searchbox {
+    width: 150px;
+}
+
+#selectedregion-text {
+    display: inline-block;
+    width: 40px;
+    text-align: center;
+}
+
+#selectedregion {
+    width: unset;
+    padding: 0 5px;
+}

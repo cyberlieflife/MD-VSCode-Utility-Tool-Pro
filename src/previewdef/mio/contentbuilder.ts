@@ -178,7 +178,7 @@ async function renderToolBar(mios: Mio[], styleTable: StyleTable, mioOptionsHtml
         <input type="checkbox" id="show-overlaps" class="${styleTable.style('marginRight10', () => `margin-right:10px`)}">`;
 
     return `<div class="toolbar-outer ${styleTable.style('toolbar-height', () => `box-sizing: border-box; height: 40px;`)}">
-        <div class="toolbar">
+        <div class="toolbar ${styleTable.style('mio-toolbar', () => `top:0; transform:none;`)}">
             ${mioSelect}
             ${conditions}
             ${toggles}

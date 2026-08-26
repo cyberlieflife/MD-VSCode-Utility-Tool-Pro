@@ -1,5 +1,5 @@
 import { ContentLoader, LoadResultOD, Dependency, LoaderSession, mergeInLoadResult } from "../../util/loader/loader";
-import { convertFocusFileNodeToJson, FocusTree, getFocusTreeWithFocusFile } from "./schema";
+import { convertFocusFileNodeToJson, FocusTree, getFocusTreeWithFocusFile, getGfxNameForSearchFilter } from "./schema";
 import { parseHoi4File } from "../../hoiformat/hoiparser";
 import { localize } from "../../util/i18n";
 import { uniq, flatten, chain } from "lodash";
@@ -119,7 +119,7 @@ export class FocusTreeLoader extends ContentLoader<FocusTreeLoaderResult> {
         const gfxDependencies = [
             ...dependencies.filter(d => d.type === 'gfx').map(d => d.path),
             ...flatten(focusTreeDepFiles.map(f => f.result.gfxFiles)),
-            ...await getGfxContainerFiles(chain(focusTrees).flatMap(ft => Object.values(ft.focuses)).flatMap(f => f.icon).map(i => i.icon).value()),
+            ...await getGfxContainerFiles(chain(focusTrees).flatMap(ft => Object.values(ft.focuses)).flatMap(f => [...f.icon.map(i => i.icon), f.overlay, ...f.searchFilters.map(getGfxNameForSearchFilter)]).value()),
             ...inlayGuiGfxFiles,
             ...inlayResolvedGfxFiles,
         ];

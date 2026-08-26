@@ -161,3 +161,14 @@ const languageYmlDict = {
 export function getLanguageIdInYml(): string {
     return languageYmlDict[vscode.workspace.getConfiguration(ConfigurationKey).previewLocalisation ?? 'English'] ?? languageYmlDict['English'];
 }
+
+export function getPreferedIndent(): string {
+    const editorConfig = vscode.workspace.getConfiguration('editor');
+    const insertSpaces = editorConfig.get<boolean>('insertSpaces', true);
+    if (insertSpaces) {
+        const tabSize = editorConfig.get<number>('tabSize', 4);
+        return ' '.repeat(tabSize);
+    } else {
+        return '\t';
+    }
+}

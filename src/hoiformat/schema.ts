@@ -3,6 +3,8 @@ import { Node, Token, NodeValue, SymbolNode } from "./hoiparser";
 //#region Common
 export interface TokenObject {
     _token: Token | undefined;
+    _valueStartToken?: Token;
+    _valueEndToken?: Token;
 }
 
 export interface CustomMap<T> extends TokenObject {
@@ -64,7 +66,7 @@ export type SchemaDef<T> =
     T extends CustomMap<infer T1> ? { _innerType: SchemaDef<T1>; _type: 'map'; } :
     T extends DetailValue<infer T1> ? { _innerType: SchemaDef<T1>; _type: 'detailvalue'; } :
     T extends (infer B)[] ? { _innerType: SchemaDef<B>; _type: 'array'; } :
-    { [K in Exclude<keyof T, '_token' | '_index'>]: SchemaDef<T[K]>; };
+    { [K in Exclude<keyof T, '_token' | '_index' | '_valueStartToken' | '_valueEndToken'>]: SchemaDef<T[K]>; };
 
 //#endregion
 
@@ -334,6 +336,8 @@ export function convertNodeToJson<T>(node: Node, schemaDef: SchemaDef<T>, consta
 
     if (typeof result === 'object') {
         (result as { _token: Token | undefined })._token = node.nameToken ?? undefined;
+        (result as { _valueStartToken?: Token; _valueEndToken?: Token })._valueStartToken = node.valueStartToken ?? undefined;
+        (result as { _valueStartToken?: Token; _valueEndToken?: Token })._valueEndToken = node.valueEndToken ?? undefined;
     }
 
     return result;

@@ -1,9 +1,9 @@
 import { State, Province, WorldMapWarning, WorldMapWarningSource, Region, StateCategory } from "../definitions";
-import { Enum, SchemaDef, CustomMap, DetailValue } from "../../../hoiformat/schema";
-import { readFileFromModOrHOI4AsJson } from "../../../util/fileloader";
+import { Enum, SchemaDef, CustomMap, DetailValue, convertNodeToJson } from "../../../hoiformat/schema";
+import { readFileFromModOrHOI4, readFileFromModOrHOI4AsJson } from "../../../util/fileloader";
 import { error } from "../../../util/debug";
 import { LoadResult, FolderLoader, FileLoader, mergeInLoadResult, sortItems, mergeRegion, convertColor, LoadResultOD } from "./common";
-import { Token } from "../../../hoiformat/hoiparser";
+import { parseHoi4File, Token } from "../../../hoiformat/hoiparser";
 import { arrayToMap, UserError } from "../../../util/common";
 import { DefaultMapLoader } from "./provincemap";
 import { localize } from "../../../util/i18n";
@@ -231,8 +231,14 @@ class StateCategoryLoader extends FileLoader<StateCategory[]> {
 }
 
 async function loadState(stateFile: string, globalWarnings: WorldMapWarning[]): Promise<StateNoBoundingBox[]> {
+    const [buffer] = await readFileFromModOrHOI4(stateFile);
+    return loadStateFromContent(buffer.toString(), stateFile, globalWarnings);
+}
+
+export function loadStateFromContent(content: string, stateFile: string, globalWarnings: WorldMapWarning[]): StateNoBoundingBox[] {
     try {
-        const data = await readFileFromModOrHOI4AsJson<StateFile>(stateFile, stateFileSchema);
+        const nodes = parseHoi4File(content, localize('infile', 'In file {0}:\n', stateFile));
+        const data = convertNodeToJson<StateFile>(nodes, stateFileSchema);
         const result: StateNoBoundingBox[] = [];
 
         for (const state of data.state) {

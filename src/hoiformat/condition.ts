@@ -361,3 +361,30 @@ export function conditionToString(condition: ConditionComplexExpr): string {
 
     return condition.type + '(' + condition.items.map(conditionToString).join(', ') + ')' + (condition.type === 'count' ? ' == ' + condition.amount : '');
 }
+
+export function conditionItemToStringValue(conditionItem: ConditionItem): string {
+    return `${conditionItem.scopeName}!|${conditionItem.nodeContent}`;
+}
+
+export function stringValueToConditionItem(value: string): ConditionItem {
+    const index = value.indexOf('!|');
+    if (index === -1) {
+        return {
+            scopeName: '',
+            nodeContent: value,
+        };
+    } else {
+        return {
+            scopeName: value.substring(0, index),
+            nodeContent: value.substring(index + 2),
+        };
+    }
+}
+
+export function sortConditionExprs(exprs: ConditionItem[]): void {
+    exprs.sort((a, b) => {
+        const aStr = conditionItemToStringValue(a);
+        const bStr = conditionItemToStringValue(b);
+        return aStr.localeCompare(bStr);
+    });
+}

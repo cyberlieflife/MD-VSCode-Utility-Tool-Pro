@@ -55,6 +55,7 @@ class Dropdown extends Subscriber {
             if (!option.hidden) {
                 optionForDropdownMenu.push({
                     text: option.textContent ?? '',
+                    html: undefined,
                     value: option.value,
                     selected: option.value === this.select.value,
                 });
@@ -201,6 +202,7 @@ export class DivDropdown extends Subscriber {
                 const value = option.getAttribute('value');
                 optionForDropdownMenu.push({
                     text: option.textContent ?? '',
+                    html: option.innerHTML,
                     value: value ?? '',
                     selected: value !== null ? selectedValues!.includes(value) : false,
                 });
@@ -220,7 +222,7 @@ export class DivDropdown extends Subscriber {
     }
 }
 
-type Option = { text: string, value: string, selected: boolean };
+type Option = { text: string, html: string | undefined, value: string, selected: boolean };
 class DropdownMenu extends Subscriber {
     private writableOptions$: Subject<Option[]>;
     public options$: Observable<Option[]>;
@@ -294,7 +296,7 @@ class DropdownMenu extends Subscriber {
             checkbox.checked = option.selected;
 
             item.appendChild(checkbox);
-            const checkboxItem = new Checkbox(checkbox, option.text);
+            const checkboxItem = new Checkbox(checkbox, option.text, option.html);
             this.addSubscription(checkboxItem);
 
             fromEvent(checkbox, 'change').subscribe(() => {

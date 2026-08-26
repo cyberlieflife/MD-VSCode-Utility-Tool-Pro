@@ -17,6 +17,7 @@ div.select > div.option {
     display: block;
     height: 0;
     opacity: 0;
+    overflow: hidden;
 }
 
 div.select.multiple-select > div.option {
@@ -104,6 +105,7 @@ ul.select-dropdown {
     z-index: 100;
     max-height: 300px;
     overflow-y: auto;
+    overscroll-behavior: none;
 }
 
 ul.select-dropdown li {
@@ -173,7 +175,6 @@ input[type=checkbox]:checked + div.checkbox-container-out div.checkbox, div.chec
 
 .toolbar-outer {
     position: fixed;
-    padding-top: 10px;
     padding-left: 20px;
     width: 100%;
     top: 0;
@@ -185,6 +186,19 @@ input[type=checkbox]:checked + div.checkbox-container-out div.checkbox, div.chec
 
 .toolbar {
     display: flex;
+    position: relative;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.toolbar-row {
+    display: flex;
+    flex-direction: row;
+    margin: 5px 0;
+}
+
+.toolbar-row > * {
+    flex-shrink: 0;
 }
 
 .toolbar > * {

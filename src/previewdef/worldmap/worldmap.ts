@@ -4,7 +4,7 @@ import worldmapviewstyles from './worldmapview.css';
 import { localize, localizeText, i18nTableAsScript } from '../../util/i18n';
 import { html } from '../../util/html';
 import { error, debug } from '../../util/debug';
-import { WorldMapMessage, ProgressReporter, WorldMapData, MapItemMessage, RequestMapItemMessage } from './definitions';
+import { WorldMapMessage, ProgressReporter, WorldMapData, MapItemMessage, RequestMapItemMessage, MoveProvinceMessage, AddMapItemMessage } from './definitions';
 import { matchPathEnd } from '../../util/nodecommon';
 import { writeFile, getConfiguration } from '../../util/vsccommon';
 import { slice, debounceByInput, forceError } from '../../util/common';
@@ -14,6 +14,9 @@ import { isEqual } from 'lodash';
 import { LoaderSession } from '../../util/loader/loader';
 import { TelemetryMessage, sendByMessage } from '../../util/telemetry';
 import { itemFingerprints, collectChangeRanges } from './itemfingerprint';
+import { contextContainer } from '../../context';
+import { moveProvince } from './editor/moveprovince';
+import { addMapItem } from './editor/addmapitem';
 
 export class WorldMap {
     public panel: vscode.WebviewPanel | undefined;
@@ -87,6 +90,9 @@ export class WorldMap {
             [
                 { content: i18nTableAsScript() },
                 { content: 'window.__enableSupplyArea = ' + getConfiguration().enableSupplyArea + ';' },
+                { content: contextContainer.current ?
+                    'window.__pencilUri = "' + webview.asWebviewUri(vscode.Uri.joinPath(contextContainer.current.extensionUri, 'static/pencil.svg')).toString() + '";' :
+                    '' },
                 'common.js',
                 'worldmap.js'
             ],
@@ -133,6 +139,12 @@ export class WorldMap {
                     break;
                 case 'exportmap':
                     await this.exportMap(msg.dataUrl);
+                    break;
+                case 'moveprovince':
+                    await this.moveProvince(msg);
+                    break;
+                case 'addmapitem':
+                    await this.addMapItem(msg);
                     break;
             }
         } catch (e) {
@@ -347,6 +359,30 @@ export class WorldMap {
         } catch (e) {
             error(e);
             vscode.window.showErrorMessage(localize('worldmap.export.error', 'Can\'t export world map: {0}.', e));
+        }
+    }
+
+    private async moveProvince(msg: MoveProvinceMessage) {
+        if (!this.cachedWorldMap) {
+            await vscode.window.showErrorMessage(localize('worldmap.edit.failed.nocache', 'Editing failed. No cached world map data. Please reload the world map and try again.'));
+            return;
+        }
+
+        const messages = await moveProvince(msg, this.cachedWorldMap);
+        for (const message of messages) {
+            await this.postMessageToWebview(message);
+        }
+    }
+
+    private async addMapItem(msg: AddMapItemMessage) {
+        if (!this.cachedWorldMap) {
+            await vscode.window.showErrorMessage(localize('worldmap.add.failed.nocache', 'Adding failed. No cached world map data. Please reload the world map and try again.'));
+            return;
+        }
+
+        const messages = await addMapItem(msg, this.cachedWorldMap);
+        for (const message of messages) {
+            await this.postMessageToWebview(message);
         }
     }
 }

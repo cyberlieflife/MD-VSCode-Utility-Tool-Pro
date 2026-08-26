@@ -501,7 +501,7 @@ class FocusTreePreview extends PreviewBase {
                 // Phase 2 (background): resolve the real focus icons and stream their CSS into the
                 // already-visible preview. No hard timeout: slow icons fill in when ready.
                 void this.pushIconStyles(generation);
-                return buildFocusTreeHtml(structure, this.panel.webview, document.uri);
+                return await buildFocusTreeHtml(structure, this.panel.webview, document.uri);
             }
 
             this.lastStructuralFingerprint = undefined;

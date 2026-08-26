@@ -1241,6 +1241,7 @@ async function buildContent() {
     updateFocusSelectionHighlight();
     // Refresh the search element cache against the rebuilt DOM.
     focusElementsCache = Array.from(document.getElementsByClassName('focus')) as HTMLDivElement[];
+    applySearchFilters();
 }
 
 function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Record<string, boolean>) {
@@ -1279,10 +1280,16 @@ function updateSelectedFocusTree(clearCondition: boolean) {
         }
 
         if (conditions) {
-            conditions.select.innerHTML = `<span class="value"></span>
-                ${conditionExprs.map(option =>
-                    `<div class="option" value='${option.scopeName}!|${option.nodeContent}'>${option.scopeName ? `[${option.scopeName}]` : ''}${option.nodeContent}</div>`
-                ).join('')}`;
+            // Options are built via DOM + textContent so foreign condition strings from mod files
+            // can never inject markup into the dropdown.
+            conditions.select.innerHTML = '<span class="value"></span>';
+            for (const option of conditionExprs) {
+                const div = document.createElement('div');
+                div.className = 'option';
+                div.setAttribute('value', `${option.scopeName}!|${option.nodeContent}`);
+                div.textContent = (option.scopeName ? `[${option.scopeName}]` : '') + option.nodeContent;
+                conditions.select.appendChild(div);
+            }
             conditions.selectedValues$.next(clearCondition ? [] : selectedExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
         }
 
@@ -1292,10 +1299,14 @@ function updateSelectedFocusTree(clearCondition: boolean) {
         }
 
         if (inlayConditions) {
-            inlayConditions.select.innerHTML = `<span class="value"></span>
-                ${inlayConditionExprs.map(option =>
-                    `<div class="option" value='${option.scopeName}!|${option.nodeContent}'>${option.scopeName ? `[${option.scopeName}]` : ''}${option.nodeContent}</div>`
-                ).join('')}`;
+            inlayConditions.select.innerHTML = '<span class="value"></span>';
+            for (const option of inlayConditionExprs) {
+                const div = document.createElement('div');
+                div.className = 'option';
+                div.setAttribute('value', `${option.scopeName}!|${option.nodeContent}`);
+                div.textContent = (option.scopeName ? `[${option.scopeName}]` : '') + option.nodeContent;
+                inlayConditions.select.appendChild(div);
+            }
             inlayConditions.selectedValues$.next(clearCondition ? [] : selectedInlayExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
         }
 
@@ -1561,6 +1572,27 @@ function getInlayGfxClassName(gfxName: string | undefined, gfxFile: string | und
 }
 
 let retriggerSearch: () => void = () => {};
+
+let selectedSearchFilters: string[] = getState().selectedSearchFilters ?? [];
+
+// Dims every focus that does not carry any of the selected search filters; the filters come from
+// the focus files' search_filters list (one dropdown entry per distinct value across all trees).
+function applySearchFilters(): void {
+    const focusTree = focusTrees[selectedFocusTreeIndex];
+    if (!focusTree) {
+        return;
+    }
+
+    for (const focus of Object.values(focusTree.focuses)) {
+        const focusElement = document.getElementById('focus_' + focus.id);
+        if (!focusElement) {
+            continue;
+        }
+
+        const matchesFilter = selectedSearchFilters.some(filter => focus.searchFilters.includes(filter));
+        focusElement.style.opacity = matchesFilter || selectedSearchFilters.length === 0 ? '1' : '0.2';
+    }
+}
 
 window.addEventListener('message', async (event) => {
     const msg = event.data;
@@ -2003,7 +2035,20 @@ window.addEventListener('load', tryRun(async function() {
 
     // Zoom
     const contentElement = document.getElementById('focustreecontent') as HTMLDivElement;
-    enableZoom(contentElement, 0, 40);
+    enableZoom(contentElement, 0, 80);
+
+    // Search filters: dims focuses that don't carry any selected filter.
+    const searchFiltersElement = document.getElementById('search-filters') as HTMLDivElement | null;
+    if (searchFiltersElement) {
+        const searchFiltersDropdown = new DivDropdown(searchFiltersElement, true);
+        searchFiltersDropdown.selectedValues$.next(selectedSearchFilters);
+        searchFiltersDropdown.selectedValues$.subscribe((selection) => {
+            selectedSearchFilters = [...selection];
+            setState({ selectedSearchFilters });
+
+            applySearchFilters();
+        });
+    }
 
     // Toggle warnings
     const showWarnings = document.getElementById('show-warnings') as HTMLButtonElement;

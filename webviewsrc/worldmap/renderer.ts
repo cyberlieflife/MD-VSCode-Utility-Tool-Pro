@@ -82,6 +82,8 @@ export class Renderer extends Subscriber {
                 topBar.selectedStrategicRegionId$,
                 topBar.hoverSupplyAreaId$,
                 topBar.selectedSupplyAreaId$,
+                topBar.editMode$,
+                topBar.editModeHoverProvinceId$,
                 topBar.warningFilter.selectedValues$,
                 topBar.display.selectedValues$,
             ]).pipe(
@@ -136,10 +138,18 @@ export class Renderer extends Subscriber {
                 this.renderProvinceHoverSelection(this.loader.worldMap);
                 break;
             case 'state':
-                this.renderStateHoverSelection(this.loader.worldMap);
+                if (this.topBar.editMode$.value) {
+                    this.renderStateEditModeSelection(this.loader.worldMap);
+                } else {
+                    this.renderStateHoverSelection(this.loader.worldMap);
+                }
                 break;
             case 'strategicregion':
-                this.renderStrategicRegionHoverSelection(this.loader.worldMap);
+                if (this.topBar.editMode$.value) {
+                    this.renderStrategicRegionEditModeSelection(this.loader.worldMap);
+                } else {
+                    this.renderStrategicRegionHoverSelection(this.loader.worldMap);
+                }
                 break;
             case 'supplyarea':
                 this.renderSupplyAreaHoverSelection(this.loader.worldMap);
@@ -709,6 +719,45 @@ ${worldMap.getProvinceWarnings(province, stateObject, strategicRegion, supplyAre
         backCanvasContext.textAlign = 'start';
         backCanvasContext.textBaseline = 'top';
         backCanvasContext.fillText(text, 10, 10 + topBarHeight);
+    }
+
+    private renderStateEditModeSelection(worldMap: FEWorldMap) {
+        const hoverProvince = worldMap.getProvinceById(this.topBar.editModeHoverProvinceId$.value);
+        this.renderHoverSelectionInEditMode(worldMap, hoverProvince, worldMap.getStateById(this.topBar.selectedStateId$.value));
+    }
+
+    private renderStrategicRegionEditModeSelection(worldMap: FEWorldMap) {
+        const hoverProvince = worldMap.getProvinceById(this.topBar.editModeHoverProvinceId$.value);
+        this.renderHoverSelectionInEditMode(worldMap, hoverProvince, worldMap.getStrategicRegionById(this.topBar.selectedStrategicRegionId$.value));
+    }
+
+    // Edit mode highlights the whole selected region in green, the hovered province in red when it
+    // is part of that region (the move would remove it), and in green otherwise (the move target).
+    private renderHoverSelectionInEditMode(worldMap: FEWorldMap, hover: Province | undefined, selected: { provinces: number[] } | undefined) {
+        let hoverRendered = false;
+        if (selected) {
+            for (const provinceId of selected.provinces) {
+                const province = worldMap.getProvinceById(provinceId);
+                if (province) {
+                    if (province !== hover) {
+                        this.renderSelectedProvince(province, worldMap);
+                    } else {
+                        hoverRendered = true;
+                        this.renderStyledProvince(province, worldMap, 'rgba(255, 128, 128, 0.7)');
+                    }
+                }
+            }
+        }
+
+        if (hover && !hoverRendered) {
+            this.renderSelectedProvince(hover, worldMap);
+        }
+    }
+
+    private renderStyledProvince(province: Province, worldMap: FEWorldMap, fillStyle: string) {
+        this.backCanvasContext.fillStyle = fillStyle;
+        this.renderAllOffsets(province.boundingBox, worldMap.width, xOffset =>
+            this.renderProvince(this.backCanvasContext, province, this.viewPoint.scale, xOffset));
     }
 
     private renderProvinceHoverSelection(worldMap: FEWorldMap) {
@@ -1328,8 +1377,9 @@ function getColorByColorSet(
 
                 const stateId = provinceToState[province.id];
                 const state = worldMap.getStateById(stateId);
-                const value = victoryPointsHandler(state ? state.victoryPoints[province.id] ?? 0.1 : 0) / victoryPointsHandler(renderContext.extraState);
-                return valueToColorGreyScale(value);
+                const vp = state?.victoryPoints[province.id] ?? 0;
+                const value = victoryPointsHandler(vp) / victoryPointsHandler(renderContext.extraState);
+                return state === undefined ? 0x000080 : (vp === 0 ? 0x008000 : valueToColorGYR(value));
             }
         case 'resources':
             {
@@ -1418,10 +1468,6 @@ function resourcesHandler(resources: number): number {
 
 function valueToColorGYR(value: number): number {
     return value < 0.5 ? (0xFF00 | (Math.floor(255 * 2 * value) << 16)) : (0xFF0000 | (Math.floor(255 * 2 * (1 - value)) << 8));
-}
-
-function valueToColorGreyScale(value: number): number {
-    return Math.floor(value * 255) * 0x10101;
 }
 
 function valueAndMaxToColor(value: number, max: number): number {

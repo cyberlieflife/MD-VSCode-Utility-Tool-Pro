@@ -1,8 +1,8 @@
 import { Node, Token } from "../../hoiformat/hoiparser";
-import { HOIPartial, SchemaDef, Position, convertNodeToJson, positionSchema, Raw } from "../../hoiformat/schema";
+import { HOIPartial, SchemaDef, Position, convertNodeToJson, positionSchema, Raw, Enum } from "../../hoiformat/schema";
 import { normalizeNumberLike } from "../../util/hoi4gui/common";
 import { flatten, chain } from 'lodash';
-import { ConditionItem, ConditionComplexExpr, extractConditionValues, extractConditionValue, extractConditionalExprs } from "../../hoiformat/condition";
+import { ConditionItem, ConditionComplexExpr, extractConditionValues, extractConditionValue, extractConditionalExprs, sortConditionExprs } from "../../hoiformat/condition";
 import { countryScope } from "../../hoiformat/scope";
 import { useConditionInFocus } from "../../util/featureflags";
 import { randomString, Warning } from "../../util/common";
@@ -22,6 +22,7 @@ export interface FocusTree {
     isSharedFocues: boolean;
     continuousFocusPositionX?: number;
     continuousFocusPositionY?: number;
+    searchFilters: string[];
     warnings: FocusWarning[];
 }
 
@@ -37,6 +38,7 @@ export interface Focus {
     icon: FocusIconWithCondition[];
     textIcon?: string;
     overlay?: string;
+    searchFilters: string[];
     prerequisite: string[][];
     exclusive: string[];
     hasAllowBranch: boolean;
@@ -128,6 +130,7 @@ interface FocusDef {
     offset: OffsetDef[];
     _token: Token;
     text?: string;
+    search_filters: Enum;
 }
 
 interface FocusIconDef {
@@ -171,6 +174,7 @@ const focusSchema: SchemaDef<FocusDef> = {
     },
     text_icon: "string",
     overlay: "string",
+    search_filters: "enum",
     x: "raw",
     y: "raw",
     prerequisite: {
@@ -247,6 +251,7 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
         const conditionExprs: ConditionItem[] = [];
         const warnings: FocusWarning[] = [];
         const focuses = getFocuses(file.shared_focus, conditionExprs, filePath, warnings, constants);
+        sortConditionExprs(conditionExprs);
         const sharedFocusTree = {
             id: localize('focustree.sharedfocuses', '<Shared focuses>'),
             focuses,
@@ -256,6 +261,7 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
             allowBranchOptions: getAllowBranchOptions(focuses),
             conditionExprs,
             isSharedFocues: true,
+            searchFilters: chain(focuses).flatMap(f => f.searchFilters).uniq().value(),
             warnings,
         };
         focusTrees.push(sharedFocusTree);
@@ -276,6 +282,7 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
             allowBranchOptions: getAllowBranchOptions(focuses),
             conditionExprs,
             isSharedFocues: false,
+            searchFilters: chain(focuses).flatMap(f => f.searchFilters).uniq().value(),
             warnings,
         });
     }
@@ -296,6 +303,7 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
 
         validateRelativePositionId(focuses, warnings);
 
+        sortConditionExprs(conditionExprs);
         focusTrees.push({
             id: focusTree.id ?? localize('focustree.ananymous', '<Anonymous focus tree>'),
             focuses,
@@ -311,10 +319,12 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
             continuousFocusPositionY: normalizeNumberLike(focusTree.continuous_focus_position?.y, 0) ?? 1000,
             conditionExprs,
             isSharedFocues: false,
+            searchFilters: chain(focuses).flatMap(f => f.searchFilters).uniq().value(),
             warnings,
         });
     }
 
+    focusTrees.sort((a, b) => a.id.localeCompare(b.id));
     return focusTrees;
 }
 
@@ -322,6 +332,10 @@ function getJointFocusTreeId(filePath: string): string {
     const fileName = path.basename(filePath, path.extname(filePath));
     const label = localize('focustree.jointfocustree', '<Joint focus tree>');
     return fileName ? `${label} (${fileName})` : label;
+}
+
+export function getGfxNameForSearchFilter(filter: string): string {
+    return `GFX_${filter}`;
 }
 
 /**
@@ -519,6 +533,7 @@ function getFocus(hoiFocus: HOIPartial<FocusDef>, conditionExprs: ConditionItem[
         icon,
         textIcon,
         overlay,
+        searchFilters: hoiFocus.search_filters?._values ?? [],
         x,
         y,
         xToken: xRaw?.token,

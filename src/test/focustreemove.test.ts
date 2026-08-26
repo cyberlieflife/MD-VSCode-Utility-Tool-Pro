@@ -190,7 +190,10 @@ focus_tree = {
             assert.strictEqual(content[pos!], '}');
             const inserted = content.slice(0, pos) + '\n\tfocus = { id = new_focus }\n' + content.slice(pos);
             const tree = convertFocusFileNodeToJson(parseHoi4File(inserted), {});
-            assert.strictEqual(getFocusTreeWithFocusFile(tree, [], 't.txt', {})[1].focuses['new_focus'].id, 'new_focus');
+            // focusTrees are sorted by id (see getFocusTreeWithFocusFile), so find the tree that
+            // received the inserted focus instead of relying on a fixed index.
+            const target = getFocusTreeWithFocusFile(tree, [], 't.txt', {}).find(t => t.focuses['new_focus']);
+            assert.strictEqual(target?.focuses['new_focus'].id, 'new_focus');
         });
 
         it('returns undefined for text without a focus tree', () => {

@@ -215,7 +215,7 @@ export interface TokenInFile {
     token: Token | null;
 }
 
-export type WorldMapMessage = LoadedMessage | RequestMapItemMessage | MapItemMessage | ErrorMessage | ProgressMessage | ProvinceMapSummaryMessage | OpenFileMessage | ExportMapMessage;
+export type WorldMapMessage = LoadedMessage | RequestMapItemMessage | MapItemMessage | ErrorMessage | ProgressMessage | ProvinceMapSummaryMessage | OpenFileMessage | ExportMapMessage | MoveProvinceMessage | AddMapItemMessage | SelectMapItemMessage;
 
 export interface LoadedMessage {
     command: 'loaded';
@@ -233,6 +233,8 @@ export interface MapItemMessage {
     data: string;
     start: number;
     end: number;
+    count?: number;
+    badCount?: number;
 }
 
 export interface ErrorMessage {
@@ -261,6 +263,28 @@ export interface OpenFileMessage {
 export interface ExportMapMessage {
     command: 'exportmap' | 'requestexportmap';
     dataUrl?: string;
+}
+
+export interface MoveProvinceMessage {
+    command: 'moveprovince';
+    type: 'state' | 'strategicregion',
+    province: number,
+    to: number,
+    from: number | undefined,
+    toFile: string,
+    fromFile: string | undefined,
+}
+
+export interface AddMapItemMessage {
+    command: 'addmapitem';
+    type: 'state' | 'strategicregion';
+}
+
+export interface SelectMapItemMessage {
+    command: 'selectmapitem';
+    type: 'state' | 'strategicregion';
+    id: number;
+    enterEditMode: boolean;
 }
 
 export type ProgressReporter = (progress: string) => Promise<void>;

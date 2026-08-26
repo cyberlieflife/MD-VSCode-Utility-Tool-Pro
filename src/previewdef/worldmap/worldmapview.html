@@ -89,9 +89,19 @@
                 </button>
             </div>
 
-            <div class="group" viewmode="state strategicregion supplyarea">
+            <div class="group" viewmode="province state strategicregion supplyarea">
+                <button id="selectedregion" title="%worldmap.topbar.selectedregion.title|Navigate to selected%">
+                    <span>%worldmap.topbar.selectedregion|Selected: %</span>
+                    <span id="selectedregion-text">%worldmap.topbar.selectedregion.none|None%</span>
+                </button>
                 <button id="open" title="%worldmap.topbar.open.title|Open in workspace%">
                     <i class="codicon codicon-link-external"></i>
+                </button>
+                <button id="edit" viewmode="state strategicregion" title="%worldmap.topbar.edit.title|Edit%">
+                    <i class="codicon codicon-edit"></i>
+                </button>
+                <button id="add" viewmode="state strategicregion" title="%worldmap.topbar.add.title|Add%">
+                    <i class="codicon codicon-add"></i>
                 </button>
             </div>
         </div>

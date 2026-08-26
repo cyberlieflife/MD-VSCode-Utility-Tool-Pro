@@ -31,9 +31,19 @@ export class TopBar extends Subscriber {
 
     public warningsVisible: boolean = false;
 
+    // Edit mode: when active (state/strategicregion views), clicking a province moves it into the
+    // currently selected region instead of changing the selection. editModeHoverProvinceId$ carries
+    // the province under the cursor so the renderer can highlight the move target.
+    public editMode$ = new BehaviorSubject<boolean>(false);
+    public editModeHoverProvinceId$ = new BehaviorSubject<number | undefined>(undefined);
+
+    public get editMode(): boolean {
+        return this.editMode$.value;
+    }
+
     private searchBox: HTMLInputElement;
 
-    constructor(canvas: HTMLCanvasElement, private viewPoint: ViewPoint, private loader: Loader, state: any) {
+    constructor(private canvas: HTMLCanvasElement, private viewPoint: ViewPoint, private loader: Loader, state: any) {
         super();
 
         this.addSubscription(this.warningFilter = new DivDropdown(document.getElementById('warningfilter') as HTMLDivElement, true));
@@ -115,6 +125,8 @@ export class TopBar extends Subscriber {
         this.loadRefreshButton();
         this.loadOpenButton();
         this.loadExportButton();
+        this.loadEditButton();
+        this.loadSelectedRegionButton();
     }
 
     private loadWarningButton() {
@@ -237,13 +249,228 @@ export class TopBar extends Subscriber {
         }));
     }
     
+    private loadEditButton() {
+        const editButton = document.getElementById('edit') as HTMLButtonElement;
+        const addButton = document.getElementById('add') as HTMLButtonElement;
+        editButton.disabled = true;
+        addButton.disabled = true;
+        const pencilUri: string | undefined = (window as any).__pencilUri;
+
+        const that = this;
+
+        function enterEditMode() {
+            that.editMode$.next(true);
+            editButton.classList.add('active');
+            that.canvas.style.cursor = pencilUri ? "url('" + pencilUri + "') 3.5 27.5, pointer" : 'crosshair';
+        }
+
+        function exitEditMode() {
+            that.editMode$.next(false);
+            editButton.classList.remove('active');
+            that.canvas.style.cursor = 'crosshair';
+        }
+
+        this.addSubscription(this.viewMode$.subscribe(() => {
+            exitEditMode();
+        }));
+
+        this.addSubscription(combineLatest([
+            this.viewMode$,
+            this.selectedStateId$,
+            this.selectedStrategicRegionId$,
+        ]).subscribe(() => {
+            editButton.disabled = !this.canEditCurrentView();
+            addButton.disabled = !(this.viewMode$.value === 'state' || this.viewMode$.value === 'strategicregion');
+        }));
+
+        this.addSubscription(fromEvent(editButton, 'click').subscribe(e => {
+            e.stopPropagation();
+            if (!this.editMode$.value) {
+                sendEvent('worldmap.entereditmode.' + this.viewMode$.value);
+                enterEditMode();
+            } else {
+                exitEditMode();
+            }
+        }));
+
+        this.addSubscription(fromEvent(addButton, 'click').subscribe(e => {
+            e.stopPropagation();
+            if (this.loader.worldMap) {
+                sendEvent('worldmap.add.' + this.viewMode$.value);
+                vscode.postMessage<WorldMapMessage>({ command: 'addmapitem', type: this.viewMode$.value as 'state' | 'strategicregion' });
+            }
+        }));
+
+        this.addSubscription(fromEvent<MessageEvent>(window, 'message').subscribe(event => {
+            const message = event.data as WorldMapMessage;
+            if (message.command !== 'selectmapitem') {
+                return;
+            }
+
+            if (message.type === this.viewMode$.value) {
+                if (message.type === 'state') {
+                    this.selectedStateId$.next(message.id);
+                } else if (message.type === 'strategicregion') {
+                    this.selectedStrategicRegionId$.next(message.id);
+                }
+                if (message.enterEditMode && this.canEditCurrentView()) {
+                    enterEditMode();
+                }
+            }
+        }));
+    }
+
+    private canEditCurrentView(): boolean {
+        const viewMode = this.viewMode$.value;
+        return (viewMode === 'state' && this.selectedStateId$.value !== undefined) ||
+            (viewMode === 'strategicregion' && this.selectedStrategicRegionId$.value !== undefined);
+    }
+
+    private loadSelectedRegionButton() {
+        const selectedRegionButton = document.getElementById('selectedregion') as HTMLButtonElement;
+        const selectedRegionText = document.getElementById('selectedregion-text') as HTMLSpanElement;
+
+        this.addSubscription(combineLatest([
+            this.viewMode$,
+            this.selectedProvinceId$,
+            this.selectedStateId$,
+            this.selectedStrategicRegionId$,
+            this.selectedSupplyAreaId$,
+        ]).subscribe(() => {
+            selectedRegionButton.disabled = !this.canViewSelected();
+            const selected = this.getSelectedItemId();
+            selectedRegionText.textContent = selected === undefined ?
+                feLocalize('worldmap.topbar.selectedregion.none', 'None') :
+                selected.toString();
+        }));
+
+        this.addSubscription(fromEvent(selectedRegionButton, 'click').subscribe(e => {
+            e.stopPropagation();
+            this.viewSelected();
+        }));
+    }
+
+    private getSelectedItemId(): number | undefined {
+        switch (this.viewMode$.value) {
+            case 'province':
+                return this.selectedProvinceId$.value;
+            case 'state':
+                return this.selectedStateId$.value;
+            case 'strategicregion':
+                return this.selectedStrategicRegionId$.value;
+            case 'supplyarea':
+                return this.selectedSupplyAreaId$.value;
+            default:
+                return undefined;
+        }
+    }
+
+    private canViewSelected(): boolean {
+        const worldMap = this.loader.worldMap;
+        const id = this.getSelectedItemId();
+        if (id === undefined) {
+            return false;
+        }
+        switch (this.viewMode$.value) {
+            case 'province':
+                return worldMap.getProvinceById(id) !== undefined;
+            case 'state':
+                return worldMap.getStateById(id) !== undefined;
+            case 'strategicregion':
+                return worldMap.getStrategicRegionById(id) !== undefined;
+            case 'supplyarea':
+                return worldMap.getSupplyAreaById(id) !== undefined;
+            default:
+                return false;
+        }
+    }
+
+    private viewSelected(): void {
+        const worldMap = this.loader.worldMap;
+        const id = this.getSelectedItemId();
+        if (id === undefined) {
+            return;
+        }
+        const region = this.viewMode$.value === 'province' ? worldMap.getProvinceById(id) :
+            this.viewMode$.value === 'state' ? worldMap.getStateById(id) :
+            this.viewMode$.value === 'strategicregion' ? worldMap.getStrategicRegionById(id) :
+            worldMap.getSupplyAreaById(id);
+        if (region && region.boundingBox.h > 0 && region.boundingBox.w > 0) {
+            this.viewPoint.centerZone(region.boundingBox);
+        }
+    }
+
+    // Edit-mode click on a province: ask the extension host to move it into the selected region.
+    // The target files are resolved (and copied into the workspace if needed) on the host side.
+    private moveProvinceToSelected(): void {
+        const worldMap = this.loader.worldMap;
+        const hoverProvince = worldMap.getProvinceById(this.editModeHoverProvinceId$.value);
+        if (!hoverProvince) {
+            return;
+        }
+
+        const viewMode = this.viewMode$.value;
+        if (viewMode === 'state') {
+            const selectedState = worldMap.getStateById(this.selectedStateId$.value);
+            if (!selectedState) {
+                return;
+            }
+            const hoverState = worldMap.getStateByProvinceId(hoverProvince.id);
+            vscode.postMessage<WorldMapMessage>({
+                command: 'moveprovince',
+                type: 'state',
+                province: hoverProvince.id,
+                to: selectedState.id,
+                from: hoverState?.id,
+                toFile: selectedState.file,
+                fromFile: hoverState?.file,
+            });
+        } else if (viewMode === 'strategicregion') {
+            const selectedStrategicRegion = worldMap.getStrategicRegionById(this.selectedStrategicRegionId$.value);
+            if (!selectedStrategicRegion) {
+                return;
+            }
+            const hoverStrategicRegion = worldMap.getStrategicRegionByProvinceId(hoverProvince.id);
+            vscode.postMessage<WorldMapMessage>({
+                command: 'moveprovince',
+                type: 'strategicregion',
+                province: hoverProvince.id,
+                to: selectedStrategicRegion.id,
+                from: hoverStrategicRegion?.id,
+                toFile: selectedStrategicRegion.file,
+                fromFile: hoverStrategicRegion?.file,
+            });
+        }
+    }
+
+    // Middle-button click: select the item under the cursor without toggling the previous selection.
+    private selectHoveredItem(): void {
+        switch (this.viewMode$.value) {
+            case 'province':
+                this.selectedProvinceId$.next(this.hoverProvinceId$.value);
+                break;
+            case 'state':
+                this.selectedStateId$.next(this.hoverStateId$.value);
+                break;
+            case 'strategicregion':
+                this.selectedStrategicRegionId$.next(this.hoverStrategicRegionId$.value);
+                break;
+            case 'supplyarea':
+                this.selectedSupplyAreaId$.next(this.hoverSupplyAreaId$.value);
+                break;
+        }
+    }
+    
     private registerEventListeners(canvas: HTMLCanvasElement) {
+        let midButtonDown = false;
+
         this.addSubscription(fromEvent<MouseEvent>(canvas, 'mousemove').subscribe((e) => {
             if (!this.loader.worldMap) {
                 this.hoverProvinceId$.next(undefined);
                 this.hoverStateId$.next(undefined);
                 this.hoverStrategicRegionId$.next(undefined);
                 this.hoverSupplyAreaId$.next(undefined);
+                this.editModeHoverProvinceId$.next(undefined);
                 return;
             }
     
@@ -258,6 +485,7 @@ export class TopBar extends Subscriber {
             }
 
             this.hoverProvinceId$.next(worldMap.getProvinceByPosition(x, y)?.id);
+            this.editModeHoverProvinceId$.next(this.hoverProvinceId$.value);
             this.hoverStateId$.next(this.hoverProvinceId$.value === undefined ? undefined : worldMap.getStateByProvinceId(this.hoverProvinceId$.value)?.id);
             this.hoverStrategicRegionId$.next(this.hoverProvinceId$.value === undefined ? undefined : worldMap.getStrategicRegionByProvinceId(this.hoverProvinceId$.value)?.id);
             this.hoverSupplyAreaId$.next(this.hoverStateId$.value === undefined ? undefined : worldMap.getSupplyAreaByStateId(this.hoverStateId$.value)?.id);
@@ -268,9 +496,15 @@ export class TopBar extends Subscriber {
             this.hoverStateId$.next(undefined);
             this.hoverStrategicRegionId$.next(undefined);
             this.hoverSupplyAreaId$.next(undefined);
+            this.editModeHoverProvinceId$.next(undefined);
+            midButtonDown = false;
         }));
     
         this.addSubscription(fromEvent(canvas, 'click').subscribe(() => {
+            if (this.editMode$.value && (this.viewMode$.value === 'state' || this.viewMode$.value === 'strategicregion')) {
+                this.moveProvinceToSelected();
+                return;
+            }
             switch (this.viewMode$.value) {
                 case 'province':
                     this.selectedProvinceId$.next(this.selectedProvinceId$.value === this.hoverProvinceId$.value ? undefined : this.hoverProvinceId$.value);
@@ -289,7 +523,25 @@ export class TopBar extends Subscriber {
 
         this.addSubscription(fromEvent(canvas, 'dblclick').subscribe(e => {
             e.stopPropagation();
-            this.openMapItem(true);
+            if (!this.editMode$.value) {
+                this.openMapItem(true);
+            }
+        }));
+
+        this.addSubscription(fromEvent<MouseEvent>(canvas, 'mousedown').subscribe(e => {
+            if (e.button === 1) {
+                midButtonDown = true;
+            }
+        }));
+
+        this.addSubscription(fromEvent<MouseEvent>(canvas, 'mouseup').subscribe(e => {
+            if (e.button === 1) {
+                if (midButtonDown) {
+                    e.preventDefault();
+                    this.selectHoveredItem();
+                }
+                midButtonDown = false;
+            }
         }));
 
         this.addSubscription(this.viewMode$.subscribe(() => this.onViewModeChange()));
