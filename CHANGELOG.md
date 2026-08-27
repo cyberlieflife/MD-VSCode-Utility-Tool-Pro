@@ -1,10 +1,15 @@
-## [v1.1.24] - 2026-08-26
+## [v1.1.24] - 2026-08-27
 
 ### Functionality
 
 - [World Map] The display settings now include "Show Resources" and "Show Factories" toggles (both enabled by default). When the preview mode is set to State, the centre of each state shows its resource icons with quantities, and civilian/military factory icons with quantities loaded from the game's own assets (conversion_mapicon_industry / conversion_mapicon_arms). State buildings are read from the `history` block where HOI4 defines them, keeping both the current named keys and the legacy numeric ones.
 - [World Map] The state hover tooltip now lists the same resource and civilian/military factory rows with quantities beneath the state details.
-- [World Map] States can now be edited from the preview beyond moving provinces: right-click a province in state view and choose "Edit state" to open a dialog for the owner (single tag), cores and claims (add_core_of / add_claim_by, multiple space-separated tags), the state category (dropdown of the parsed definitions), civilian and military factory counts, and each resource amount individually (0 removes the resource line). The history file is rewritten in place (copied from the HOI4 install first when the mod does not override it) with the file's own indentation, line endings and legacy building keys preserved; all field edits are built before anything is applied, so a failure leaves the file untouched.
+- [World Map] States can now be edited from the preview beyond moving provinces: right-click a province in state view and choose "Edit state" to open a dialog for the owner (single tag), cores and claims (add_core_of / add_claim_by, multiple space-separated tags), the state category (dropdown of the parsed definitions), manpower, civilian and military factory counts, and each resource amount individually (0 removes the resource line). The history file is rewritten in place (copied from the HOI4 install first when the mod does not override it) with the file's own indentation, line endings and legacy building keys preserved; all field edits are built before anything is applied, so a failure leaves the file untouched.
+- [World Map] The edit-state dialog localises what it shows: category options use the game's own localised names (with the key kept in parentheses and the category's base building slots from `local_building_slots` appended, e.g. "都市 (city) — 6"), and resource rows use built-in Chinese/Korean/Russian display names. The values written to the files stay untouched keys, so mod compatibility is unchanged.
+
+### Bugfixes
+
+- [World Map] The localisation index now self-heals from a corrupted cache pair (an empty data file next to a full manifest made every lookup silently return the untranslated key and the index never rebuilt) and refuses to persist an empty index, so the cached build can no longer lock itself into returning untranslated text.
 
 ## [v1.1.23] - 2026-08-26
 
