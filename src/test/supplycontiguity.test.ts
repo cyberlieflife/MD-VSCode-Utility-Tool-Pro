@@ -29,6 +29,7 @@ function makeState(id: number, provinces: number[]): State {
         owner: undefined,
         provinces,
         cores: [],
+        claims: [],
         impassable: false,
         impassableIgnoredLinks: [],
         victoryPoints: {},

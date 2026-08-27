@@ -333,6 +333,16 @@ async function buildLocalisationIndexWithCache(
             }
         }
     }
+
+    // Self-heal against a corrupted cache pair (a data file written empty next to a full
+    // manifest, e.g. by an interrupted write): the cache hit above then yields an empty index
+    // with nothing left to parse, and every later build would stay empty forever. Detect that
+    // state and force a full reparse instead.
+    const cachedIndexKeyCount = Object.values(targetIndex).reduce((sum, lang) => sum + Object.keys(lang).length, 0);
+    if (manifest && filesToParse.length === 0 && cachedIndexKeyCount === 0 && locFiles.length > 0) {
+        Logger.warn(`${cacheName}: cache data is empty while the manifest lists ${locFiles.length} files; rebuilding from scratch`);
+        filesToParse = locFiles;
+    }
     timer.mark('cache');
 
     await parseLocalisationFiles(filesToParse, targetIndex, fileMap, options, estimatedSize, priority);
@@ -348,6 +358,13 @@ async function buildLocalisationIndexWithCache(
                 serializedFileMap[langKey][filePath] = [...fileMap[langKey][filePath]];
             }
         }
+    }
+    // Never persist an empty index next to a full manifest: that pair makes every later build
+    // trust the empty cache and skip parsing entirely (see the self-heal above).
+    const indexKeyCount = Object.values(targetIndex).reduce((sum, lang) => sum + Object.keys(lang).length, 0);
+    if (locFiles.length > 0 && indexKeyCount === 0) {
+        Logger.warn(`${cacheName}: parsed ${locFiles.length} files but produced no entries; cache not saved`);
+        return;
     }
     const cacheData: LocCacheData = { index: targetIndex, fileMap: serializedFileMap };
     // fire-and-forget: write data before manifest for atomicity

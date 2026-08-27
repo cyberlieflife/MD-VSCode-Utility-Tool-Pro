@@ -197,6 +197,22 @@ describe('previewdef/worldmap/loader loadStateFromContent', () => {
         assert.strictEqual(states[0].buildings['industrial_complex'], undefined);
         assert.strictEqual(states[0].buildings['1'], undefined);
     });
+
+    it('parses cores and claims (add_claim_by) with duplicates removed', () => {
+        const content = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n\thistory = {\n\t\towner = SPR\n\t\tadd_core_of = GLC\n\t\tadd_core_of = SPR\n\t\tadd_claim_by = BUL\n\t\tadd_claim_by = GRE\n\t}\n}\n';
+        const states = loadStateFromContent(content, 'history/states/42.txt', []);
+        assert.strictEqual(states.length, 1);
+        assert.deepStrictEqual(states[0].cores, ['GLC', 'SPR']);
+        assert.deepStrictEqual(states[0].claims, ['BUL', 'GRE']);
+    });
+
+    it('produces empty cores and claims when the history block has none', () => {
+        const content = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n\thistory = {\n\t\towner = SPR\n\t}\n}\n';
+        const states = loadStateFromContent(content, 'history/states/42.txt', []);
+        assert.strictEqual(states.length, 1);
+        assert.deepStrictEqual(states[0].cores, []);
+        assert.deepStrictEqual(states[0].claims, []);
+    });
 });
 
 describe('previewdef/worldmap/loader loadStrategicRegionFromContent', () => {

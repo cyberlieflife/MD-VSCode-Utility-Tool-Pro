@@ -9,6 +9,8 @@ import { DivDropdown } from "../util/dropdown";
 import { BehaviorSubject, combineLatest, fromEvent } from 'rxjs';
 import { Renderer } from './renderer';
 import { sendEvent } from '../util/telemetry';
+import { showContextMenu, closeContextMenu } from "../util/contextmenu";
+import { openEditStateDialog } from "./editstatedialog";
 
 export type ViewMode = 'province' | 'state' | 'strategicregion' | 'supplyarea' | 'warnings';
 export type ColorSet = 'provinceid' | 'provincetype' | 'terrain' | 'country' | 'stateid' | 'manpower' |
@@ -476,6 +478,55 @@ export class TopBar extends Subscriber {
                 break;
         }
     }
+
+    // Right-click on a province in state view offers the "Edit state" action. The right button is
+    // also the map pan gesture, so the menu only opens when the press was a click (the pointer
+    // barely moved between mousedown and contextmenu).
+    private registerContextMenu(canvas: HTMLCanvasElement) {
+        let rightDownPosition: { x: number; y: number } | undefined = undefined;
+
+        this.addSubscription(fromEvent<MouseEvent>(canvas, 'mousedown').subscribe(e => {
+            if (e.button === 2) {
+                rightDownPosition = { x: e.clientX, y: e.clientY };
+            }
+        }));
+
+        this.addSubscription(fromEvent<MouseEvent>(canvas, 'contextmenu').subscribe(e => {
+            e.preventDefault();
+            const down = rightDownPosition;
+            rightDownPosition = undefined;
+            if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) {
+                closeContextMenu();
+                return;
+            }
+            if (this.viewMode$.value !== 'state' || this.editMode$.value || !this.loader.worldMap) {
+                return;
+            }
+
+            const worldMap = this.loader.worldMap;
+            let x = this.viewPoint.convertBackX(e.pageX);
+            let y = this.viewPoint.convertBackY(e.pageY);
+            if (x < 0) {
+                x += worldMap.width;
+            }
+            while (x >= worldMap.width && worldMap.width > 0) {
+                x -= worldMap.width;
+            }
+
+            const province = worldMap.getProvinceByPosition(x, y);
+            const state = province ? worldMap.getStateByProvinceId(province.id) : undefined;
+            if (!province || !state) {
+                return;
+            }
+
+            showContextMenu('wm-context-menu', e.clientX, e.clientY, [
+                {
+                    label: feLocalize('worldmap.edit.state.menu', 'Edit state'),
+                    onClick: () => openEditStateDialog(worldMap, state),
+                },
+            ]);
+        }));
+    }
     
     private registerEventListeners(canvas: HTMLCanvasElement) {
         let midButtonDown = false;
@@ -559,6 +610,8 @@ export class TopBar extends Subscriber {
                 midButtonDown = false;
             }
         }));
+
+        this.registerContextMenu(canvas);
 
         this.addSubscription(this.viewMode$.subscribe(() => this.onViewModeChange()));
 

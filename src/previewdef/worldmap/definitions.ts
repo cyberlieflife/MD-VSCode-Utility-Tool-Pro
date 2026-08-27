@@ -26,6 +26,11 @@ export interface WorldMapData {
     terrains: Terrain[];
     resources: Resource[];
     factoryImages: FactoryImages;
+    stateCategories: string[];
+    // State category key -> localised display name, for UI dropdowns (falls back to the key).
+    stateCategoryNames: Record<string, string>;
+    // State category key -> base building slots, for UI hints (missing when undefined in the file).
+    stateCategorySlots: Record<string, number>;
     rivers: River[];
     warnings: WorldMapWarning[];
 }
@@ -99,6 +104,7 @@ export interface State extends Region, TokenInFile {
     victoryPoints: Record<number, number | undefined>;
     resources: Record<string, number | undefined>;
     buildings: Record<string, number | undefined>;
+    claims: string[];
 }
 
 export interface Railway {
@@ -157,6 +163,8 @@ export interface Terrain {
 
 export interface Resource {
     name: string;
+    // Localised display name for UI lists (falls back to name when no translation exists).
+    displayName: string;
     iconFrame: number;
     imageUri: string;
     file: string;
@@ -185,6 +193,8 @@ export interface StateCategory {
     name: string;
     color: number;
     file: string;
+    // Base building slots from the category definition (undefined when the file omits it).
+    buildingSlots: number | undefined;
 }
 
 export interface RiverBmp {
@@ -222,7 +232,7 @@ export interface TokenInFile {
     token: Token | null;
 }
 
-export type WorldMapMessage = LoadedMessage | RequestMapItemMessage | MapItemMessage | ErrorMessage | ProgressMessage | ProvinceMapSummaryMessage | OpenFileMessage | ExportMapMessage | MoveProvinceMessage | AddMapItemMessage | SelectMapItemMessage;
+export type WorldMapMessage = LoadedMessage | RequestMapItemMessage | MapItemMessage | ErrorMessage | ProgressMessage | ProvinceMapSummaryMessage | OpenFileMessage | ExportMapMessage | MoveProvinceMessage | AddMapItemMessage | SelectMapItemMessage | EditStateMessage;
 
 export interface LoadedMessage {
     command: 'loaded';
@@ -292,6 +302,20 @@ export interface SelectMapItemMessage {
     type: 'state' | 'strategicregion';
     id: number;
     enterEditMode: boolean;
+}
+
+export interface EditStateMessage {
+    command: 'editstate';
+    id: number;
+    file: string;
+    owner: string | undefined;
+    cores: string[];
+    claims: string[];
+    category: string;
+    manpower: number | undefined;
+    civilianFactories: number | undefined;
+    militaryFactories: number | undefined;
+    resources: Record<string, number>;
 }
 
 export type ProgressReporter = (progress: string) => Promise<void>;

@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import { State, Province, WorldMapWarning, WorldMapWarningSource, Region, StateCategory } from "../definitions";
 import { Enum, SchemaDef, CustomMap, DetailValue, convertNodeToJson } from "../../../hoiformat/schema";
 import { readFileFromModOrHOI4, readFileFromModOrHOI4AsJson } from "../../../util/fileloader";
@@ -7,6 +8,7 @@ import { parseHoi4File, Token } from "../../../hoiformat/hoiparser";
 import { arrayToMap, UserError } from "../../../util/common";
 import { DefaultMapLoader } from "./provincemap";
 import { localize } from "../../../util/i18n";
+import { ensureLocalisationIndex, getLocalisedTextUnchecked } from "../../../util/localisationIndex";
 import { LoaderSession } from "../../../util/loader/loader";
 import { flatMap } from "lodash";
 import { ResourceDefinitionLoader } from "./resource";
@@ -29,10 +31,12 @@ interface StateDefinition {
 }
 
 // Buildings live inside the history block in HOI4 state files (vanilla and mods alike).
+// Claims use add_claim_by (one TAG per line) in vanilla files.
 interface StateHistory {
     owner: string;
     victory_points: Enum[];
     add_core_of: string[];
+    add_claim_by: string[];
     buildings: CustomMap<number>;
 }
 
@@ -50,6 +54,10 @@ const stateFileSchema: SchemaDef<StateFile> = {
                     _type: "array",
                 },
                 add_core_of: {
+                    _innerType: "string",
+                    _type: "array",
+                },
+                add_claim_by: {
                     _innerType: "string",
                     _type: "array",
                 },
@@ -76,6 +84,8 @@ interface StateCategoryFile {
 
 interface StateCategoryDefinition {
     color: DetailValue<Enum>;
+    // Base building slots granted by this category (vanilla: 0-12).
+    local_building_slots: number;
 }
 
 const stateCategoryFileSchema: SchemaDef<StateCategoryFile> = {
@@ -85,6 +95,7 @@ const stateCategoryFileSchema: SchemaDef<StateCategoryFile> = {
                 _innerType: "enum",
                 _type: "detailvalue",
             },
+            local_building_slots: "number",
         },
         _type: "map",
     },
@@ -92,7 +103,7 @@ const stateCategoryFileSchema: SchemaDef<StateCategoryFile> = {
 
 type StateNoBoundingBox = Omit<State, keyof Region>;
 
-type StateLoaderResult = { states: State[], badStatesCount: number };
+type StateLoaderResult = { states: State[], badStatesCount: number, stateCategories: string[], stateCategoryNames: Record<string, string>, stateCategorySlots: Record<string, number> };
 export class StatesLoader extends FolderLoader<StateLoaderResult, StateNoBoundingBox[]> {
     private categoriesLoader: StateCategoriesLoader;
 
@@ -155,10 +166,27 @@ export class StatesLoader extends FolderLoader<StateLoaderResult, StateNoBoundin
         const badStatesCount = badStateId + 1;
         validateProvinceInState(provinces, filledStates, badStatesCount, warnings);
 
+        // Localised category names for the edit dialog's dropdown; the game's own localisation
+        // files key them by the bare category name. The index is built on demand (it is otherwise
+        // only prewarmed for focus-tree previews) and missing translations fall back to the key.
+        await ensureLocalisationIndex();
+        const stateCategoryNames: Record<string, string> = {};
+        const stateCategorySlots: Record<string, number> = {};
+        for (const name of Object.keys(stateCategories.result)) {
+            stateCategoryNames[name] = getLocalisedTextUnchecked(name, targetLocalisationLanguage()) ?? name;
+            const slots = stateCategories.result[name].buildingSlots;
+            if (slots !== undefined) {
+                stateCategorySlots[name] = slots;
+            }
+        }
+
         return {
             result: {
                 states: filledStates,
                 badStatesCount,
+                stateCategories: Object.keys(stateCategories.result).sort(),
+                stateCategoryNames,
+                stateCategorySlots,
             },
             dependencies: [this.folder + '/*', ...stateCategories.dependencies],
             warnings,
@@ -256,6 +284,7 @@ export function loadStateFromContent(content: string, stateFile: string, globalW
             const owner = state.history?.owner;
             const provinces = state.provinces._values.map(v => parseInt(v));
             const cores = state.history?.add_core_of.map(v => v).filter((v, i, a): v is string => v !== undefined && i === a.indexOf(v)) ?? [];
+            const claims = state.history?.add_claim_by.map(v => v).filter((v, i, a): v is string => v !== undefined && i === a.indexOf(v)) ?? [];
             const impassable = state.impassable ?? false;
             const impassableIgnoredLinks = state.impassable_ignored_links?._values.map(v => parseInt(v)) ?? [];
             const victoryPointsArray = state.history?.victory_points.filter(v => v._values.length >= 2).map(v => v._values.slice(0, 2).map(v => parseInt(v)) as [number, number]) ?? [];
@@ -290,7 +319,7 @@ export function loadStateFromContent(content: string, stateFile: string, globalW
             })));
 
             result.push({
-                id, name, manpower, category, owner, provinces, cores, impassable, impassableIgnoredLinks, victoryPoints, resources, buildings,
+                id, name, manpower, category, owner, provinces, cores, claims, impassable, impassableIgnoredLinks, victoryPoints, resources, buildings,
                 file: stateFile,
                 token: state._token ?? null,
             });
@@ -405,8 +434,9 @@ async function loadStateCategory(file: string, _warning: WorldMapWarning[]): Pro
         for (const categories of Object.values(data.state_categories._map)) {
             const name = categories._key;
             const color = convertColor(categories._value.color);
+            const buildingSlots = categories._value.local_building_slots;
 
-            result.push({ name, color, file });
+            result.push({ name, color, file, buildingSlots });
         }
 
         return result;
@@ -414,4 +444,22 @@ async function loadStateCategory(file: string, _warning: WorldMapWarning[]): Pro
         error(e);
         return [];
     }
+}
+
+// The language to translate into: the preview-localisation setting wins over the VSCode UI
+// language, mirroring getLocalisedTextQuick in util/localisationIndex.
+function targetLocalisationLanguage(): string {
+    const previewLocalisation = vscode.workspace.getConfiguration('mdHoi4Utilities').get<string>('previewLocalisation');
+    const localeISOMapping: Record<string, string> = {
+        ['Brazilian Portuguese']: 'pt-br',
+        English: 'en',
+        French: 'fr',
+        German: 'de',
+        Japanese: 'ja',
+        Polish: 'pl',
+        Russian: 'ru',
+        ['Simplified Chinese']: 'zh-cn',
+        Spanish: 'es',
+    };
+    return (previewLocalisation && localeISOMapping[previewLocalisation]) || vscode.env.language;
 }

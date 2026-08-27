@@ -293,6 +293,9 @@ export class FEWorldMapClass implements FEWorldMap {
     terrains!: Terrain[];
     resources!: Resource[];
     factoryImages!: FactoryImages;
+    stateCategories!: string[];
+    stateCategoryNames!: Record<string, string>;
+    stateCategorySlots!: Record<string, number>;
     rivers!: River[];
 
     private provinces!: (Province | null | undefined)[];
@@ -323,7 +326,7 @@ export class FEWorldMapClass implements FEWorldMap {
         Object.assign(this, worldMap ?? ({
             width: 0, height: 0,
             provinces: [], states: [], countries: [], warnings: [], continents: [], strategicRegions: [], supplyAreas: [], terrains: [],
-            railways: [], supplyNodes: [], resources: [], factoryImages: { civilian: '', military: '' }, rivers: [],
+            railways: [], supplyNodes: [], resources: [], factoryImages: { civilian: '', military: '' }, stateCategories: [], stateCategoryNames: {}, stateCategorySlots: {}, rivers: [],
             provincesCount: 0, statesCount: 0, countriesCount: 0, strategicRegionsCount: 0, supplyAreasCount: 0,
             badProvincesCount: 0, badStatesCount: 0, badStrategicRegionsCount: 0, badSupplyAreasCount: 0,
             railwaysCount: 0, supplyNodesCount: 0,

@@ -4,7 +4,7 @@ import worldmapviewstyles from './worldmapview.css';
 import { localize, localizeText, i18nTableAsScript } from '../../util/i18n';
 import { html } from '../../util/html';
 import { error, debug } from '../../util/debug';
-import { WorldMapMessage, ProgressReporter, WorldMapData, MapItemMessage, RequestMapItemMessage, MoveProvinceMessage, AddMapItemMessage } from './definitions';
+import { WorldMapMessage, ProgressReporter, WorldMapData, MapItemMessage, RequestMapItemMessage, MoveProvinceMessage, AddMapItemMessage, EditStateMessage } from './definitions';
 import { matchPathEnd } from '../../util/nodecommon';
 import { writeFile, getConfiguration } from '../../util/vsccommon';
 import { slice, debounceByInput, forceError } from '../../util/common';
@@ -17,6 +17,7 @@ import { itemFingerprints, collectChangeRanges } from './itemfingerprint';
 import { contextContainer } from '../../context';
 import { moveProvince } from './editor/moveprovince';
 import { addMapItem } from './editor/addmapitem';
+import { editState } from './editor/editstate';
 
 export class WorldMap {
     public panel: vscode.WebviewPanel | undefined;
@@ -145,6 +146,9 @@ export class WorldMap {
                     break;
                 case 'addmapitem':
                     await this.addMapItem(msg);
+                    break;
+                case 'editstate':
+                    await this.editState(msg);
                     break;
             }
         } catch (e) {
@@ -381,6 +385,18 @@ export class WorldMap {
         }
 
         const messages = await addMapItem(msg, this.cachedWorldMap);
+        for (const message of messages) {
+            await this.postMessageToWebview(message);
+        }
+    }
+
+    private async editState(msg: EditStateMessage) {
+        if (!this.cachedWorldMap) {
+            await vscode.window.showErrorMessage(localize('worldmap.edit.failed.nocache', 'Editing failed. No cached world map data. Please reload the world map and try again.'));
+            return;
+        }
+
+        const messages = await editState(msg, this.cachedWorldMap);
         for (const message of messages) {
             await this.postMessageToWebview(message);
         }

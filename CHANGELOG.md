@@ -4,6 +4,7 @@
 
 - [World Map] The display settings now include "Show Resources" and "Show Factories" toggles (both enabled by default). When the preview mode is set to State, the centre of each state shows its resource icons with quantities, and civilian/military factory icons with quantities loaded from the game's own assets (conversion_mapicon_industry / conversion_mapicon_arms). State buildings are read from the `history` block where HOI4 defines them, keeping both the current named keys and the legacy numeric ones.
 - [World Map] The state hover tooltip now lists the same resource and civilian/military factory rows with quantities beneath the state details.
+- [World Map] States can now be edited from the preview beyond moving provinces: right-click a province in state view and choose "Edit state" to open a dialog for the owner (single tag), cores and claims (add_core_of / add_claim_by, multiple space-separated tags), the state category (dropdown of the parsed definitions), civilian and military factory counts, and each resource amount individually (0 removes the resource line). The history file is rewritten in place (copied from the HOI4 install first when the mod does not override it) with the file's own indentation, line endings and legacy building keys preserved; all field edits are built before anything is applied, so a failure leaves the file untouched.
 
 ## [v1.1.23] - 2026-08-26
 

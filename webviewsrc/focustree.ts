@@ -13,6 +13,7 @@ import { toNumberLike } from "../src/hoiformat/schema";
 import { feLocalize } from './util/i18n';
 import { Checkbox } from "./util/checkbox";
 import { vscode } from "./util/vscode";
+import { showContextMenu as showSharedContextMenu, closeContextMenu as closeSharedContextMenu, sharedContextMenuEl } from "./util/contextmenu";
 import { substituteInlaySlots } from "./inlayslots";
 import { propagateAllowBranches, AllowBranchFocus } from "./focusbranch";
 import { patchFocusTreeContent } from "./focustreepatch";
@@ -218,7 +219,6 @@ function currentFocusPositions(): Record<string, { x: number; y: number }> {
 // incremental DOM updates keep working without re-binding.
 
 // Right-click context menu ---------------------------------------------
-let contextMenuEl: HTMLDivElement | null = null;
 
 // Maps a viewport point (right-click position) to the focus-tree grid cell under it. Uses the
 // same layout math as buildContent: the canvas is the scaled #focustreecontent element, the
@@ -262,33 +262,11 @@ function focusPositionToGrid(clientX: number, clientY: number): { x: number; y: 
 }
 
 function closeContextMenu() {
-    if (contextMenuEl) {
-        contextMenuEl.remove();
-        contextMenuEl = null;
-    }
+    closeSharedContextMenu();
 }
 
 function showContextMenu(x: number, y: number, items: { label: string; onClick: () => void }[]) {
-    closeContextMenu();
-    const menu = document.createElement('div');
-    menu.className = 'ft-context-menu';
-    menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:2000;' +
-        'background:var(--vscode-menu-background);color:var(--vscode-menu-foreground);' +
-        'border:1px solid var(--vscode-menu-border);box-shadow:0 2px 8px rgba(0,0,0,.3);' +
-        'font-size:12px;min-width:160px;';
-    for (const item of items) {
-        const el = document.createElement('div');
-        el.style.cssText = 'padding:4px 12px;cursor:pointer;white-space:nowrap;';
-        el.textContent = item.label;
-        el.addEventListener('pointerdown', (e) => e.stopPropagation());
-        el.addEventListener('click', () => {
-            closeContextMenu();
-            item.onClick();
-        });
-        menu.appendChild(el);
-    }
-    document.body.appendChild(menu);
-    contextMenuEl = menu;
+    showSharedContextMenu('ft-context-menu', x, y, items);
 }
 
 // Delete confirmation flow (two steps on purpose): first a soft confirm, then an explicit
@@ -1806,7 +1784,7 @@ window.addEventListener('load', tryRun(async function() {
         ]);
     });
     document.addEventListener('pointerdown', (e) => {
-        if (contextMenuEl && !contextMenuEl.contains(e.target as Node)) {
+        if (sharedContextMenuEl() && !sharedContextMenuEl()!.contains(e.target as Node)) {
             closeContextMenu();
         }
     });
