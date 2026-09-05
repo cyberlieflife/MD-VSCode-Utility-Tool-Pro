@@ -1,3 +1,9 @@
+## [v1.1.25] - 2026-09-05
+
+### Functionality
+
+- [World Map] The edit-state dialog now also edits the state's infrastructure level (0-5). An existing `infrastructure` line inside the history buildings block is replaced in place (trailing comments kept), a missing one is inserted into the existing buildings block, and a state without any buildings block gets exactly one created (nested in the history block, which is also created when absent). A level of 0 removes the line, matching how the game treats an absent line. The file's own indentation, line endings and legacy key spellings are preserved, and the map's cached state updates without a reload.
+
 ## [v1.1.24] - 2026-08-27
 
 ### Functionality
