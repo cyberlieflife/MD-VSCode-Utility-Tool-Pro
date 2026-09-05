@@ -171,6 +171,7 @@ const table: Partial<typeof __table> = {
     "worldmap.edit.state.confirm": "Подтвердить",
     "worldmap.edit.state.cores": "Ядерные страны (теги через пробел)",
     "worldmap.edit.state.failed.notfoundstate": "Штат {0} отсутствует в данных карты. Перезагрузите карту мира и попробуйте снова.",
+    "worldmap.edit.state.infrastructure": "Инфраструктура",
     "worldmap.edit.state.menu": "Изменить штат",
     "worldmap.edit.state.manpower": "Живая сила",
     "worldmap.edit.state.militaryfactories": "Военные заводы",

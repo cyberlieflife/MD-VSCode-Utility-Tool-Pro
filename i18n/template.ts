@@ -170,6 +170,7 @@ const table: Partial<typeof __table> = {
     "worldmap.edit.state.confirm": "Confirm",
     "worldmap.edit.state.cores": "Cores (space-separated tags)",
     "worldmap.edit.state.failed.notfoundstate": "The state {0} does not exist in the world map data. Please reload the world map and try again.",
+    "worldmap.edit.state.infrastructure": "Infrastructure",
     "worldmap.edit.state.menu": "Edit state",
     "worldmap.edit.state.manpower": "Manpower",
     "worldmap.edit.state.militaryfactories": "Military factories",

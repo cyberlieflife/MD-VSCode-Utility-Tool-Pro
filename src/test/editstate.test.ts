@@ -124,6 +124,7 @@ describe('previewdef/worldmap/editor editState', () => {
             claims: [],
             category: 'city',
             manpower: 1358394,
+            infrastructure: undefined,
             civilianFactories: 3,
             militaryFactories: 1,
             resources: {},
@@ -167,6 +168,38 @@ describe('previewdef/worldmap/editor editState', () => {
         assert.ok(result.includes('industrial_complex = 9 #was: 6'), 'value replaced, trailing comment kept');
         assert.ok(result.includes('arms_factory = 4'));
         assert.ok(result.includes('infrastructure = 2 #keep'));
+    });
+
+    it('replaces the infrastructure level in place without touching other buildings', async () => {
+        const { result } = await editAndReplay(vanillaish, { infrastructure: 5, civilianFactories: undefined, militaryFactories: undefined });
+        assert.strictEqual((result.match(/buildings = \{/g) ?? []).length, 1, 'exactly one buildings block');
+        assert.ok(result.includes('infrastructure = 5'), 'infrastructure replaced in place');
+        assert.strictEqual((result.match(/infrastructure/g) ?? []).length, 1);
+        assert.ok(result.includes('industrial_complex = 3'), 'factory lines survive');
+    });
+
+    it('removes the infrastructure line when the level is 0 and clears the cached value', async () => {
+        const { result, cache } = await editAndReplay(vanillaish, { infrastructure: 0, civilianFactories: undefined, militaryFactories: undefined });
+        assert.strictEqual((result.match(/buildings = \{/g) ?? []).length, 1, 'exactly one buildings block');
+        assert.ok(!result.includes('infrastructure'), 'the infrastructure line must be removed');
+        assert.ok(result.includes('industrial_complex = 3'), 'factory lines survive');
+        assert.strictEqual(cache.states[1].buildings['infrastructure'], undefined, 'the cached infrastructure must clear');
+    });
+
+    it('inserts an infrastructure line into an existing buildings block missing it', async () => {
+        const source = 'state = {\n\tid = 42\n\thistory = {\n\t\towner = GER\n\t\tbuildings = {\n\t\t\tarms_factory = 2\n\t\t}\n\t}\n\tprovinces = { 1 }\n}\n';
+        const { result } = await editAndReplay(source, { infrastructure: 3, civilianFactories: undefined, militaryFactories: undefined });
+        assert.strictEqual((result.match(/buildings = \{/g) ?? []).length, 1, 'no duplicate buildings blocks');
+        assert.ok(result.includes('infrastructure = 3'), 'the missing line must be inserted');
+        assert.ok(result.includes('arms_factory = 2'), 'existing buildings survive');
+    });
+
+    it('creates one history and one buildings block when only the infrastructure level is set', async () => {
+        const sparse = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n}\n';
+        const { result } = await editAndReplay(sparse, { owner: undefined, cores: [], claims: [], category: '', infrastructure: 1, civilianFactories: undefined, militaryFactories: undefined, resources: {} });
+        assert.strictEqual((result.match(/history = \{/g) ?? []).length, 1, 'exactly one history block');
+        assert.strictEqual((result.match(/buildings = \{/g) ?? []).length, 1, 'exactly one buildings block');
+        assert.ok(result.includes('infrastructure = 1'));
     });
 
     it('keeps CRLF endings when adding factory lines to an existing buildings block', async () => {
@@ -339,7 +372,7 @@ describe('previewdef/worldmap/editor editState', () => {
         stubOpenDocument(vanillaish);
         stubApplyEdit(true);
         const cache = makeCache(vanillaish);
-        const messages = await editState(makeMessage({ owner: 'SOV', cores: ['GER', 'SOV'], claims: ['POL'], category: 'town', manpower: 42, civilianFactories: 9, militaryFactories: 0, resources: { steel: 0, oil: 2 } }), cache);
+        const messages = await editState(makeMessage({ owner: 'SOV', cores: ['GER', 'SOV'], claims: ['POL'], category: 'town', manpower: 42, infrastructure: 4, civilianFactories: 9, militaryFactories: 0, resources: { steel: 0, oil: 2 } }), cache);
         assert.strictEqual(messages.length, 1);
         const msg = messages[0] as any;
         assert.strictEqual(msg.command, 'states');
@@ -351,6 +384,7 @@ describe('previewdef/worldmap/editor editState', () => {
         assert.deepStrictEqual(state.claims, ['POL']);
         assert.strictEqual(state.category, 'town');
         assert.strictEqual(state.manpower, 42);
+        assert.strictEqual(state.buildings['infrastructure'], 4);
         assert.strictEqual(state.buildings['industrial_complex'], 9);
         assert.strictEqual(state.buildings['arms_factory'], undefined);
         assert.strictEqual(state.resources['steel'], undefined);

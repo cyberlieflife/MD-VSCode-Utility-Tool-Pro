@@ -27,7 +27,7 @@ describe('webview/worldmap editstatedialog', () => {
         claims: ['POL'],
         category: 'city',
         manpower: 1358394,
-        buildings: { industrial_complex: 3, arms_factory: 1 },
+        buildings: { infrastructure: 2, industrial_complex: 3, arms_factory: 1 },
         resources: { steel: 5 },
     } as any;
 
@@ -82,6 +82,8 @@ describe('webview/worldmap editstatedialog', () => {
         assert.strictEqual(claims.value, 'POL');
         const manpower = queryInput('Manpower');
         assert.strictEqual(manpower.value, '1358394');
+        const infrastructure = queryInput('Infrastructure');
+        assert.strictEqual(infrastructure.value, '2');
         const civilian = queryInput('Civilian factories');
         assert.strictEqual(civilian.value, '3');
         const military = queryInput('Military factories');
@@ -95,6 +97,7 @@ describe('webview/worldmap editstatedialog', () => {
         cores.value = 'GER SOV';
         claims.value = 'POL ITA';
         manpower.value = '999999';
+        infrastructure.value = '4';
         civilian.value = '9';
         military.value = '0';
         steel.value = '0';
@@ -114,6 +117,7 @@ describe('webview/worldmap editstatedialog', () => {
         assert.deepStrictEqual(msg.cores, ['GER', 'SOV']);
         assert.deepStrictEqual(msg.claims, ['POL', 'ITA']);
         assert.strictEqual(msg.category, 'city');
+        assert.strictEqual(msg.infrastructure, 4);
         assert.strictEqual(msg.civilianFactories, 9);
         assert.strictEqual(msg.manpower, 999999);
         assert.strictEqual(msg.militaryFactories, 0);
@@ -155,6 +159,24 @@ describe('webview/worldmap editstatedialog', () => {
         const buttons = Array.from(overlay.querySelectorAll('button'));
         buttons.find(b => b.textContent === 'Confirm')!.click();
         assert.deepStrictEqual(posted[0].resources, { steel: 5, oil: 2 }, 'the message must carry the resource keys, not the display names');
+    });
+
+    it('clamps the infrastructure level into the 0-5 range on confirm', () => {
+        openEditStateDialog(worldMap, state);
+        const infrastructure = queryInput('Infrastructure');
+        infrastructure.value = '9';
+        const overlay = query('.wm-editstate');
+        const buttons = Array.from(overlay.querySelectorAll('button'));
+        buttons.find(b => b.textContent === 'Confirm')!.click();
+        assert.strictEqual(posted[0].infrastructure, 5, 'values above 5 must clamp down to 5');
+
+        openEditStateDialog(worldMap, state);
+        const infrastructureAgain = queryInput('Infrastructure');
+        infrastructureAgain.value = '-3';
+        const overlayAgain = query('.wm-editstate');
+        const buttonsAgain = Array.from(overlayAgain.querySelectorAll('button'));
+        buttonsAgain.find(b => b.textContent === 'Confirm')!.click();
+        assert.strictEqual(posted[1].infrastructure, 0, 'negative values must clamp up to 0');
     });
 
     it('removes the owner when the field is blank', () => {

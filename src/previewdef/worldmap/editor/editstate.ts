@@ -4,8 +4,8 @@ import { copyFilesIntoWorkspace } from '../../../util/previewfileopener';
 import { EditStateMessage, WorldMapData, WorldMapMessage } from '../definitions';
 import { parseHoi4File, Node, Token } from '../../../hoiformat/hoiparser';
 
-// State attribute editing: rewrites owner / cores / claims / state_category / civilian and
-// military factory counts / resource amounts in the state's history file. The write-back
+// State attribute editing: rewrites owner / cores / claims / state_category / manpower /
+// infrastructure / factory counts / resource amounts in the state's history file. The write-back
 // re-parses the current document (never the load-time snapshot), locates every field through the
 // original token tree, and builds the whole WorkspaceEdit before applying it, so a failure in any
 // field leaves the file untouched.
@@ -67,8 +67,9 @@ export async function editState(msg: EditStateMessage, cachedWorldMap: WorldMapD
         () => applyTagLines(context, nodes, 'add_claim_by', msg.claims),
         () => applyCategory(context, nodes, msg.category),
         () => applyManpower(context, nodes, msg.manpower),
-        () => applyBuildingCount(context, nodes, 'civilian', msg.civilianFactories),
-        () => applyBuildingCount(context, nodes, 'military', msg.militaryFactories),
+        () => applyBuildingCount(context, nodes, 'infrastructure', msg.infrastructure),
+        () => applyBuildingCount(context, nodes, 'industrial_complex', msg.civilianFactories, '1'),
+        () => applyBuildingCount(context, nodes, 'arms_factory', msg.militaryFactories, '4'),
         () => applyResourceCounts(context, nodes, msg.resources),
     ];
     if (!builders.every(build => build())) {
@@ -96,6 +97,9 @@ export async function editState(msg: EditStateMessage, cachedWorldMap: WorldMapD
     }
     if (!state.buildings) {
         state.buildings = {};
+    }
+    if (msg.infrastructure !== undefined) {
+        state.buildings['infrastructure'] = msg.infrastructure === 0 ? undefined : msg.infrastructure;
     }
     if (msg.civilianFactories !== undefined) {
         state.buildings[buildingKey(state.buildings, 'civilian')] = msg.civilianFactories === 0 ? undefined : msg.civilianFactories;
@@ -345,18 +349,18 @@ function buildingKey(buildings: Record<string, unknown>, kind: 'civilian' | 'mil
     return keys.find(key => key in buildings) ?? keys[0];
 }
 
-// Sets (or removes) one factory count inside the history buildings block. When the file has no
-// buildings block the line goes to the shared pending buffer so both factory counts share one
-// newly created block.
-function applyBuildingCount(context: EditContext, nodes: StateNodes, kind: 'civilian' | 'military', target: number | undefined): boolean {
+// Sets (or removes) one building count inside the history buildings block. `name` is the current
+// building key (e.g. infrastructure / industrial_complex / arms_factory); `legacyName` is the
+// optional older numeric spelling a legacy mod may already use. When the file has no buildings
+// block the line goes to the shared pending buffer so all building counts share one newly
+// created block.
+function applyBuildingCount(context: EditContext, nodes: StateNodes, name: string, target: number | undefined, legacyName?: string): boolean {
     if (target === undefined) {
         return true;
     }
 
-    const name = kind === 'civilian' ? 'industrial_complex' : 'arms_factory';
-    const legacyName = kind === 'civilian' ? '1' : '4';
     const buildingsNode = nodes.historyNode ? findChild(nodes.historyNode, 'buildings') : undefined;
-    const existing = buildingsNode ? (findChild(buildingsNode, name) ?? findChild(buildingsNode, legacyName)) : undefined;
+    const existing = buildingsNode ? (findChild(buildingsNode, name) ?? (legacyName ? findChild(buildingsNode, legacyName) : undefined)) : undefined;
     const spelling = existing ? existing.name! : name;
 
     if (existing) {

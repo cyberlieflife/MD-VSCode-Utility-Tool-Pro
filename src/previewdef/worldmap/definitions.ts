@@ -313,6 +313,7 @@ export interface EditStateMessage {
     claims: string[];
     category: string;
     manpower: number | undefined;
+    infrastructure: number | undefined;
     civilianFactories: number | undefined;
     militaryFactories: number | undefined;
     resources: Record<string, number>;

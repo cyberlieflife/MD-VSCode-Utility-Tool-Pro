@@ -127,6 +127,13 @@ export function openEditStateDialog(worldMap: FEWorldMap, state: State) {
         Math.max(0, state.manpower ?? 0));
 
     const buildings = state.buildings ?? {};
+    // Infrastructure levels range 0-5 in vanilla; the input clamps to the same range on confirm.
+    const infrastructureInput = makeNumberField(
+        box,
+        feLocalize('worldmap.edit.state.infrastructure', 'Infrastructure'),
+        buildings['infrastructure'] ?? 0);
+    infrastructureInput.min = '0';
+    infrastructureInput.max = '5';
     const civilianInput = makeNumberField(
         box,
         feLocalize('worldmap.edit.state.civilianfactories', 'Civilian factories'),
@@ -192,6 +199,7 @@ export function openEditStateDialog(worldMap: FEWorldMap, state: State) {
             claims: parseTagList(claimsInput.value),
             category: categorySelect ? categorySelect.value : state.category,
             manpower: Math.max(0, parseInt(manpowerInput.value, 10) || 0),
+            infrastructure: Math.min(5, Math.max(0, parseInt(infrastructureInput.value, 10) || 0)),
             civilianFactories: Math.max(0, parseInt(civilianInput.value, 10) || 0),
             militaryFactories: Math.max(0, parseInt(militaryInput.value, 10) || 0),
             resources: Object.fromEntries(resourceInputs.map(({ name, input }) => [name, Math.max(0, parseInt(input.value, 10) || 0)])),

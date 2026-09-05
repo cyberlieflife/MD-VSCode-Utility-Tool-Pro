@@ -171,6 +171,7 @@ const table: Partial<typeof __table> = {
     "worldmap.edit.state.confirm": "确认",
     "worldmap.edit.state.cores": "拥有核心者（空格分隔标签）",
     "worldmap.edit.state.failed.notfoundstate": "州{0}不存在于世界地图数据中。请重新加载世界地图后重试。",
+    "worldmap.edit.state.infrastructure": "基础设施等级",
     "worldmap.edit.state.menu": "修改州",
     "worldmap.edit.state.manpower": "人力",
     "worldmap.edit.state.militaryfactories": "军用工厂数量",

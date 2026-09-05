@@ -171,6 +171,7 @@ const table: Partial<typeof __table> = {
     "worldmap.edit.state.confirm": "확인",
     "worldmap.edit.state.cores": "핵심 국가 (공백으로 구분된 태그)",
     "worldmap.edit.state.failed.notfoundstate": "주 {0}이(가) 지도 데이터에 없습니다. 지도를 다시 불러온 후 시도하세요.",
+    "worldmap.edit.state.infrastructure": "인프라",
     "worldmap.edit.state.menu": "주 편집",
     "worldmap.edit.state.manpower": "인력",
     "worldmap.edit.state.militaryfactories": "군수 공장 수",
