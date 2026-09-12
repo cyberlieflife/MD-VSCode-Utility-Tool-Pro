@@ -1,3 +1,10 @@
+## [v1.1.26] - 2026-09-12
+
+### Bugfixes
+
+- [World Map] The preview no longer breaks into an unstyled, non-functional toolbar when VS Code rebuilds its page (for example after the renderer process crashes under the map data's memory pressure). The bundled scripts, stylesheets and the codicon icon font are now embedded directly in the page instead of being loaded as external resources, whose reload after a rebuild could fail silently and leave a broken layout with no way to recover. A rebuilt page now re-runs its bootstrap script by itself and reloads the map data on its own.
+- [Preview] Sprite icons no longer stay missing when a preview opens while the gfx index is still being built: the resolution now waits for the build to finish, and a finished build notifies open previews so already-rendered icons recover.
+
 ## [v1.1.25] - 2026-09-05
 
 ### Functionality
