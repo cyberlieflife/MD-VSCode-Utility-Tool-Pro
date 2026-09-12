@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { readFileSync } from 'fs';
 import worldmapview from './worldmapview.html';
 import worldmapviewstyles from './worldmapview.css';
 import { localize, localizeText, i18nTableAsScript } from '../../util/i18n';
@@ -7,7 +6,7 @@ import { html } from '../../util/html';
 import { error, debug } from '../../util/debug';
 import { WorldMapMessage, ProgressReporter, WorldMapData, MapItemMessage, RequestMapItemMessage, MoveProvinceMessage, AddMapItemMessage, EditStateMessage } from './definitions';
 import { matchPathEnd } from '../../util/nodecommon';
-import { writeFile, getConfiguration } from '../../util/vsccommon';
+import { writeFile, getConfiguration, readFile } from '../../util/vsccommon';
 import { slice, debounceByInput, forceError } from '../../util/common';
 import { openOrCopyHoiFile } from '../../util/previewfileopener';
 import { WorldMapLoader } from './loader/worldmaploader';
@@ -36,7 +35,7 @@ interface WorldMapWebviewAssets {
 // bundled loader by itself and reloads the map data on its own.
 let worldMapWebviewAssets: WorldMapWebviewAssets | undefined = undefined;
 
-function readWorldMapWebviewAssets(): WorldMapWebviewAssets {
+async function readWorldMapWebviewAssets(): Promise<WorldMapWebviewAssets> {
     if (worldMapWebviewAssets) {
         return worldMapWebviewAssets;
     }
@@ -46,18 +45,18 @@ function readWorldMapWebviewAssets(): WorldMapWebviewAssets {
         throw new Error('Cannot read world map webview assets: extension context is not registered.');
     }
 
-    const read = (name: string) => readFileSync(vscode.Uri.joinPath(extensionUri, 'static/' + name).fsPath, 'utf8');
+    const read = async (name: string) => (await readFile(vscode.Uri.joinPath(extensionUri, 'static/' + name))).toString('utf8');
     // The icon font is embedded as a data URI (CSP: font-src data:) so a rebuilt page keeps its
     // toolbar icons without any external request.
-    const codiconTtf = readFileSync(vscode.Uri.joinPath(extensionUri, 'static/codicon.ttf').fsPath);
-    const codiconCss = read('codicon.css').replace(
+    const codiconTtf = await readFile(vscode.Uri.joinPath(extensionUri, 'static/codicon.ttf'));
+    const codiconCss = (await read('codicon.css')).replace(
         /url\("\.\/codicon\.ttf[^"]*"\)/,
         'url("data:font/ttf;base64,' + codiconTtf.toString('base64') + '")');
 
     worldMapWebviewAssets = {
-        commonJs: read('common.js'),
-        worldmapJs: read('worldmap.js'),
-        commonCss: read('common.css'),
+        commonJs: await read('common.js'),
+        worldmapJs: await read('worldmap.js'),
+        commonCss: await read('common.css'),
         codiconCss,
     };
     return worldMapWebviewAssets;
@@ -78,13 +77,13 @@ export class WorldMap {
         this.worldMapLoader.onProgress(this.progressReporter);
     }
 
-    public initialize(): void {
+    public async initialize(): Promise<void> {
         if (!this.panel) {
             return;
         }
 
         const webview = this.panel.webview;
-        webview.html = this.renderWorldMap(webview);
+        webview.html = await this.renderWorldMap(webview);
         webview.onDidReceiveMessage((msg) => this.onMessage(msg));
         this.panel.onDidChangeViewState(() => this.onViewStateChanged());
     }
@@ -128,8 +127,8 @@ export class WorldMap {
         this.panel = undefined;
     }
 
-    private renderWorldMap(webview: vscode.Webview): string {
-        const assets = readWorldMapWebviewAssets();
+    private async renderWorldMap(webview: vscode.Webview): Promise<string> {
+        const assets = await readWorldMapWebviewAssets();
         return html(
             webview,
             localizeText(worldmapview),

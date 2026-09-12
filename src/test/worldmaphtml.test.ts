@@ -47,40 +47,40 @@ describe('previewdef/worldmap html inlining', () => {
         contextContainer.current = null;
     });
 
-    function initializeWorldMap() {
+    async function initializeWorldMap() {
         const panel = makePanel();
-        new WorldMap(panel.panel).initialize();
+        await new WorldMap(panel.panel).initialize();
         return panel.html;
     }
 
-    it('inlines every script and stylesheet so the page makes no external resource requests', () => {
-        const result = initializeWorldMap();
+    it('inlines every script and stylesheet so the page makes no external resource requests', async () => {
+        const result = await initializeWorldMap();
         assert.ok(!result.includes('<script src='), 'scripts must be inlined, not linked');
         assert.ok(!result.includes('<link rel="stylesheet"'), 'stylesheets must be inlined, not linked');
     });
 
-    it('embeds the bundled scripts and the shared stylesheet verbatim', () => {
-        const result = initializeWorldMap();
+    it('embeds the bundled scripts and the shared stylesheet verbatim', async () => {
+        const result = await initializeWorldMap();
         for (const asset of ['common.js', 'worldmap.js', 'common.css']) {
             const content = fs.readFileSync(path.join(extensionRoot, 'static', asset), 'utf8');
             assert.ok(result.includes(content), asset + ' must be embedded in the html');
         }
     });
 
-    it('embeds the codicon font as a data URI instead of an external font request', () => {
-        const result = initializeWorldMap();
+    it('embeds the codicon font as a data URI instead of an external font request', async () => {
+        const result = await initializeWorldMap();
         assert.ok(result.includes('data:font/ttf;base64,'), 'the icon font must be a data URI');
         assert.ok(!result.includes('./codicon.ttf'), 'no external codicon.ttf reference may remain');
     });
 
-    it('keeps the bootstrap inline scripts for the localisation table and settings', () => {
-        const result = initializeWorldMap();
+    it('keeps the bootstrap inline scripts for the localisation table and settings', async () => {
+        const result = await initializeWorldMap();
         assert.ok(result.includes('window.__i18ntable'));
         assert.ok(result.includes('window.__enableSupplyArea'));
     });
 
-    it('allows data: font sources in the CSP for the embedded icon font', () => {
-        const result = initializeWorldMap();
+    it('allows data: font sources in the CSP for the embedded icon font', async () => {
+        const result = await initializeWorldMap();
         assert.ok(/font-src[^;]*data:/.test(result));
     });
 });

@@ -54,7 +54,16 @@ function buildStub() {
         fs: {
             stat: async () => ({ type: FileType.File, mtime: 0, ctime: 0, size: 0 }),
             readDirectory: async () => [],
-            readFile: async () => new Uint8Array(),
+            // Reads real files when the path exists (so tests of code that loads bundled assets
+            // see their content); missing paths keep returning an empty buffer, matching the
+            // original stub behaviour.
+            readFile: async (uri: any) => {
+                try {
+                    return require('fs').readFileSync(uri.fsPath);
+                } catch (e) {
+                    return new Uint8Array();
+                }
+            },
             writeFile: async () => undefined,
             createDirectory: async () => undefined,
         },
