@@ -39,7 +39,16 @@ function makePanel() {
 }
 
 describe('previewdef/worldmap html inlining', () => {
-    before(() => {
+    before(function () {
+        // static/ is gitignored: the bundled assets only exist after a webpack build. CI runs
+        // its test step before packaging, so there the suite has nothing real to assert against;
+        // the packaging step itself still fails the release if the build breaks.
+        const assets = ['common.js', 'worldmap.js', 'common.css', 'codicon.css', 'codicon.ttf']
+            .every(name => fs.existsSync(path.join(extensionRoot, 'static', name)));
+        if (!assets) {
+            this.skip();
+        }
+
         contextContainer.current = { extensionUri: vscode.Uri.file(extensionRoot) } as any;
     });
 
