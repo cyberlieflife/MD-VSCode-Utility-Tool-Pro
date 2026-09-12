@@ -107,7 +107,20 @@ function buildStub() {
             public replace(_uri: any, range: any, text: string) { this.ops.push({ kind: 'replace', range, text }); }
         },
         Disposable: { from: (...d: any[]) => ({ dispose: () => d.forEach(x => x && x.dispose && x.dispose()) }) },
-        EventEmitter: class { event: any; fire: any; dispose: any; constructor() { this.event = () => undefined; this.fire = noop; this.dispose = noop; } },
+        // Event semantics match the real vscode API: `event(cb)` registers the listener and
+        // returns a disposable, `fire` invokes the registered listeners. The previous stub
+        // dropped listeners, which made event-firing code paths (e.g. gfxindex build
+        // notifications) untestable; the existing tests inject their own event mocks and are
+        // unaffected.
+        EventEmitter: class {
+            private listeners: ((value: any) => void)[] = [];
+            event = (listener: (value: any) => void) => {
+                this.listeners.push(listener);
+                return { dispose: () => { this.listeners = this.listeners.filter(l => l !== listener); } };
+            };
+            fire = (value: any) => { for (const listener of [...this.listeners]) { listener(value); } };
+            dispose = () => { this.listeners = []; };
+        },
         TreeItem: class { label: any; constructor(label: any) { this.label = label; } },
         TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
         ThemeIcon: class { id: any; constructor(id: any) { this.id = id; } },

@@ -126,5 +126,16 @@ export abstract class PreviewBase {
         void this.onDocumentChange(document);
     }
 
+    // PreviewManager calls this when a background index (the GFX sprite index) finishes building.
+    // A preview that resolved sprites while the index was still in flight may have lost the misses
+    // permanently: an index miss is authoritative in index mode and nothing else re-triggers icon
+    // resolution. Default is a no-op, and only FocusTreePreview opts in (its icon CSS re-push is
+    // cheap and state-safe). The other previews skip self-healing deliberately: the index wait in
+    // getGfxContainerFile already removes their loss window on startup restore, and a full reload
+    // would disturb their interactive state for the marginal residual gap (workspace-folder
+    // rebuilds and failed rebuilds).
+    public refreshIcons(): void {
+    }
+
     protected abstract getContent(document: vscode.TextDocument): Promise<string>;
 }

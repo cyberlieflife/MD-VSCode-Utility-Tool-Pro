@@ -791,6 +791,30 @@ class FocusTreePreview extends PreviewBase {
         this.lastPushedIconGeneration = generation;
         this.panel.webview.postMessage({ type: 'iconStyles', css });
     }
+
+    // Called by PreviewManager when the GFX sprite index finishes building. If this preview
+    // resolved its icons while the index was still building (a panel restored right after VS Code
+    // startup, racing the background build), the misses were permanently rendered as the
+    // goal_unknown/grey fallback. The index is ready now, so re-resolve and re-push the icon CSS.
+    // Guarded on a successfully rendered tree: loading/error/no-tree pages have no pushed icon CSS
+    // to refresh, and their pending or next full load already sees the completed index.
+    public refreshIcons(): void {
+        if (this.isDisposed || this.lastStructuralFingerprint === undefined) {
+            return;
+        }
+        // Drop picker negative-cache entries (undefined image URIs) so icons the picker resolved
+        // as unresolvable while the index was building are retried on the next pull instead of
+        // staying memoized as permanent misses.
+        for (const [name, imageUri] of this.resolvedIconImages) {
+            if (imageUri === undefined) {
+                this.resolvedIconImages.delete(name);
+            }
+        }
+        // Chain onto the update queue like every other render: repushResolvedIconStyles runs a
+        // full load against the loader and must never run concurrently with a pending update.
+        const run = this.updateQueue.then(() => this.repushResolvedIconStyles());
+        this.updateQueue = run.catch(() => undefined);
+    }
 }
 
 export const focusTreePreviewDef: PreviewProviderDef = {

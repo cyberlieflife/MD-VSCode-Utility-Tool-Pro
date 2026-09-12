@@ -22,15 +22,52 @@ let workspaceGfxIndex: Record<string, GfxIndexItem | undefined> = {};
 // Reverse map for O(1) removal: file path -> sprite names from that file
 const workspaceGfxFileToKeys = new Map<string, string[]>();
 
+// Settles when the first full (global + workspace) index build finishes. Lazy: icon resolution
+// starts the build on demand here if activation has not kicked it off yet.
+let gfxIndexBuildPromise: Promise<void> | undefined;
+
+// Fired after a full (re)build of the gfx indexes settles. PreviewManager listens to it so
+// previews that resolved sprites while an index was still building can re-resolve the icons
+// they missed (an index miss is authoritative in index mode, so those misses are permanent
+// unless re-resolved).
+const gfxIndexBuiltEmitter = new vscode.EventEmitter<void>();
+export const onGfxIndexBuilt = gfxIndexBuiltEmitter.event;
+
+// Sprite-name count of the last completed build, kept for the telemetry in ensureGfxIndex.
+let gfxIndexSize = 0;
+
+// Builds the global + workspace indexes once and reuses that promise for every caller. A build
+// failure must not poison the shared promise: it resets so a later lookup retries, and resolves
+// instead of rejecting so icon resolution falls through to the scan-based fallback paths rather
+// than turning every preview into an error page.
+export function ensureGfxIndex(): Promise<void> {
+    if (gfxIndexBuildPromise === undefined) {
+        const estimatedSize: [number] = [0];
+        gfxIndexBuildPromise = Promise.all([
+            buildGlobalGfxIndex(estimatedSize),
+            buildWorkspaceGfxIndex(estimatedSize),
+        ]).then(
+            () => {
+                gfxIndexSize = estimatedSize[0];
+                sendEvent('gfxIndex', { size: gfxIndexSize.toString() });
+                gfxIndexBuiltEmitter.fire();
+            },
+            (e) => {
+                gfxIndexBuildPromise = undefined;
+                error(e);
+            },
+        );
+    }
+    return gfxIndexBuildPromise;
+}
+
 export function registerGfxIndex(): vscode.Disposable {
     const disposables: vscode.Disposable[] = [];
     if (gfxIndex) {
-        const estimatedSize: [number] = [0];
-        const task = Promise.all([ buildGlobalGfxIndex(estimatedSize), buildWorkspaceGfxIndex(estimatedSize) ]);
+        const task = ensureGfxIndex();
         vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('gfxindex.building', 'Building GFX index...'), task);
         void task.then(() => {
             vscode.window.showInformationMessage(localize('gfxindex.builddone', 'Building GFX index done.'));
-            sendEvent('gfxIndex', { size: estimatedSize[0].toString() });
         });
         disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(onChangeWorkspaceFolders));
         disposables.push(vscode.workspace.onDidChangeTextDocument(onChangeTextDocument));
@@ -48,6 +85,12 @@ export async function getGfxContainerFile(gfxName: string | undefined): Promise<
         return undefined;
     }
 
+    // The index builds in the background after activation. A preview restored right after VS Code
+    // startup (deserialize) runs its icon pass while the build is still in flight; without this
+    // wait a miss during the build window is treated as authoritative ("defined in no indexed gfx
+    // file", see getSpriteByGfxName) and the sprite is lost for the panel's lifetime. Awaiting the
+    // settled promise costs one microtask.
+    await ensureGfxIndex();
     return (globalGfxIndex[gfxName] ?? workspaceGfxIndex[gfxName])?.file;
 }
 
@@ -173,6 +216,14 @@ function onChangeWorkspaceFolders(_: vscode.WorkspaceFoldersChangeEvent) {
     void task.then(() => {
         vscode.window.showInformationMessage(localize('gfxindex.workspace.builddone', 'Building workspace GFX index done.'));
         sendEvent('gfxIndex.workspace', { size: estimatedSize[0].toString() });
+        // The rebuild window has the same authoritative-miss hazard as the startup build, so
+        // let open previews re-resolve the sprites they resolved against the empty index.
+        gfxIndexBuiltEmitter.fire();
+    }, (e) => {
+        // A failed rebuild also leaves the workspace index empty: still notify so open previews
+        // re-resolve (the global index may cover them), and never leave the rejection unhandled.
+        error(e);
+        gfxIndexBuiltEmitter.fire();
     });
 }
 

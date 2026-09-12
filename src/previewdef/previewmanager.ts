@@ -10,6 +10,7 @@ import { debug, error } from '../util/debug';
 import { PreviewBase } from './previewbase';
 import { contextContainer, setVscodeContext } from '../context';
 import { basename, getDocumentByUri } from '../util/vsccommon';
+import { onGfxIndexBuilt } from '../util/gfxindex';
 import { worldMapPreviewDef } from './worldmap';
 import { eventPreviewDef } from './event';
 import { chain } from 'lodash';
@@ -54,6 +55,14 @@ export class PreviewManager implements vscode.WebviewPanelSerializer {
         disposables.push(vscode.workspace.onDidChangeTextDocument(this.onChangeTextDocument, this));
         disposables.push(vscode.window.onDidChangeActiveTextEditor(this.updateHoi4PreviewContextValue, this));
         disposables.push(vscode.window.registerWebviewPanelSerializer(WebviewType.Preview, this));
+        // A preview restored right after VS Code startup races the background GFX index build and
+        // can lose sprite lookups to the not-yet-built index (authoritative miss). When the build
+        // settles, let every open preview re-resolve what it resolved against the empty index.
+        disposables.push(onGfxIndexBuilt(() => {
+            for (const preview of Object.values(this._previews)) {
+                preview.refreshIcons();
+            }
+        }));
 
         // Trigger context value setting
         this.updateHoi4PreviewContextValue(vscode.window.activeTextEditor);
