@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { readFileSync } from 'fs';
 import worldmapview from './worldmapview.html';
 import worldmapviewstyles from './worldmapview.css';
 import { localize, localizeText, i18nTableAsScript } from '../../util/i18n';
@@ -18,6 +19,49 @@ import { contextContainer } from '../../context';
 import { moveProvince } from './editor/moveprovince';
 import { addMapItem } from './editor/addmapitem';
 import { editState } from './editor/editstate';
+
+interface WorldMapWebviewAssets {
+    commonJs: string;
+    worldmapJs: string;
+    commonCss: string;
+    codiconCss: string;
+}
+
+// The world map webview accumulates 100-300 MB of map data, which can crash its renderer
+// process. VS Code then rebuilds the page from panel.webview.html, but that rebuild's requests
+// for the external webview resources (the bundled scripts and stylesheets) can fail (known VS
+// Code service-worker issues), leaving an unstyled page whose bootstrap script never ran and
+// which therefore never re-requests the map data. Inlining every script, stylesheet and the
+// icon font into the html removes those external requests entirely: a rebuilt page re-runs the
+// bundled loader by itself and reloads the map data on its own.
+let worldMapWebviewAssets: WorldMapWebviewAssets | undefined = undefined;
+
+function readWorldMapWebviewAssets(): WorldMapWebviewAssets {
+    if (worldMapWebviewAssets) {
+        return worldMapWebviewAssets;
+    }
+
+    const extensionUri = contextContainer.current?.extensionUri;
+    if (!extensionUri) {
+        throw new Error('Cannot read world map webview assets: extension context is not registered.');
+    }
+
+    const read = (name: string) => readFileSync(vscode.Uri.joinPath(extensionUri, 'static/' + name).fsPath, 'utf8');
+    // The icon font is embedded as a data URI (CSP: font-src data:) so a rebuilt page keeps its
+    // toolbar icons without any external request.
+    const codiconTtf = readFileSync(vscode.Uri.joinPath(extensionUri, 'static/codicon.ttf').fsPath);
+    const codiconCss = read('codicon.css').replace(
+        /url\("\.\/codicon\.ttf[^"]*"\)/,
+        'url("data:font/ttf;base64,' + codiconTtf.toString('base64') + '")');
+
+    worldMapWebviewAssets = {
+        commonJs: read('common.js'),
+        worldmapJs: read('worldmap.js'),
+        commonCss: read('common.css'),
+        codiconCss,
+    };
+    return worldMapWebviewAssets;
+}
 
 export class WorldMap {
     public panel: vscode.WebviewPanel | undefined;
@@ -85,6 +129,7 @@ export class WorldMap {
     }
 
     private renderWorldMap(webview: vscode.Webview): string {
+        const assets = readWorldMapWebviewAssets();
         return html(
             webview,
             localizeText(worldmapview),
@@ -94,10 +139,14 @@ export class WorldMap {
                 { content: contextContainer.current ?
                     'window.__pencilUri = "' + webview.asWebviewUri(vscode.Uri.joinPath(contextContainer.current.extensionUri, 'static/pencil.svg')).toString() + '";' :
                     '' },
-                'common.js',
-                'worldmap.js'
+                { content: assets.commonJs },
+                { content: assets.worldmapJs },
             ],
-            ['common.css', 'codicon.css', { content: worldmapviewstyles }]
+            [
+                { content: assets.commonCss },
+                { content: assets.codiconCss },
+                { content: worldmapviewstyles },
+            ]
         );
     }
 

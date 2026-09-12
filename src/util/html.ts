@@ -32,8 +32,11 @@ export function html(webview: vscode.Webview, body: string, scripts: (string | D
             ];
         } else {
             const nonce = randomString(32);
+            // An inline </script> (from a bundled string or a translation table) would close the
+            // tag early and truncate the page; \/ is an identity escape inside JS strings and
+            // regexes, so this rewrite never changes the script's behaviour.
             return [
-                `<script nonce="${nonce}">${script.content}</script>`,
+                `<script nonce="${nonce}">${script.content.replace(/<\/script/g, '<\\/script')}</script>`,
                 `'nonce-${nonce}'`,
             ];
         }
@@ -54,8 +57,10 @@ export function html(webview: vscode.Webview, body: string, scripts: (string | D
                         `'nonce-${style.nonce}'`,
                     ];
                 } else {
+                    // Same early-close protection as the inline scripts above: an inline </style
+                    // inside CSS content would truncate the stylesheet.
                     return [
-                        `<style${style.id ? ` id="${style.id}"` : ''} nonce="${nonce}">${style.content}</style>`,
+                        `<style${style.id ? ` id="${style.id}"` : ''} nonce="${nonce}">${style.content.replace(/<\/style/g, '<\\/style')}</style>`,
                         `'nonce-${nonce}'`,
                     ];
                 }
@@ -80,7 +85,7 @@ export function html(webview: vscode.Webview, body: string, scripts: (string | D
             style-src ${preparedStyles.map(v => v[1]).join(' ')} ${webview.cspSource};
             script-src ${preparedScripts.map(v => v[1]).filter(v => v.length > 0).join(' ')} ${webview.cspSource};
             img-src data: ${webview.cspSource};
-            font-src ${webview.cspSource};
+            font-src data: ${webview.cspSource};
         ">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         ${preparedScripts.map(v => v[0]).join('')}

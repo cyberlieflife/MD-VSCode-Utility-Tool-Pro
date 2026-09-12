@@ -132,8 +132,25 @@ const origResolve = (Module as any)._resolveFilename;
     if (request === 'vscode') {
         return path.join(__dirname, '__vscode_stub__');
     }
+    // Preview sources import their view html/css and file templates through webpack's
+    // raw-loader, which a tsc-only test run does not have. Serve those imports the way
+    // raw-loader would: resolve them to the source files (the compiled module lives under
+    // out-test/, the raw asset still under src/) and export their contents as the module's
+    // default string.
+    if (/\.(html|css|txt)$/.test(request) && parent && parent.filename) {
+        // Compiled layout is out-test/src/..., the raw asset lives at src/...: drop the
+        // out-test segment to map back to the source tree.
+        const resolved = path.resolve(path.dirname(parent.filename), request);
+        return resolved.replace(/([\\/])out-test(?=[\\/])/, '$1');
+    }
     return origResolve.call(this, request, parent, ...rest);
 };
+
+for (const rawExtension of ['.html', '.css', '.txt']) {
+    (require.extensions as any)[rawExtension] = (module: any, filename: string) => {
+        module.exports = require('fs').readFileSync(filename, 'utf8');
+    };
+}
 
 // `def.d.ts` declares a handful of compile-time globals (IS_WEB_EXT, VERSION,
 // EXTENSION_ID). The webpack build wires these up via DefinePlugin; under
