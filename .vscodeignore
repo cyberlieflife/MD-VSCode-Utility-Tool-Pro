@@ -3,6 +3,7 @@
 .claude/**
 .superpowers/**
 .mimosa/**
+.zcode/**
 out/**
 out-test/**
 out-test-webview/**

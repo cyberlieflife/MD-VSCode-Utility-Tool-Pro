@@ -1,3 +1,13 @@
+## [v1.1.27] - 2026-09-13
+
+### Functionality
+
+- [Ideas] Hovering the value of `picture = XXX` inside an idea in a `common/ideas` file now shows the picture in the hover: the resolved sprite name, the icon image itself (DDS/TGA decoded and embedded as a data URI, scaled down proportionally above 128 px height) and the source dimensions. Bare names resolve through the `GFX_idea_<name>` and `GFX_<name>` sprite conventions, values that already start with `GFX_` are used as-is, and quoted or `@constant` values work too. When no sprite can be found, the hover lists the attempted sprite names instead of showing an image. Sprite lookup goes through the gfx index when it is enabled; with the index off, the mod's or vanilla `interface/ideas.gfx` is scanned as a fallback, so enabling the gfx index widens coverage for icons defined in other .gfx files.
+
+### Bugfixes
+
+- [Ideas] The Korean and Russian locale tables now carry the hover's `picture` image-not-found message, which they were missing next to the English and Simplified Chinese entries.
+- [Build] The packaged extension no longer ships the local `.zcode` tooling directory (session plan files that are unrelated to the deliverable): the ignore list covers it alongside the other tool directories.
 ## [v1.1.26] - 2026-09-12
 
 ### Bugfixes
