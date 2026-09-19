@@ -80,6 +80,7 @@ const table: Partial<typeof __table> = {
     "guipreview.containerWindow": "컨테이너 창: ",
     "guipreview.nocontainerwindows": "gui 파일 내에 컨테이너 창 없음.",
     "guipreview.topbar.toggleVisibility.title": "컨테이너 창 표시/숨기기",
+    "hover.ideapicture.notfound": "picture 이미지를 찾을 수 없음: {0}",
     "hours": "시간",
     "infile": "{0} 파일 내:\n",
     "loading": "로딩중...",

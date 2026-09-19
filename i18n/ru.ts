@@ -80,6 +80,7 @@ const table: Partial<typeof __table> = {
     "guipreview.containerWindow": "Container Window: ",
     "guipreview.nocontainerwindows": "No containerwindowtype in gui file.",
     "guipreview.topbar.toggleVisibility.title": "Show or Hide Container Windows",
+    "hover.ideapicture.notfound": "Изображение для picture не найдено: {0}",
     "hours": "Час(ов)",
     "infile": "В файле {0}:\n",
     "loading": "Загрузка...",

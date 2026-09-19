@@ -80,6 +80,7 @@ const internalTable = /* SOT Do not remove this comment */{
     "guipreview.containerWindow": "Container Window: ",
     "guipreview.nocontainerwindows": "No containerwindowtype in gui file.",
     "guipreview.topbar.toggleVisibility.title": "Show or Hide Container Windows",
+    "hover.ideapicture.notfound": "Picture image not found: {0}",
     "hours": "hour(s)",
     "infile": "In file {0}:\n",
     "loading": "Loading...",
