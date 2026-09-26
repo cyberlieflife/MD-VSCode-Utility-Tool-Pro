@@ -2,6 +2,7 @@
 
 ### Bugfixes
 
+- [Localisation] The Korean and Russian package manifests now carry the `Select HOI4 Install Path` command title. Both files were missing `hoi4modutilities.selecthoifolder.title`, so that entry in the command palette fell back to the raw `%hoi4modutilities.selecthoifolder.title%` placeholder for Korean and Russian users, while the English and Simplified Chinese manifests had it.
 - [Test] `npm test` now runs on Windows as well as on POSIX shells. `pretest` chained the two TypeScript builds with `&` and a trailing `wait`, which is POSIX shell syntax: on Windows the command stopped at "'wait' is not recognized" and the tests were never compiled. `test` also passed its Mocha globs in single quotes, which cmd.exe does not strip, so Mocha received a literal quote around each pattern and reported "No test files found". The builds are now chained with `&&` and the globs are double quoted, which both shells treat the same way.
 ## [v1.1.27] - 2026-09-13
 

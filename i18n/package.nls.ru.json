@@ -23,6 +23,7 @@
     "hoi4modutilities.preview.title": "Предпросмотр файла HOI4",
     "hoi4modutilities.previewworld.title": "Предпросмотр карты мира",
     "hoi4modutilities.scanreferences.title": "Найти похожее",
+    "hoi4modutilities.selecthoifolder.title": "Выбрать путь установки HOI4",
     "hoi4modutilities.selectmodfile.title": "Выбрать файл мода",
     "hoi4modutilities.enableSupplyArea.title": "Включить зону снабжения",
     "hoi4modutilities.enableSupplyArea.desc": "Если вы разрабатываете мод для HOI4(version<=1.10). Проверьте этот параметр перед включением зоны снабжения."
