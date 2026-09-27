@@ -15,6 +15,8 @@
     "hoi4modutilities.gfxIndex.desc": "GFX 스프라이트 정의 인덱스를 빌드합니다. 더 많은 메모리를 사용합니다. 변경 후 다시 로드해야 합니다.",
     "hoi4modutilities.localisationIndex.title": "현지화 인덱스",
     "hoi4modutilities.localisationIndex.desc": "미리보기에 번역된 텍스트를 표시하기 위한 현지화 인덱스를 빌드합니다. 더 많은 메모리를 사용합니다. 변경 후 다시 로드해야 합니다.",
+    "hoi4modutilities.modifierInlayHint.title": "수정치 인라인 힌트",
+    "hoi4modutilities.modifierInlayHint.desc": ".txt 스크립트 파일에 수정치의 현지화된 이름을 인라인으로 표시합니다. 변경 후 다시 로드해야 합니다.",
     "hoi4modutilities.installPath.title": "저장 위치",
     "hoi4modutilities.installPath.desc": "하츠오브아이언 저장 위치.",
     "hoi4modutilities.loadDlcContents.title": "DLC 컨텐츠 로드",

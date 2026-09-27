@@ -14,6 +14,8 @@
     "hoi4modutilities.gfxIndex.desc": "Build an index of GFX sprite definitions. Uses more memory. Reloading is required after changing this.",
     "hoi4modutilities.localisationIndex.title": "Localisation Index",
     "hoi4modutilities.localisationIndex.desc": "Build a localisation index to show translated text in previews. Uses more memory. Reloading is required after changing this.",
+    "hoi4modutilities.modifierInlayHint.title": "Modifier Inlay Hint",
+    "hoi4modutilities.modifierInlayHint.desc": "Show the localised name of modifiers inline in .txt script files. Reloading is required after changing this.",
     "hoi4modutilities.installPath.title": "Install Path",
     "hoi4modutilities.installPath.desc": "Hearts of Iron IV install path. If you are on web, you should press Ctrl+Shift+P, and type \"Select HOI4 Install Path\" command instead of this setting.",
     "hoi4modutilities.loadDlcContents.title": "Load DLC Contents",

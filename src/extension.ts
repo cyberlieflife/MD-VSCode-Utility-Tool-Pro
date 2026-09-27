@@ -15,6 +15,7 @@ import { registerLocalisationIndex } from "./util/localisationIndex";
 import { registerSharedFocusIndex } from "./util/sharedFocusIndex";
 import { registerFeatureFlags } from "./util/featureflags";
 import { registerIdeaPictureHover } from "./hover/ideaPictureHover";
+import { registerModifierInlayHint } from "./inlayhint/modifierInlayHint";
 
 export function activate(context: vscode.ExtensionContext) {
     let locale = (context as any).extension?.packageJSON.locale;
@@ -44,6 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(registerGfxIndex());
     context.subscriptions.push(registerLocalisationIndex());
     context.subscriptions.push(registerIdeaPictureHover());
+    context.subscriptions.push(registerModifierInlayHint());
 
     setVscodeContext(ContextName.Hoi4MULoaded, true);
 }

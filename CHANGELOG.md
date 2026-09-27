@@ -1,9 +1,14 @@
 ## [v1.1.28] - 2026-09-27
 
+### Functionality
+
+- [Inlay Hint] Modifier keys in HOI4 scripts now show the game's localised name as a grey inlay hint after the key, in any scope of a `.txt` file (workspace files and files under the HOI4 install path). The name is looked up through `MODIFIERS_<NAME>`, `MODIFIER_<NAME>` and `modifier_<name>` in that order, following the editor's display language, while UI-only keys such as `MODIFIER_NONE` or `*_DESC` are skipped. A `custom_modifier_tooltip` value is resolved as a localisation key too and flattened to a single line: colour codes, placeholders and icon tokens are cleaned and the text is truncated with an ellipsis past 80 characters. Parsed documents are cached per URI and version, and the feature can be turned off with `mdHoi4Utilities.modifierInlayHint`.
+
 ### Bugfixes
 
 - [Localisation] The Korean and Russian package manifests now carry the `Select HOI4 Install Path` command title. Both files were missing `hoi4modutilities.selecthoifolder.title`, so that entry in the command palette fell back to the raw `%hoi4modutilities.selecthoifolder.title%` placeholder for Korean and Russian users, while the English and Simplified Chinese manifests had it.
 - [Test] `npm test` now runs on Windows as well as on POSIX shells. `pretest` chained the two TypeScript builds with `&` and a trailing `wait`, which is POSIX shell syntax: on Windows the command stopped at "'wait' is not recognized" and the tests were never compiled. `test` also passed its Mocha globs in single quotes, which cmd.exe does not strip, so Mocha received a literal quote around each pattern and reported "No test files found". The builds are now chained with `&&` and the globs are double quoted, which both shells treat the same way.
+- [Build] The packaged extension no longer ships the stray `%SystemDrive%` directory (Windows cache database copies left behind by an external script that did not expand the environment variable); the ignore list now covers it.
 ## [v1.1.27] - 2026-09-13
 
 ### Functionality

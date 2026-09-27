@@ -14,6 +14,8 @@
     "hoi4modutilities.gfxIndex.desc": "构建 GFX 精灵定义索引。会使用更多内存。更改后需要重启。",
     "hoi4modutilities.localisationIndex.title": "本地化索引",
     "hoi4modutilities.localisationIndex.desc": "构建本地化索引以在预览中显示翻译文本。会使用更多内存。更改后需要重启。",
+    "hoi4modutilities.modifierInlayHint.title": "修正值内联提示",
+    "hoi4modutilities.modifierInlayHint.desc": "在 .txt 脚本文件中内联显示修正值的本地化名称。更改后需要重启。",
     "hoi4modutilities.installPath.title": "安装路径",
     "hoi4modutilities.installPath.desc": "钢铁雄心四的安装路径。如果你在使用网页版VSCode，请使用Ctrl+Shift+P，然后“选择钢四安装路径”命令。",
     "hoi4modutilities.loadDlcContents.title": "加载DLC内容",

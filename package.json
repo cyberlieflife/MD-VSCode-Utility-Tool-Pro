@@ -143,6 +143,12 @@
 						"type": "boolean",
 						"default": true,
 						"description": "%hoi4modutilities.localisationIndex.desc%"
+					},
+					"mdHoi4Utilities.modifierInlayHint": {
+						"title": "%hoi4modutilities.modifierInlayHint.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.modifierInlayHint.desc%"
 					}
 				}
 			}

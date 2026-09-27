@@ -14,6 +14,8 @@
     "hoi4modutilities.gfxIndex.desc": "Построить индекс GFX спрайтов. Требует больше памяти. Требуется перезагрузка после изменения.",
     "hoi4modutilities.localisationIndex.title": "Индекс локализации",
     "hoi4modutilities.localisationIndex.desc": "Построить индекс локализации для отображения переведённого текста в предпросмотрах. Требует больше памяти. Требуется перезагрузка после изменения.",
+    "hoi4modutilities.modifierInlayHint.title": "Встроенная подсказка модификатора",
+    "hoi4modutilities.modifierInlayHint.desc": "Показывать локализованное название модификаторов прямо в .txt файлах скриптов. Требуется перезагрузка после изменения.",
     "hoi4modutilities.installPath.title": "Установить путь",
     "hoi4modutilities.installPath.desc": "Hearts of Iron IV установить путь.",
     "hoi4modutilities.loadDlcContents.title": "Загрузить контент из DLC",
