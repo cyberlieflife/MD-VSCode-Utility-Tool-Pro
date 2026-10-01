@@ -1,3 +1,9 @@
+## [v1.1.29] - 2026-10-01
+
+### Documentation
+
+- [README] The English and Chinese readme files were merged into a single bilingual `README.md`, with the English text immediately followed by its Chinese counterpart: section headings, the introductory callout, the tagline, both tables, the getting-started steps, the known issues and the credits all carry both languages side by side. The separate `README_CN.md` was removed along with the language switcher that pointed at it, and the logo's alternative text now names the project in both languages.
+
 ## [v1.1.28] - 2026-09-27
 
 ### Functionality
