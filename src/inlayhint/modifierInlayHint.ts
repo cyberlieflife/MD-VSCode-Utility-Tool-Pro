@@ -50,15 +50,21 @@ export function isModifierScriptFile(uri: vscode.Uri): boolean {
  * Returns the localisation keys to try for a modifier name, most specific first. Vanilla localisation
  * is inconsistent about the key shape, so an upper-cased MODIFIERS_/MODIFIER_ prefix and the
  * lower-case `modifier_` prefix are all tried; `MODIFIERS_` wins because the game tooltips reference
- * that form when both exist for the same name.
+ * that form when both exist for the same name. The `<name>_tt` tooltip key is tried last: several
+ * modifiers (monthly_population, experience_gain_army_factor) have no key of their own and are only
+ * mapped through it.
  */
 export function buildModifierLocalisationKeys(name: string): string[] {
     const upperName = name.toUpperCase();
+    const excluded = excludedModifierNames.has(name.toLowerCase()) || excludedModifierNameSuffixes.test(name);
     const keys: string[] = [`MODIFIERS_${upperName}`];
-    if (!excludedModifierNames.has(name.toLowerCase()) && !excludedModifierNameSuffixes.test(name)) {
+    if (!excluded) {
         keys.push(`MODIFIER_${upperName}`);
     }
     keys.push(`modifier_${name}`);
+    if (!excluded) {
+        keys.push(`${name}_tt`);
+    }
     return keys;
 }
 
@@ -84,6 +90,77 @@ export function formatInlayText(raw: string, lookup: (key: string) => string | u
     return text.length > MAX_INLAY_TEXT_LENGTH ? text.substring(0, MAX_INLAY_TEXT_LENGTH) + '…' : text;
 }
 
+/**
+ * Resolves a `$...$` reference inside a localisation value. Vanilla tooltips reference modifier
+ * names without a consistent prefix (`$communism_drift$`, `$CARRIER_SORTIE_EFFICIENCY_FACTOR$`), so
+ * a bare identifier is retried with the same MODIFIERS_/MODIFIER_/modifier_ key shapes used for
+ * modifier names. Formatting directives such as `$RIGHT|+=%1$` fail the identifier test and stay
+ * unresolved.
+ */
+function resolveLocalisationReference(key: string, lookup: (key: string) => string | undefined): string | undefined {
+    const direct = lookup(key);
+    if (direct !== undefined) {
+        return direct;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key)) {
+        return undefined;
+    }
+    const upper = key.toUpperCase();
+    return lookup(`MODIFIERS_${upper}`) ?? lookup(`MODIFIER_${upper}`) ?? lookup(`modifier_${key.toLowerCase()}`);
+}
+
+/**
+ * `<name>_tt` keys are shared by modifiers, triggers, effects and AI weights; only modifier tooltips
+ * bind the value through a placeholder such as `$RIGHT|+=%1$`. Tooltips without one describe
+ * something other than a modifier (transfer_state_tt, is_literally_china_tt), so they must not
+ * produce a hint.
+ */
+function hasValueBinding(raw: string): boolean {
+    return /\$[^$\n]*\|[^$\n]*\$/.test(raw);
+}
+
+/**
+ * `<name>_tt` tooltip values wrap the modifier name in a placeholder reference, e.g.
+ * `" $MODIFIER_GLOBAL_MONTHLY_POPULATION$: $RIGHT|+=%1$"`. Returns the text of the first reference
+ * that resolves so the hint shows the bare name; when none resolves the caller formats the whole
+ * tooltip instead.
+ */
+function extractTooltipName(raw: string, lookup: (key: string) => string | undefined): string | undefined {
+    for (const match of raw.matchAll(/\$([^$\n]+)\$/g)) {
+        const text = resolveLocalisationReference(match[1], lookup);
+        if (text === undefined) {
+            continue;
+        }
+        const formatted = formatInlayText(text, lookup);
+        if (formatted !== '') {
+            return formatted;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Returns the text to show for a modifier name, or undefined when no candidate key resolves. A
+ * `<name>_tt` tooltip value is used only when it binds a value: the referenced name is then shown
+ * instead of the whole tooltip. Any other key is formatted as a plain value.
+ */
+function resolveModifierHintText(name: string, lookup: (key: string) => string | undefined): string | undefined {
+    for (const key of buildModifierLocalisationKeys(name)) {
+        const text = lookup(key);
+        if (text === undefined) {
+            continue;
+        }
+        if (key !== `${name}_tt`) {
+            return formatInlayText(text, lookup);
+        }
+        if (!hasValueBinding(text)) {
+            return undefined;
+        }
+        return extractTooltipName(text, lookup) ?? formatInlayText(text, lookup);
+    }
+    return undefined;
+}
+
 function getNodeValueText(node: Node): string | undefined {
     if (typeof node.value === 'string') {
         return node.value;
@@ -105,12 +182,9 @@ export function collectModifierHints(root: Node, lookup: (key: string) => string
     while (stack.length > 0) {
         const node = stack.pop()!;
         if (node.name !== null && node.nameToken !== null && modifierNameRegex.test(node.name)) {
-            for (const key of buildModifierLocalisationKeys(node.name)) {
-                const text = lookup(key);
-                if (text !== undefined) {
-                    hints.push({ offset: node.nameToken.end, text: formatInlayText(text, lookup) });
-                    break;
-                }
+            const text = resolveModifierHintText(node.name, lookup);
+            if (text !== undefined && text !== '') {
+                hints.push({ offset: node.nameToken.end, text });
             }
         }
         if (node.name === 'custom_modifier_tooltip' && node.nameToken !== null) {
@@ -118,10 +192,13 @@ export function collectModifierHints(root: Node, lookup: (key: string) => string
             if (key !== undefined) {
                 const text = lookup(key);
                 if (text !== undefined) {
-                    hints.push({
-                        offset: node.valueEndToken?.end ?? node.nameToken.end,
-                        text: formatInlayText(text, lookup),
-                    });
+                    const formatted = formatInlayText(text, lookup);
+                    if (formatted !== '') {
+                        hints.push({
+                            offset: node.valueEndToken?.end ?? node.nameToken.end,
+                            text: formatted,
+                        });
+                    }
                 }
             }
         }

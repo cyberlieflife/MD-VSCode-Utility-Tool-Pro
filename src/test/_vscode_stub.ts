@@ -90,6 +90,12 @@ function buildStub() {
         registerCommand: () => disposable(),
     };
 
+    // Provider-layer tests replace this handler on the shared object to capture the provider
+    // that registerModifierInlayHint passes to the extension host.
+    const languages = {
+        registerInlayHintsProvider: () => disposable(),
+    };
+
     const ConfigurationTarget = { Global: 1, Workspace: 2 };
     const StatusBarAlignment = { Left: 1, Right: 2 };
     const ViewColumn = { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3 };
@@ -97,11 +103,22 @@ function buildStub() {
     function Position(this: any, line: number, character: number) { this.line = line; this.character = character; }
     function Range(this: any, s: any, e: any) { this.start = s; this.end = e; }
 
+    class InlayHint {
+        position: any;
+        label: any;
+        paddingLeft = false;
+        constructor(position: any, label: any) {
+            this.position = position;
+            this.label = label;
+        }
+    }
+
     return {
         Uri,
         workspace,
         window,
         commands,
+        languages,
         env: {},
         FileType,
         ConfigurationTarget,
@@ -109,6 +126,8 @@ function buildStub() {
         ViewColumn,
         Position,
         Range,
+        InlayHint,
+        InlayHintKind: { Type: 1, Parameter: 2 },
         WorkspaceEdit: class {
             public ops: { kind: string; pos?: any; range?: any; text?: string }[] = [];
             public insert(_uri: any, pos: any, text: string) { this.ops.push({ kind: 'insert', pos, text }); }

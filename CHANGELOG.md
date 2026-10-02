@@ -1,3 +1,9 @@
+## [v1.1.30] - 2026-10-02
+
+### Bugfixes
+
+- [Inlay Hint] Modifier keys whose localised name is only reachable through a `<name>_tt` tooltip key now show a hint. HOI4 names several modifiers differently from their localisation keys (`monthly_population` maps to `MODIFIER_GLOBAL_MONTHLY_POPULATION`, `experience_gain_army_factor` to `MODIFIER_XP_GAIN_ARMY_FACTOR`), so the three name-key shapes alone could never resolve them; the tooltip key is now tried last. It is used only when its value binds the number through a placeholder (`$RIGHT|+=%1$`), which keeps achievement ids, triggers and AI weights that share a `<name>_tt` key from producing hints; the referenced name is shown instead of the whole tooltip. References inside the tooltip resolve through the same key shapes as modifier names, including bare ones such as `$communism_drift$`, and a tooltip that formats to an empty string is skipped.
+
 ## [v1.1.29] - 2026-10-01
 
 ### Documentation
