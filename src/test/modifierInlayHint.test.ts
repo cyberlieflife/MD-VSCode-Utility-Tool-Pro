@@ -260,25 +260,96 @@ describe('modifierInlayHint', () => {
             assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), []);
         });
 
-        it('ignores a tooltip reference that names a different object', () => {
-            // Vanilla tooltips of the NSB tax brackets name the neighbouring bracket in the middle of
-            // the sentence, so the hint falls back to the tooltip text instead of naming that bracket.
+        it('keeps a mid-sentence reference as part of the sentence instead of naming it', () => {
+            // Vanilla tooltips of the NSB tax brackets mention the neighbouring bracket in the middle
+            // of the sentence. The hint must not be replaced by that bracket's name; the reference is
+            // resolved as part of the sentence text instead.
             const name = 'tier_two_threshold';
             const content = ['modifier = {', '\t' + name + ' = 50', '}'].join('\n');
             const ttLookup = (key: string): string | undefined => {
                 const entries: Record<string, string> = {
                     tier_two_threshold_tt:
                         'Raises the threshold for remaining in the §Y$tier_one_threshold$§! by: §Y$RIGHT|+=.0$§! Civilian Factories',
-                    tier_one_threshold: '1st Low Income Tax Bracket',
+                    tier_one_threshold: '1st Bracket',
                 };
                 return entries[key];
             };
             assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), [
                 {
                     offset: offsetOf(content, name) + name.length,
-                    text: 'Raises the threshold for remaining in the by: Civilian Factories',
+                    text: 'Raises the threshold for remaining in the 1st Bracket by: Civilian Factories',
                 },
             ]);
+        });
+
+        it('treats a Chinese sentence as text rather than as leading punctuation', () => {
+            // `\W` matches every non-ASCII letter, so a Chinese sentence used to be skipped over and
+            // the reference it mentions in the middle was shown as the hint name.
+            const name = 'tier_two_threshold';
+            const content = ['modifier = {', '\t' + name + ' = 50', '}'].join('\n');
+            const ttLookup = (key: string): string | undefined => {
+                const entries: Record<string, string> = {
+                    tier_two_threshold_tt: '提高 $tier_one_threshold$ 的阈值：$RIGHT|+=.0$',
+                    tier_one_threshold: '低收入第一税级',
+                };
+                return entries[key];
+            };
+            assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), [
+                {
+                    offset: offsetOf(content, name) + name.length,
+                    text: '提高 低收入第一税级 的阈值',
+                },
+            ]);
+        });
+
+        it('resolves the references a Chinese tooltip keeps inside its sentence', () => {
+            // The Chinese tier_two_threshold_tt wraps its reference in colour codes, which hides it
+            // from the leading-reference test: the whole sentence is formatted, references resolved.
+            const name = 'tier_two_threshold';
+            const content = ['modifier = {', '\t' + name + ' = 50', '}'].join('\n');
+            const ttLookup = (key: string): string | undefined => {
+                const entries: Record<string, string> = {
+                    tier_two_threshold_tt: '提高§Y$tier_one_threshold$§!的阈值：§Y$RIGHT|+=.0$§!§Y民用工厂§!',
+                    tier_one_threshold: '低收入第一税级',
+                };
+                return entries[key];
+            };
+            assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), [
+                {
+                    offset: offsetOf(content, name) + name.length,
+                    text: '提高低收入第一税级的阈值：民用工厂',
+                },
+            ]);
+        });
+
+        it('resolves a bare reference that colour codes hide from the leading test', () => {
+            // The sentence is the fallback text here; its own bare reference must still be resolved.
+            const name = 'communism_drift';
+            const content = ['modifier = {', '\t' + name + ' = 0.05', '}'].join('\n');
+            const ttLookup = (key: string): string | undefined => {
+                const entries: Record<string, string> = {
+                    communism_drift_tt: '§Y$communism_drift$§!：$RIGHT|+=2$',
+                    communism_drift: 'Daily Communism Support',
+                };
+                return entries[key];
+            };
+            assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), [
+                { offset: offsetOf(content, name) + name.length, text: 'Daily Communism Support' },
+            ]);
+        });
+
+        it('keeps the ellipsis that marks a truncated fallback text', () => {
+            // formatInlayText cuts a hint past the length limit and marks the cut with an ellipsis;
+            // trimming the fallback text must not eat that mark.
+            const name = 'long_description_factor';
+            const content = ['modifier = {', '\t' + name + ' = 0.1', '}'].join('\n');
+            const longText =
+                'This tooltip describes at length what the modifier does to the country and keeps going well past the length limit: $RIGHT|+=%1$';
+            const ttLookup = (key: string): string | undefined =>
+                key === name + '_tt' ? longText : undefined;
+            const hints = collectModifierHints(parseHoi4File(content), ttLookup);
+            assert.strictEqual(hints.length, 1);
+            assert.strictEqual(hints[0].text.endsWith('…'), true);
         });
 
         it('resolves a tooltip whose reference is followed by the value instead of a colon', () => {

@@ -69,19 +69,17 @@ export function buildModifierLocalisationKeys(name: string): string[] {
 }
 
 /**
- * Turns a raw localisation value into a single-line hint: `$MODIFIER_XXX$`-style placeholders are
- * replaced by the referenced name when it is known, the remaining placeholders (formatting
- * directives like `$RIGHT|+=%1$`) and icon tokens are removed, and colour codes and line breaks are
- * dropped so the result fits on one line.
+ * Turns a raw localisation value into a single-line hint: every `$...$` reference is resolved through
+ * the same key shapes as modifier names and replaced by its text when it resolves, while formatting
+ * directives such as `$RIGHT|+=%1$` and icon tokens are removed, and colour codes and line breaks
+ * are dropped so the result fits on one line.
  */
 export function formatInlayText(raw: string, lookup: (key: string) => string | undefined): string {
     const text = raw
         .replace(/\\n/g, ' ')
-        // Placeholders are resolved before the colour codes are stripped: a replacement is itself a
+        // References are resolved before the colour codes are stripped: a replacement is itself a
         // localisation value and may carry `§Y...§!` sequences that must not reach the hint.
-        .replace(/\$([^$\n]*)\$/g, (_match, key: string) => {
-            return /^(MODIFIERS?_|modifier_)/.test(key) ? lookup(key) ?? '' : '';
-        })
+        .replace(/\$([^$\n]*)\$/g, (_match, key: string) => resolveLocalisationReference(key, lookup) ?? '')
         .replace(/§[\s\S]/g, '')
         // `£prod_eff_cap`-style tokens render as icons in game; inline they are just noise.
         .replace(/£[A-Za-z0-9_]+/g, '')
@@ -121,12 +119,14 @@ function hasValueBinding(raw: string): boolean {
 
 /**
  * A `<name>_tt` tooltip of a modifier opens with the modifier itself, as a reference either followed
- * by a colon or by the bound value directly. A tooltip that starts with a sentence instead belongs to
- * something else and only mentions a key along the way: `tier_two_threshold_tt` names
- * `$tier_one_threshold$`, the neighbouring tax bracket, in the middle of its sentence.
+ * by a colon or by the bound value directly. Only whitespace and punctuation may precede it: a
+ * tooltip that starts with a sentence instead belongs to something else and only mentions a key along
+ * the way, as `tier_two_threshold_tt` does with `$tier_one_threshold$`, the neighbouring tax bracket.
+ * `\W` cannot express that opening because JavaScript's `\w` is ASCII-only, so a Chinese or Russian
+ * sentence would pass for leading punctuation and its first reference would be taken for the name.
  */
 function tooltipNameReference(raw: string): string | undefined {
-    const match = raw.match(/^\W*\$([^$\n]+)\$/u);
+    const match = raw.match(/^[\s\p{P}]*\$([^$\n]+)\$/u);
     return match?.[1];
 }
 
@@ -135,7 +135,10 @@ function tooltipNameReference(raw: string): string | undefined {
  * that introduced them behind: "Damage taken: $RIGHT|+=%1$" would read as "Damage taken:".
  */
 function trimDanglingPunctuation(text: string): string {
-    return text.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, '');
+    const trimmed = text.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, '');
+    // formatInlayText marks a hint cut at the length limit with a trailing ellipsis; it is a cut
+    // marker rather than dangling punctuation and must survive the trim.
+    return text.endsWith('…') ? trimmed + '…' : trimmed;
 }
 
 /**
