@@ -120,23 +120,40 @@ function hasValueBinding(raw: string): boolean {
 }
 
 /**
+ * A `<name>_tt` tooltip of a modifier opens with the modifier itself, as a reference either followed
+ * by a colon or by the bound value directly. A tooltip that starts with a sentence instead belongs to
+ * something else and only mentions a key along the way: `tier_two_threshold_tt` names
+ * `$tier_one_threshold$`, the neighbouring tax bracket, in the middle of its sentence.
+ */
+function tooltipNameReference(raw: string): string | undefined {
+    const match = raw.match(/^\W*\$([^$\n]+)\$/u);
+    return match?.[1];
+}
+
+/**
+ * Stripping the placeholders out of a tooltip that carries no name of its own leaves the punctuation
+ * that introduced them behind: "Damage taken: $RIGHT|+=%1$" would read as "Damage taken:".
+ */
+function trimDanglingPunctuation(text: string): string {
+    return text.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, '');
+}
+
+/**
  * `<name>_tt` tooltip values wrap the modifier name in a placeholder reference, e.g.
- * `" $MODIFIER_GLOBAL_MONTHLY_POPULATION$: $RIGHT|+=%1$"`. Returns the text of the first reference
- * that resolves so the hint shows the bare name; when none resolves the caller formats the whole
- * tooltip instead.
+ * `" $MODIFIER_GLOBAL_MONTHLY_POPULATION$: $RIGHT|+=%1$"`. Returns the text of that reference so the
+ * hint shows the bare name; when it does not resolve the caller falls back to the tooltip itself.
  */
 function extractTooltipName(raw: string, lookup: (key: string) => string | undefined): string | undefined {
-    for (const match of raw.matchAll(/\$([^$\n]+)\$/g)) {
-        const text = resolveLocalisationReference(match[1], lookup);
-        if (text === undefined) {
-            continue;
-        }
-        const formatted = formatInlayText(text, lookup);
-        if (formatted !== '') {
-            return formatted;
-        }
+    const reference = tooltipNameReference(raw);
+    if (reference === undefined) {
+        return undefined;
     }
-    return undefined;
+    const text = resolveLocalisationReference(reference, lookup);
+    if (text === undefined) {
+        return undefined;
+    }
+    const formatted = formatInlayText(text, lookup);
+    return formatted === '' ? undefined : formatted;
 }
 
 /**
@@ -156,7 +173,8 @@ function resolveModifierHintText(name: string, lookup: (key: string) => string |
         if (!hasValueBinding(text)) {
             return undefined;
         }
-        return extractTooltipName(text, lookup) ?? formatInlayText(text, lookup);
+        // A tooltip whose reference does not resolve leaves only its plain text behind.
+        return extractTooltipName(text, lookup) ?? trimDanglingPunctuation(formatInlayText(text, lookup));
     }
     return undefined;
 }

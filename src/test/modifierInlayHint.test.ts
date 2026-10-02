@@ -221,13 +221,14 @@ describe('modifierInlayHint', () => {
             ]);
         });
 
-        it('falls back to formatting the whole tooltip when no reference resolves', () => {
+        it('falls back to the tooltip text when no reference resolves', () => {
+            // The colon in front of the dropped placeholder must not stay behind in the hint.
             const name = 'resistance_damage_to_garrison_on_our_occupied_states';
             const content = ['modifier = {', '\t' + name + ' = 0.1', '}'].join('\n');
             const ttLookup = (key: string): string | undefined =>
                 key === name + '_tt' ? '我们被敌方占领地区的驻军所受伤害：$RIGHT|+=%1$' : undefined;
             assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), [
-                { offset: offsetOf(content, name) + name.length, text: '我们被敌方占领地区的驻军所受伤害：' },
+                { offset: offsetOf(content, name) + name.length, text: '我们被敌方占领地区的驻军所受伤害' },
             ]);
         });
 
@@ -257,6 +258,46 @@ describe('modifierInlayHint', () => {
             const ttLookup = (key: string): string | undefined =>
                 key === 'formatting_only_factor_tt' ? '$RIGHT|+=%1$' : undefined;
             assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), []);
+        });
+
+        it('ignores a tooltip reference that names a different object', () => {
+            // Vanilla tooltips of the NSB tax brackets name the neighbouring bracket in the middle of
+            // the sentence, so the hint falls back to the tooltip text instead of naming that bracket.
+            const name = 'tier_two_threshold';
+            const content = ['modifier = {', '\t' + name + ' = 50', '}'].join('\n');
+            const ttLookup = (key: string): string | undefined => {
+                const entries: Record<string, string> = {
+                    tier_two_threshold_tt:
+                        'Raises the threshold for remaining in the §Y$tier_one_threshold$§! by: §Y$RIGHT|+=.0$§! Civilian Factories',
+                    tier_one_threshold: '1st Low Income Tax Bracket',
+                };
+                return entries[key];
+            };
+            assert.deepStrictEqual(collectModifierHints(parseHoi4File(content), ttLookup), [
+                {
+                    offset: offsetOf(content, name) + name.length,
+                    text: 'Raises the threshold for remaining in the by: Civilian Factories',
+                },
+            ]);
+        });
+
+        it('resolves a tooltip whose reference is followed by the value instead of a colon', () => {
+            // Vanilla writes some tooltips as "$MODIFIER_WAR_SUPPORT_FACTOR$ $RIGHT|Y=%1$", with the
+            // name separated from the bound value by a space. war_support_factor_neutral has no key of
+            // its own, so the tooltip is the only way to reach the name.
+            const name = 'war_support_factor_neutral';
+            const content = ['modifier = {', '\t' + name + ' = 0.1', '}'].join('\n');
+            const ttLookup = (key: string): string | undefined => {
+                const entries: Record<string, string> = {
+                    war_support_factor_neutral_tt: '$MODIFIER_WAR_SUPPORT_FACTOR$ $RIGHT|Y=%1$',
+                    MODIFIER_WAR_SUPPORT_FACTOR: 'War Support',
+                };
+                return entries[key];
+            };
+            assert.deepStrictEqual(
+                collectModifierHints(parseHoi4File(content), ttLookup).map((hint) => hint.text),
+                ['War Support']
+            );
         });
     });
 
