@@ -331,6 +331,42 @@ export function simplifyCondition(condition: ConditionComplexExpr): ConditionCom
     };
 }
 
+// Combines two conditions that both have to hold. Nested `and` folders are flattened and an item
+// already present is dropped, so folding a guard onto an expression that already carries it -- an
+// enclosing `if` preserved into a `random_list` branch, then folded again while the calls inside it
+// are collected -- yields the guard once rather than twice.
+export function andCondition(a: ConditionComplexExpr, b: ConditionComplexExpr): ConditionComplexExpr {
+    if (a === true) {
+        return b;
+    }
+    if (b === true) {
+        return a;
+    }
+
+    const items: ConditionComplexExpr[] = [];
+    // An item can be a whole folder here, not just a leaf, so identity comes from the serialiser
+    // this module already has rather than from a leaf key.
+    const seen = new Set<string>();
+    const push = (condition: ConditionComplexExpr): void => {
+        if (condition === true) {
+            return;
+        }
+        if (typeof condition === 'object' && 'items' in condition && condition.type === 'and') {
+            condition.items.forEach(push);
+            return;
+        }
+        const key = conditionToString(condition);
+        if (!seen.has(key)) {
+            seen.add(key);
+            items.push(condition);
+        }
+    };
+    push(a);
+    push(b);
+
+    return simplifyCondition({ type: 'and', items });
+}
+
 export function extractConditionalExprs(condition: ConditionComplexExpr, result: ConditionItem[] = []): ConditionItem[] {
     if (typeof condition === 'boolean') {
         return result;

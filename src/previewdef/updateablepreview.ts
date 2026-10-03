@@ -31,14 +31,41 @@ export interface LoaderUpdateMessage {
 }
 
 export interface LoaderRenderResult {
-	html: string;
+	// The full page. A thunk defers building it to the moment it is actually written to the webview,
+	// so a skipped or posted edit never assembles it; renderedHtml folds a thunk to a string and
+	// memoizes the result on this object, so a later read does not rebuild the page.
+	html: string | (() => string);
 	update?: LoaderUpdateMessage;
 }
 
 export type LoaderRender = string | LoaderRenderResult;
 
+// Why a render ran: `partial` is false for the first render and every full reload, true for an
+// edit against an already-initialized panel. `dependencyChanged` is threaded from the
+// subscription path: the preview is re-rendered with its OWN document even when a dependency
+// (an icon, a .gfx sprite, a .gui window) changed, so this is the only signal for it. A preview
+// whose loader reads auxiliary files forces its session on it, since its document's hash has not
+// moved and the loader would otherwise answer from its cache.
+export interface RenderContentOptions {
+	partial: boolean;
+	dependencyChanged: boolean;
+}
+
 export function normalizeRender(rendered: LoaderRender): LoaderRenderResult {
 	return typeof rendered === "string" ? { html: rendered } : rendered;
+}
+
+/**
+ * The string form of a render result's html, building a thunk once and keeping the result so a
+ * later read (the hidden-panel flush, a full assign after a dropped post) reuses it.
+ */
+export function renderedHtml(rendered: LoaderRenderResult): string {
+	if (typeof rendered.html === "string") {
+		return rendered.html;
+	}
+	const built = rendered.html();
+	rendered.html = built;
+	return built;
 }
 
 // Stable serialization of the update payload for change detection. Unlike the full html (which
@@ -84,7 +111,7 @@ export function decideLoaderRender(
 	const updateCapable = rendered.update !== undefined;
 	const hash = rendered.update
 		? hashHtml(serializeUpdate(rendered.update))
-		: hashHtml(normalizeNoncesForHash(rendered.html));
+		: hashHtml(normalizeNoncesForHash(renderedHtml(rendered)));
 	// Skip only when the content is unchanged AND the loaded page is the same kind (update-capable
 	// or not) as this render. If the page kind flipped, the hash is computed over a different domain
 	// (update payload vs full html) and a match could falsely skip, stranding a stale page.
@@ -104,7 +131,7 @@ export function decideLoaderRender(
 			hash,
 		};
 	}
-	return { kind: "assign", html: rendered.html, hash, updateCapable };
+	return { kind: "assign", html: renderedHtml(rendered), hash, updateCapable };
 }
 
 export abstract class UpdateablePreviewBase extends PreviewBase {
@@ -113,10 +140,10 @@ export abstract class UpdateablePreviewBase extends PreviewBase {
 	// preview script and so carries the updateBody listener). When false, a post would be dropped,
 	// so the next changed render must assign (full reload) to restore the listener.
 	private lastPageUpdateCapable = false;
-	// The most recent full html. Kept so a panel that received in-place updates while visible can be
-	// flushed back to a current html when it is hidden (see the view-state handler), avoiding a stale
-	// reload on the next show.
-	private latestHtml: string | undefined = undefined;
+	// The most recent full html, or a thunk for one not yet built. Kept so a panel that received
+	// in-place updates while visible can be flushed back to a current html when it is hidden (see
+	// the view-state handler), avoiding a stale reload on the next show.
+	private latestHtml: string | (() => string) | undefined = undefined;
 	private htmlPropertyStale = false;
 
 	constructor(uri: vscode.Uri, panel: vscode.WebviewPanel) {
@@ -130,10 +157,19 @@ export abstract class UpdateablePreviewBase extends PreviewBase {
 				this.htmlPropertyStale &&
 				this.latestHtml !== undefined
 			) {
-				this.panel.webview.html = this.latestHtml;
+				this.panel.webview.html = this.latestHtmlOrBuild();
 				this.htmlPropertyStale = false;
 			}
 		});
+	}
+
+	// Builds a pending thunk at the moment the html is actually needed, then keeps the result so a
+	// second flush does not rebuild the page.
+	private latestHtmlOrBuild(): string {
+		const latest = this.latestHtml as string | (() => string);
+		const html = typeof latest === "function" ? latest() : latest;
+		this.latestHtml = html;
+		return html;
 	}
 
 	// Render the document to the webview's html plus an optional in-place update payload. Previews
@@ -143,29 +179,37 @@ export abstract class UpdateablePreviewBase extends PreviewBase {
 		document: vscode.TextDocument,
 		uri: vscode.Uri,
 		webview: vscode.Webview,
+		options: RenderContentOptions,
 	): Promise<LoaderRender>;
 
-	protected async getContent(document: vscode.TextDocument): Promise<string> {
+	protected async getContent(document: vscode.TextDocument, dependencyChanged = false): Promise<string> {
 		const rendered = normalizeRender(
-			await this.renderContent(document, document.uri, this.panel.webview),
+			await this.renderContent(document, document.uri, this.panel.webview, { partial: false, dependencyChanged }),
 		);
+		// This render is assigned to the webview, so its html is built here; a partial update that
+		// only posts keeps it as a thunk.
+		const html = renderedHtml(rendered);
 		// PreviewBase assigns the returned html to the webview, so the loaded page's capability is
 		// this render's capability.
 		this.lastRenderHash = rendered.update
 			? hashHtml(serializeUpdate(rendered.update))
-			: hashHtml(normalizeNoncesForHash(rendered.html));
+			: hashHtml(normalizeNoncesForHash(html));
 		this.lastPageUpdateCapable = rendered.update !== undefined;
-		this.latestHtml = rendered.html;
+		this.latestHtml = html;
 		this.htmlPropertyStale = false;
-		return rendered.html;
+		return html;
 	}
 
 	protected async sendPartialUpdate(
 		document: vscode.TextDocument,
+		dependencyChanged = false,
 	): Promise<void> {
 		const rendered = normalizeRender(
-			await this.renderContent(document, document.uri, this.panel.webview),
+			await this.renderContent(document, document.uri, this.panel.webview, { partial: true, dependencyChanged }),
 		);
+		if (this.isDisposed) {
+			return;
+		}
 		const decision = decideLoaderRender(
 			rendered,
 			this.lastRenderHash,
@@ -181,6 +225,8 @@ export abstract class UpdateablePreviewBase extends PreviewBase {
 		if (decision.kind === "post") {
 			const delivered = await this.panel.webview.postMessage(decision.message);
 			if (delivered) {
+				// A thunk is kept as a thunk: the page already shows this content, and the html
+				// property is only flushed (and thus built) if the panel goes hidden.
 				this.latestHtml = rendered.html;
 				// The live page keeps its listener (not reloaded), so capability is unchanged; the html
 				// property still holds the pre-update document, so mark it for flush on hide.
@@ -191,14 +237,15 @@ export abstract class UpdateablePreviewBase extends PreviewBase {
 			// The post was dropped (webview not ready/gone): fall back to a full html assign so the
 			// stored state reflects what actually got applied. The assigned html is update-capable
 			// (post is only chosen for update renders), so the reloaded page keeps its listener.
-			this.panel.webview.html = rendered.html;
-			this.latestHtml = rendered.html;
+			const html = renderedHtml(rendered);
+			this.panel.webview.html = html;
+			this.latestHtml = html;
 			this.htmlPropertyStale = false;
 			this.lastRenderHash = decision.hash;
 			this.lastPageUpdateCapable = true;
 		} else {
 			this.panel.webview.html = decision.html;
-			this.latestHtml = rendered.html;
+			this.latestHtml = decision.html;
 			this.htmlPropertyStale = false;
 			this.lastRenderHash = decision.hash;
 			this.lastPageUpdateCapable = decision.updateCapable;

@@ -216,6 +216,10 @@ const webviewJsConfig = {
     eventtree: './webviewsrc/eventtree.ts',
     guipreview: './webviewsrc/guipreview.ts',
     miopreview: './webviewsrc/miopreview.ts',
+    ideapreview: './webviewsrc/ideapreview.ts',
+    characterpreview: './webviewsrc/characterpreview.ts',
+    decisiontree: './webviewsrc/decisiontree.ts',
+    boppreview: './webviewsrc/boppreview.ts',
   },
   
   output: {

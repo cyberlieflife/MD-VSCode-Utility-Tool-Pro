@@ -127,6 +127,57 @@ export interface ParseOptions {
     keepTokens?: boolean;
 }
 
+/**
+ * `parseHoi4File`, but a file that ends with blocks still open is closed off and parsed again
+ * instead of throwing. The game reads such files -- its own `interface/powerbalanceview.gfx` ends
+ * without closing its last block -- and a wholesale failure would lose every sprite in the file,
+ * not only the unwritten tail.
+ */
+export function parseHoi4FileToleratingUnclosedTail(input: string, errorMessagePrefix: string = '', options: ParseOptions = {}): Node {
+    try {
+        return parseHoi4File(input, errorMessagePrefix, options);
+    } catch (e) {
+        const missing = countUnclosedBraces(input);
+        if (missing <= 0) {
+            throw e;
+        }
+        return parseHoi4File(input + "\n" + "}".repeat(missing), errorMessagePrefix, options);
+    }
+}
+
+// Braces outside strings and comments, so a `{` in a texture path or in a comment cannot inflate
+// the count. Over-counting only appends harmless empty blocks.
+function countUnclosedBraces(input: string): number {
+    let depth = 0;
+    let inString = false;
+    let inComment = false;
+    for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+        if (inComment) {
+            if (ch === "\n") {
+                inComment = false;
+            }
+            continue;
+        }
+        if (inString) {
+            if (ch === '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (ch === '"') {
+            inString = true;
+        } else if (ch === "#") {
+            inComment = true;
+        } else if (ch === "{") {
+            depth++;
+        } else if (ch === "}") {
+            depth--;
+        }
+    }
+    return Math.max(0, depth);
+}
+
 export function parseHoi4File(input: string, errorMessagePrefix: string = '', options: ParseOptions = {}): Node {
     const keepTokens = options.keepTokens !== false;
     const tokens = tokenizer(input, errorMessagePrefix);

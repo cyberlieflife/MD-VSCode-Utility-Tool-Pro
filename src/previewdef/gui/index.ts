@@ -3,6 +3,7 @@ import { PreviewProviderDef } from '../previewmanager';
 import { LoaderPreview } from '../loaderpreview';
 import { GuiFileLoader } from './loader';
 import { renderGuiFile } from './contentbuilder';
+import { localize } from '../../util/i18n';
 
 function canPreviewGui(document: vscode.TextDocument) {
     const uri = document.uri;
@@ -17,6 +18,7 @@ class GuiPreview extends LoaderPreview<GuiFileLoader> {
 
 export const guiPreviewDef: PreviewProviderDef = {
     type: 'gui',
+    displayName: () => localize('preview.type.gui', 'Interface window (*.gui)'),
     canPreview: canPreviewGui,
     previewConstructor: GuiPreview,
 };

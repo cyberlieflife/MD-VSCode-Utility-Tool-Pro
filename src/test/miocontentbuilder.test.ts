@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { renderMioFile } from '../previewdef/mio/contentbuilder';
-import { LoaderRenderResult } from '../previewdef/loaderpreview';
+import { renderedHtml, LoaderRenderResult } from '../previewdef/loaderpreview';
 
 // The mio preview's updateBody replaces the whole #mio-server-styles sheet while the shell markup
 // (#dragger, #miopreviewcontent, frame, toolbar) persists. These drive renderMioFile against a stub
@@ -35,7 +35,7 @@ function classOf(html: string, id: string): string {
 describe('previewdef/mio renderMioFile shell class stability', () => {
     it('returns { html, update } with styleCss and data', async () => {
         const rendered = await renderMioFile(loaderFor(1), uri, webview) as LoaderRenderResult;
-        assert.strictEqual(typeof rendered.html, 'string');
+        assert.strictEqual(typeof renderedHtml(rendered), 'string');
         assert.ok(rendered.update);
         assert.strictEqual(typeof rendered.update.styleCss, 'string');
         assert.ok(rendered.update.data);
@@ -46,12 +46,12 @@ describe('previewdef/mio renderMioFile shell class stability', () => {
         const one = await renderMioFile(loaderFor(1), uri, webview) as LoaderRenderResult;
         const two = await renderMioFile(loaderFor(2), uri, webview) as LoaderRenderResult;
 
-        const dragger = classOf(one.html, 'dragger');
-        const content = classOf(one.html, 'miopreviewcontent');
+        const dragger = classOf(renderedHtml(one), 'dragger');
+        const content = classOf(renderedHtml(one), 'miopreviewcontent');
         assert.strictEqual(dragger, 'st-dragger');
         assert.strictEqual(content, 'st-miopreviewcontent');
-        assert.strictEqual(classOf(two.html, 'dragger'), dragger);
-        assert.strictEqual(classOf(two.html, 'miopreviewcontent'), content);
+        assert.strictEqual(classOf(renderedHtml(two), 'dragger'), dragger);
+        assert.strictEqual(classOf(renderedHtml(two), 'miopreviewcontent'), content);
 
         for (const rendered of [one, two]) {
             const styleCss = rendered.update!.styleCss!;

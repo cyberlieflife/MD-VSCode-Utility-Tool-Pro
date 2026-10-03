@@ -14,6 +14,15 @@ declare module 'vscode' {
             readonly inlayWindowGfxRoots: string[];
             readonly technologyGfxRoots: string[];
             readonly worldMapRetainContextWhenHidden: boolean;
+            readonly ideaPreview: boolean;
+            readonly decisionPreview: boolean;
+            readonly characterPreview: boolean;
+            readonly bopPreview: boolean;
+            readonly ideaPlaceholderIcon: string;
+            readonly modifierFormatFiles: string[];
+            readonly characterTraitStructuralKeys: string[];
+            readonly decisionGfxFiles: string[];
+            readonly ideaSwapIndex: boolean;
         };
     }
 }

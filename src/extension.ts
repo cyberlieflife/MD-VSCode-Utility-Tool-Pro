@@ -15,6 +15,7 @@ import { registerLocalisationIndex } from "./util/localisationIndex";
 import { registerSharedFocusIndex } from "./util/sharedFocusIndex";
 import { registerFeatureFlags } from "./util/featureflags";
 import { registerIdeaPictureHover } from "./hover/ideaPictureHover";
+import { registerIdeaSwapIndex } from "./util/ideaSwapIndex";
 import { registerModifierInlayHint } from "./inlayhint/modifierInlayHint";
 
 export function activate(context: vscode.ExtensionContext) {
@@ -34,6 +35,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     sendEvent('extension.activate', { locale, isWeb: IS_WEB_EXT.toString() });
 
+    // A line the reader can find in the HOI4 Modding output channel to tell which build is
+    // actually running, since every fix ships as an in-place VSIX reinstall.
+    Logger.info(`HOI4 Utilities Pro ${VERSION} activated (locale: ${locale}).`);
+
     context.subscriptions.push(previewManager.register());
     context.subscriptions.push(registerModFile());
     context.subscriptions.push(worldMap.register());
@@ -45,6 +50,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(registerGfxIndex());
     context.subscriptions.push(registerLocalisationIndex());
     context.subscriptions.push(registerIdeaPictureHover());
+    context.subscriptions.push(registerIdeaSwapIndex());
     context.subscriptions.push(registerModifierInlayHint());
 
     setVscodeContext(ContextName.Hoi4MULoaded, true);

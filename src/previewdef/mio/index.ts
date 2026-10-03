@@ -4,6 +4,7 @@ import { LoaderPreview } from '../loaderpreview';
 import { matchPathEnd } from '../../util/nodecommon';
 import { MioLoader } from './loader';
 import { renderMioFile } from './contentbuilder';
+import { localize } from '../../util/i18n';
 
 function canPreviewMio(document: vscode.TextDocument) {
     const uri = document.uri;
@@ -22,6 +23,7 @@ class MioPreview extends LoaderPreview<MioLoader> {
 
 export const mioPreviewDef: PreviewProviderDef = {
     type: 'mio',
+    displayName: () => localize('preview.type.mio', 'Military industrial organization (common/military_industrial_organization/organizations/*.txt)'),
     canPreview: canPreviewMio,
     previewConstructor: MioPreview,
 };

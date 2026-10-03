@@ -819,6 +819,7 @@ class FocusTreePreview extends PreviewBase {
 
 export const focusTreePreviewDef: PreviewProviderDef = {
     type: 'focustree',
+    displayName: () => localize('preview.type.focustree', 'Focus tree (common/national_focus/*.txt)'),
     canPreview: canPreviewFocusTree,
     previewConstructor: FocusTreePreview,
 };

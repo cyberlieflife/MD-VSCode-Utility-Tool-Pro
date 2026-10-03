@@ -5,6 +5,7 @@ import { PreviewProviderDef } from '../previewmanager';
 import { LoaderPreview } from '../loaderpreview';
 import { EventsLoader } from './loader';
 import { eventTreePreview } from '../../util/featureflags';
+import { localize } from '../../util/i18n';
 import { ConfigurationKey } from '../../constants';
 
 function canPreviewEvent(document: vscode.TextDocument) {
@@ -41,6 +42,7 @@ class EventPreview extends LoaderPreview<EventsLoader> {
 
 export const eventPreviewDef: PreviewProviderDef = {
     type: 'event',
+    displayName: () => localize('preview.type.event', 'Event tree (events/*.txt)'),
     canPreview: canPreviewEvent,
     previewConstructor: EventPreview,
 };

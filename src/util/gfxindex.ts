@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { parseHoi4File } from '../hoiformat/hoiparser';
+import { parseHoi4FileToleratingUnclosedTail } from '../hoiformat/hoiparser';
 import { getSpriteTypes } from '../hoiformat/spritetype';
 import { debounceByInput, forceError, mapLimit, UserError } from './common';
 import { error } from './debug';
@@ -98,7 +98,7 @@ export async function getGfxContainerFiles(gfxNames: (string | undefined)[]): Pr
     return uniq((await Promise.all(gfxNames.map(getGfxContainerFile))).filter((v): v is string => v !== undefined));
 }
 
-const GFX_CACHE_VERSION = 1;
+const GFX_CACHE_VERSION = 2;
 
 interface GfxCacheData {
     index: Record<string, GfxIndexItem | undefined>;
@@ -188,7 +188,7 @@ async function fillGfxItems(gfxFile: string, gfxIndex: Record<string, GfxIndexIt
             estimatedSize[0] += gfxFile.length;
         }
         const [fileBuffer, uri] = await readFileFromModOrHOI4(gfxFile, options);
-        const spriteTypes = getSpriteTypes(parseHoi4File(fileBuffer.toString(), localize('infile', 'In file {0}:\n', uri.toString()), { keepTokens: false }));
+        const spriteTypes = getSpriteTypes(parseHoi4FileToleratingUnclosedTail(fileBuffer.toString(), localize('infile', 'In file {0}:\n', uri.toString()), { keepTokens: false }));
         const spriteNames: string[] = [];
         for (const spriteType of spriteTypes) {
             gfxIndex[spriteType.name] = { file: gfxFile };

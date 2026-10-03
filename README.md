@@ -28,6 +28,10 @@
 | GUI / GUI | Preview / 界面预览 |
 | GFX / GFX | Preview `.gfx` sprite definitions (all HOI4 sprites are defined here) / `.gfx` 精灵定义预览（HOI4 的精灵都定义在这里） |
 | Images / 图片 | Preview `.dds` / `.tga` files / `.dds` / `.tga` 图片预览 |
+| Idea / 理念 | Preview as cards with categories, swap chains and filters / 预览，以卡片呈现，含分类、交换链与筛选 |
+| Character / 角色 | Preview with portraits, roles and the modifiers each trait grants / 预览，含肖像、职务与每个特质的修正 |
+| Decision / 决议 | Preview as a graph of categories, decisions and missions / 预览，以类别、决议与任务图呈现 |
+| Balance of power / 权力平衡 | The game's own balance of power window with its ranges and decisions / 游戏原版权力平衡窗口，含区间与决议 |
 
 ## Getting Started / 快速开始
 
@@ -51,6 +55,15 @@
 | `mdHoi4Utilities.modFile` | `string` | Path to the working `.mod` file, used to read `replace_path`. If not specified, uses the first `.mod` file in the first folder of the workspace. / 工作 `.mod` 文件路径，用于读取 `replace_path`。未设置时使用工作区第一个文件夹里的第一个 `.mod`。 |
 | `mdHoi4Utilities.enableSupplyArea` | `boolean` | Check this to enable supply areas when developing mods for HOI4 1.10 or below. / 为 HOI4 1.10 及以下版本做模组时勾选，启用补给区域。 |
 | `mdHoi4Utilities.previewLocalisation` | `enum` | Language of the content shown in the event tree preview. / 事件树预览中显示的语言。 |
+| `mdHoi4Utilities.ideaPreview` | `boolean` | Enable the idea preview. / 启用理念预览。 |
+| `mdHoi4Utilities.ideaSwapIndex` | `boolean` | Scan `common` and `events` for `swap_ideas` so the idea preview shows chains (reads many files on the first build). / 扫描 `common` 与 `events` 中的 `swap_ideas`，让理念预览显示交换链（首次构建会读取大量文件）。 |
+| `mdHoi4Utilities.ideaPlaceholderIcon` | `string` | Image drawn for an idea whose `picture` does not resolve. / 理念 `picture` 无法解析时绘制的图像。 |
+| `mdHoi4Utilities.modifierFormatFiles` | `string[]` | Files that say how a modifier reads, written like `common/modifier_definitions`. / 指定修正显示格式的文件，写法同 `common/modifier_definitions`。 |
+| `mdHoi4Utilities.characterPreview` | `boolean` | Enable the character preview. / 启用角色预览。 |
+| `mdHoi4Utilities.characterTraitStructuralKeys` | `string[]` | Trait keys that describe the trait rather than grant a modifier. / 描述特质本身而非提供修正的特质键。 |
+| `mdHoi4Utilities.decisionPreview` | `boolean` | Enable the decision preview. / 启用决议预览。 |
+| `mdHoi4Utilities.decisionGfxFiles` | `string[]` | `.gfx` files or folders that define the mod's decision sprites. / 定义模组决议精灵的 `.gfx` 文件或文件夹。 |
+| `mdHoi4Utilities.bopPreview` | `boolean` | Enable the balance of power preview. / 启用权力平衡预览。 |
 
 ## Known Issues / 已知问题
 

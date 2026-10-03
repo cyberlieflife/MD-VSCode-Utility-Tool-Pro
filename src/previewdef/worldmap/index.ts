@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { matchPathEnd } from '../../util/nodecommon';
 import { PreviewProviderDef } from '../previewmanager';
 import { WorldMapContainer } from "./worldmapcontainer";
+import { localize } from '../../util/i18n';
 
 export const worldMap = new WorldMapContainer();
 
@@ -16,6 +17,7 @@ function onPreviewWorldmap(_document: vscode.TextDocument): Promise<void> {
 
 export const worldMapPreviewDef: PreviewProviderDef = {
     type: 'worldmap',
+    displayName: () => localize('preview.type.worldmap', 'World map (map/default.map)'),
     canPreview: canPreviewWorldmap,
     onPreview: onPreviewWorldmap,
 };

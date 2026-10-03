@@ -2,7 +2,7 @@
 	"name": "hearts-of-iron-iv-utilities-pro",
 	"displayName": "%hoi4modutilities.displayName%",
 	"description": "钢铁雄心4模组工具扩展版",
-	"version": "1.1.30",
+	"version": "1.2.0",
 	"author": "Cyberlieflife",
 	"publisher": "Cyberlieflife",
 	"license": "MIT",
@@ -32,7 +32,11 @@
 		"workspaceContains:common/national_focus/*.txt",
 		"workspaceContains:common/technologies/*.txt",
 		"workspaceContains:events/*.txt",
-		"workspaceContains:map/default.map"
+		"workspaceContains:map/default.map",
+		"workspaceContains:common/ideas/*.txt",
+		"workspaceContains:common/characters/*.txt",
+		"workspaceContains:common/decisions/*.txt",
+		"workspaceContains:common/bop/*.txt"
 	],
 	"main": "./dist/extension.js",
 	"browser": "./dist/web-extension.js",
@@ -149,6 +153,69 @@
 						"type": "boolean",
 						"default": true,
 						"description": "%hoi4modutilities.modifierInlayHint.desc%"
+					},
+					"mdHoi4Utilities.ideaPreview": {
+						"title": "%hoi4modutilities.ideaPreview.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.ideaPreview.desc%"
+					},
+					"mdHoi4Utilities.ideaSwapIndex": {
+						"title": "%hoi4modutilities.ideaSwapIndex.title%",
+						"type": "boolean",
+						"default": false,
+						"description": "%hoi4modutilities.ideaSwapIndex.desc%"
+					},
+					"mdHoi4Utilities.ideaPlaceholderIcon": {
+						"title": "%hoi4modutilities.ideaPlaceholderIcon.title%",
+						"type": "string",
+						"default": "",
+						"description": "%hoi4modutilities.ideaPlaceholderIcon.desc%"
+					},
+					"mdHoi4Utilities.modifierFormatFiles": {
+						"title": "%hoi4modutilities.modifierFormatFiles.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.modifierFormatFiles.desc%"
+					},
+					"mdHoi4Utilities.characterPreview": {
+						"title": "%hoi4modutilities.characterPreview.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.characterPreview.desc%"
+					},
+					"mdHoi4Utilities.characterTraitStructuralKeys": {
+						"title": "%hoi4modutilities.characterTraitStructuralKeys.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.characterTraitStructuralKeys.desc%"
+					},
+					"mdHoi4Utilities.decisionPreview": {
+						"title": "%hoi4modutilities.decisionPreview.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.decisionPreview.desc%"
+					},
+					"mdHoi4Utilities.decisionGfxFiles": {
+						"title": "%hoi4modutilities.decisionGfxFiles.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.decisionGfxFiles.desc%"
+					},
+					"mdHoi4Utilities.bopPreview": {
+						"title": "%hoi4modutilities.bopPreview.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.bopPreview.desc%"
 					}
 				}
 			}
@@ -207,11 +274,6 @@
 		],
 		"menus": {
 			"editor/title": [
-				{
-					"command": "mdhoi4utilities.preview",
-					"when": "!shouldShowMdHoi4Preview && resourceExtname == '.txt' && !shouldHideMdHoi4Preview",
-					"group": "navigation"
-				},
 				{
 					"command": "mdhoi4utilities.preview",
 					"when": "shouldShowMdHoi4Preview && resourceScheme != webview-panel",

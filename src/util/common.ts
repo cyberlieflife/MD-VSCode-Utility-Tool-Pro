@@ -191,6 +191,32 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, in
 }
 
 /**
+ * Hands the event loop one turn. `setImmediate` rather than a resolved promise on purpose: a
+ * microtask would run before the host gets to service any of its pending IO or RPC, which is the
+ * whole point of yielding here.
+ */
+export function yieldToEventLoop(): Promise<void> {
+    return new Promise((resolve) => {
+        setImmediate(resolve);
+    });
+}
+
+/**
+ * For a synchronous loop too long to run in one go: call the returned function once per item and
+ * it yields the event loop whenever `budgetMs` has passed since the last yield, and otherwise costs
+ * one clock read.
+ */
+export function createTimeSlicer(budgetMs = 8): () => Promise<void> {
+    let sliceStart = Date.now();
+    return async () => {
+        if (Date.now() - sliceStart >= budgetMs) {
+            await yieldToEventLoop();
+            sliceStart = Date.now();
+        }
+    };
+}
+
+/**
  * Wraps an async, single-string-keyed function with a short-lived per-key memo. Within `ttl`
  * milliseconds of a key's last computation the memoized promise is returned as-is; after the TTL
  * the value is recomputed. Collapses IO bursts (e.g. the hundreds of fs.stat calls a single
@@ -266,4 +292,16 @@ export function forceError(e: unknown): Error {
     }
 
     return new Error();
+}
+
+// JSON for embedding in an inline <script>. The HTML parser ends the script at the first
+// script-closing tag it sees, whatever the JavaScript around it means, so a workspace string
+// containing one would otherwise truncate the payload and spill the rest into the document as
+// markup. Escaping `<` prevents that; U+2028 and U+2029 are escaped because they are valid JSON
+// but line terminators in older JavaScript parsers.
+export function jsonForScript(value: unknown): string {
+    return JSON.stringify(value).replace(
+        /[<\u2028\u2029]/g,
+        (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+    );
 }

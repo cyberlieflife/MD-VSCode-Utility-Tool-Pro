@@ -12,6 +12,13 @@ export let eventTreePreview = getConfiguration().eventTreePreview;
 export let sharedFocusIndex = getConfiguration().sharedFocusIndex;
 export let gfxIndex = getConfiguration().gfxIndex;
 export let localisationIndex = getConfiguration().localisationIndex;
+// The four preview switches gate the idea, character, decision and balance-of-power previews.
+export let ideaPreview = getConfiguration().ideaPreview;
+export let decisionPreview = getConfiguration().decisionPreview;
+export let characterPreview = getConfiguration().characterPreview;
+export let bopPreview = getConfiguration().bopPreview;
+// Gates the idea swap chain index the idea preview reads.
+export let ideaSwapIndex = getConfiguration().ideaSwapIndex;
 
 export function refreshFeatureFlags(): void {
     const config = getConfiguration();
@@ -20,6 +27,11 @@ export function refreshFeatureFlags(): void {
     sharedFocusIndex = config.sharedFocusIndex;
     gfxIndex = config.gfxIndex;
     localisationIndex = config.localisationIndex;
+    ideaPreview = config.ideaPreview;
+    decisionPreview = config.decisionPreview;
+    characterPreview = config.characterPreview;
+    bopPreview = config.bopPreview;
+    ideaSwapIndex = config.ideaSwapIndex;
 }
 
 export function registerFeatureFlags(): vscode.Disposable {

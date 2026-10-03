@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { renderEventFile } from '../previewdef/event/contentbuilder';
-import { serializeUpdate, LoaderRenderResult } from '../previewdef/loaderpreview';
+import { serializeUpdate, renderedHtml, LoaderRenderResult } from '../previewdef/loaderpreview';
 
 // renderEventFile returns the in-place update parts { html, update } on success and a plain html string
 // on the error branch. These drive it against a stub loader (a single root event in one namespace) to
@@ -49,7 +49,7 @@ describe('previewdef/event renderEventFile in-place update', () => {
     it('returns { html, update } carrying contentHtml', async () => {
         const rendered = await renderEventFile(loaderFor('test.1'), uri, webview) as LoaderRenderResult;
         assert.strictEqual(typeof rendered, 'object');
-        assert.strictEqual(typeof rendered.html, 'string');
+        assert.strictEqual(typeof renderedHtml(rendered), 'string');
         assert.ok(rendered.update);
         assert.strictEqual(typeof rendered.update.styleCss, 'string');
         const data = rendered.update.data as { contentHtml: string };
@@ -61,7 +61,7 @@ describe('previewdef/event renderEventFile in-place update', () => {
         const b = await renderEventFile(loaderFor('test.1'), uri, webview) as LoaderRenderResult;
         // The full html carries fresh CSP nonces per render so it never hashes equal; the update parts
         // must be byte-identical so a no-op edit skips.
-        assert.notStrictEqual(a.html, b.html);
+        assert.notStrictEqual(renderedHtml(a), renderedHtml(b));
         assert.strictEqual(serializeUpdate(a.update!), serializeUpdate(b.update!));
     });
 
@@ -78,12 +78,12 @@ describe('previewdef/event renderEventFile in-place update', () => {
         const one = await renderEventFile(loaderFor('test.1'), uri, webview) as LoaderRenderResult;
         const two = await renderEventFile(loaderFor(['test.1', 'test.2']), uri, webview) as LoaderRenderResult;
 
-        const draggerOne = classOf(one.html, 'dragger');
-        const contentOne = classOf(one.html, 'eventtreecontent');
+        const draggerOne = classOf(renderedHtml(one), 'dragger');
+        const contentOne = classOf(renderedHtml(one), 'eventtreecontent');
         assert.strictEqual(draggerOne, 'st-dragger');
         assert.strictEqual(contentOne, 'st-eventtreecontent');
-        assert.strictEqual(classOf(two.html, 'dragger'), draggerOne);
-        assert.strictEqual(classOf(two.html, 'eventtreecontent'), contentOne);
+        assert.strictEqual(classOf(renderedHtml(two), 'dragger'), draggerOne);
+        assert.strictEqual(classOf(renderedHtml(two), 'eventtreecontent'), contentOne);
 
         const styleCss = two.update!.styleCss!;
         assert.ok(styleCss.includes(`.${draggerOne} {`));

@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { renderTechnologyFile } from '../previewdef/technology/contentbuilder';
-import { serializeUpdate, LoaderRenderResult } from '../previewdef/loaderpreview';
+import { serializeUpdate, renderedHtml, LoaderRenderResult } from '../previewdef/loaderpreview';
 
 // renderTechnologyFile returns the in-place update parts { html, update } on success and a plain html
 // string on the no-tree / error branches. These drive it against a stub loader (a countrytechtreeview
@@ -39,7 +39,7 @@ describe('previewdef/technology renderTechnologyFile in-place update', () => {
     it('returns { html, update } carrying contentHtml, folderOptionsHtml and folders', async () => {
         const rendered = await renderTechnologyFile(loaderFor(['artillery', 'infantry']), uri, webview) as LoaderRenderResult;
         assert.strictEqual(typeof rendered, 'object');
-        assert.strictEqual(typeof rendered.html, 'string');
+        assert.strictEqual(typeof renderedHtml(rendered), 'string');
         assert.ok(rendered.update);
         assert.strictEqual(typeof rendered.update.styleCss, 'string');
         const data = rendered.update.data as { contentHtml: string; folderOptionsHtml: string; folders: string[] };
@@ -53,7 +53,7 @@ describe('previewdef/technology renderTechnologyFile in-place update', () => {
         const b = await renderTechnologyFile(loaderFor(['artillery', 'infantry']), uri, webview) as LoaderRenderResult;
         // The full html carries fresh CSP nonces per render so it never hashes equal; the update parts
         // must be byte-identical so a no-op edit skips.
-        assert.notStrictEqual(a.html, b.html);
+        assert.notStrictEqual(renderedHtml(a), renderedHtml(b));
         assert.strictEqual(serializeUpdate(a.update!), serializeUpdate(b.update!));
     });
 
@@ -72,8 +72,8 @@ describe('previewdef/technology renderTechnologyFile in-place update', () => {
 
         for (const rendered of [a, b]) {
             const styleCss = rendered.update!.styleCss!;
-            assert.strictEqual(classOf(rendered.html, 'dragger'), 'st-dragger');
-            assert.ok(classOf(rendered.html, 'techtreecontent').split(' ').includes('st-mainContent'));
+            assert.strictEqual(classOf(renderedHtml(rendered), 'dragger'), 'st-dragger');
+            assert.ok(classOf(renderedHtml(rendered), 'techtreecontent').split(' ').includes('st-mainContent'));
             assert.ok(styleCss.includes('.st-dragger {'));
             assert.ok(styleCss.includes('.st-mainContent {'));
             assert.ok(styleCss.includes('.st-folderSelectorBar {'));

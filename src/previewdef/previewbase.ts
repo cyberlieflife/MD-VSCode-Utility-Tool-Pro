@@ -6,6 +6,8 @@ import { isEqual } from 'lodash';
 import { sendByMessage } from '../util/telemetry';
 import { loadingShellHtml } from '../util/html';
 import { openOrCopyHoiFile } from '../util/previewfileopener';
+import { ConfigurationKey } from '../constants';
+import { Logger } from '../util/logger';
 
 export abstract class PreviewBase {
     private cachedDependencies: string[] | undefined = undefined;
@@ -17,6 +19,12 @@ export abstract class PreviewBase {
     public onDispose = this.disposeEmitter.event;
 
     private disposed = false;
+    // Everything subscribed on the panel. Released in dispose() so a closed panel stops holding
+    // the preview (and its cached dependencies) through its subscriptions.
+    protected readonly subscriptions: vscode.Disposable[] = [];
+    // Renders run one at a time, so a slow render can never land after a newer one and overwrite
+    // it. A queued render reads the live document when it starts, so edits in between coalesce.
+    private renderQueue: Promise<void> = Promise.resolve();
     protected panelInitialized = false;
 
     constructor(
@@ -26,10 +34,27 @@ export abstract class PreviewBase {
         this.registerEvents(panel);
     }
 
-    public async onDocumentChange(document: vscode.TextDocument, dependencyChanged = false): Promise<void> {
+    public onDocumentChange(document: vscode.TextDocument, dependencyChanged = false): Promise<void> {
+        return this.enqueueRender(() => this.renderDocument(document, dependencyChanged));
+    }
+
+    protected enqueueRender(task: () => Promise<void>): Promise<void> {
+        const run = this.renderQueue.then(task);
+        this.renderQueue = run.catch(() => undefined);
+        return run;
+    }
+
+    private async renderDocument(document: vscode.TextDocument, dependencyChanged: boolean): Promise<void> {
+        if (this.disposed) {
+            return;
+        }
         try {
             if (!this.panelInitialized) {
-                this.panel.webview.html = await this.getContent(document);
+                const html = await this.getContent(document, dependencyChanged);
+                if (this.disposed) {
+                    return;
+                }
+                this.panel.webview.html = html;
                 this.panelInitialized = true;
             } else {
                 await this.sendPartialUpdate(document, dependencyChanged);
@@ -39,11 +64,16 @@ export abstract class PreviewBase {
         }
     }
 
-    protected async sendPartialUpdate(document: vscode.TextDocument, _dependencyChanged = false): Promise<void> {
-        this.panel.webview.html = await this.getContent(document);
+    protected async sendPartialUpdate(document: vscode.TextDocument, dependencyChanged = false): Promise<void> {
+        this.panel.webview.html = await this.getContent(document, dependencyChanged);
     }
     
     public dispose(): void {
+        if (this.disposed) {
+            return;
+        }
+        vscode.Disposable.from(...this.subscriptions).dispose();
+        this.subscriptions.length = 0;
         this.dependencyChangedEmitter.dispose();
         this.disposed = true;
         this.disposeEmitter.fire(undefined);
@@ -65,10 +95,15 @@ export abstract class PreviewBase {
     }
 
     protected registerEvents(panel: vscode.WebviewPanel): void {
-        panel.webview.onDidReceiveMessage((msg) => {
+        this.subscriptions.push(panel.webview.onDidReceiveMessage((msg) => {
+            if (msg === null || typeof msg !== 'object') {
+                return;
+            }
             switch (msg.command) {
                 case 'navigate':
-                    if (msg.start !== undefined) {
+                    // `end` is optional in the protocol; a message that names only the start selects
+                    // the single character at it.
+                    if (typeof msg.start === 'number') {
                         if (msg.file == null) {
                             const document = getDocumentByUri(this.uri);
                             if (document === undefined) {
@@ -76,11 +111,11 @@ export abstract class PreviewBase {
                             }
         
                             vscode.window.showTextDocument(this.uri, {
-                                selection: new vscode.Range(document.positionAt(msg.start), document.positionAt(msg.end)),
+                                selection: new vscode.Range(document.positionAt(msg.start), document.positionAt(typeof msg.end === 'number' ? msg.end : msg.start)),
                                 viewColumn: vscode.ViewColumn.One
                             });
                         } else {
-                            void this.openOrCopyFile(msg.file, msg.start, msg.end);
+                            void this.openOrCopyFile(msg.file, msg.start, typeof msg.end === 'number' ? msg.end : undefined);
                         }
                     }
                     break;
@@ -90,12 +125,51 @@ export abstract class PreviewBase {
                 case 'reload':
                     this.reload();
                     break;
+                // A diagnostic line a preview page reports about its own state; written to the
+                // HOI4 Modding channel so a blank page can be investigated without the webview
+                // developer tools.
+                case 'debug':
+                    if (typeof msg.message === 'string') {
+                        Logger.info(`[page] ${msg.message}`);
+                    }
+                    break;
             }
-        });
+        }));
         
-        panel.onDidDispose(() => {
+        this.subscriptions.push(panel.onDidDispose(() => {
             this.dispose();
-        });
+        }));
+
+        // registerFeatureFlags subscribes to this same event during activation, long before any
+        // preview exists, and VS Code fires listeners in subscription order -- so the module flags
+        // a render reads are already refreshed by the time this runs.
+        const keys = this.reloadOnConfigurationChange;
+        if (keys.length > 0) {
+            this.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+                if (keys.some(key => e.affectsConfiguration(`${ConfigurationKey}.${key}`))) {
+                    this.reload(this.configurationChangeForcesReload);
+                }
+            }));
+        }
+    }
+
+    /**
+     * Settings whose change makes this preview's rendered page stale, without the `mdHoi4Utilities.`
+     * prefix. A getter rather than a field: registerEvents runs from the constructor, before a
+     * subclass's field initializers have, and a field would still be undefined there.
+     */
+    protected get reloadOnConfigurationChange(): readonly string[] {
+        return [];
+    }
+
+    /**
+     * Whether a configuration-driven reload has to force the loader session. Almost always yes: a
+     * setting change does not move the document's hash, so without it the loader answers from its
+     * cache and the page repaints exactly what it had. A preview that reads its settings while
+     * rendering, rather than through a loader, can leave this false.
+     */
+    protected get configurationChangeForcesReload(): boolean {
+        return true;
     }
     
     protected updateDependencies(dependencies: string[]): void {
@@ -116,14 +190,17 @@ export abstract class PreviewBase {
         });
     }
 
-    protected reload() {
+    // `dependencyChanged` forces the loader session the re-render runs in. A reload triggered by
+    // something other than the document -- a setting change -- does not move the document's hash, so
+    // without it a loader answers from its cache and the page repaints exactly what it had.
+    protected reload(dependencyChanged = false) {
         const document = getDocumentByUri(this.uri);
         if (document === undefined) {
             return;
         }
 
         this.panelInitialized = false;
-        void this.onDocumentChange(document);
+        void this.onDocumentChange(document, dependencyChanged);
     }
 
     // PreviewManager calls this when a background index (the GFX sprite index) finishes building.
@@ -137,5 +214,5 @@ export abstract class PreviewBase {
     public refreshIcons(): void {
     }
 
-    protected abstract getContent(document: vscode.TextDocument): Promise<string>;
+    protected abstract getContent(document: vscode.TextDocument, dependencyChanged?: boolean): Promise<string>;
 }

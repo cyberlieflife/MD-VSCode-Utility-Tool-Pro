@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { contextContainer } from '../context';
 import { StyleTable } from './styletable';
-import { randomString } from './common';
+import { forceError, randomString } from './common';
 import { localize } from './i18n';
+import { iconClassOf } from '../previewdef/toolbaricons';
 
 export interface DynamicScript {
     content: string;
@@ -15,12 +16,21 @@ export interface NonceOnly {
     nonce: string;
 }
 
+export interface HtmlOptions {
+    /**
+     * Whether the body's whitespace is collapsed on the way out. On by default. A caller that has
+     * already collapsed the expensive part of its markup turns it off rather than paying for a
+     * second scan of the same string.
+     */
+    collapseWhitespace?: boolean;
+}
+
 // Inline script exposing the previewed file's URI to the webview as window.previewedFileUri.
 export function previewedFileUriScript(uri: vscode.Uri): DynamicScript {
     return { content: `window.previewedFileUri = "${uri.toString()}";` };
 }
 
-export function html(webview: vscode.Webview, body: string, scripts: (string | DynamicScript)[], styles?: (string | StyleTable | DynamicScript | NonceOnly)[]): string {
+export function html(webview: vscode.Webview, body: string, scripts: (string | DynamicScript)[], styles?: (string | StyleTable | DynamicScript | NonceOnly)[], options?: HtmlOptions): string {
     const preparedScripts = scripts.map<[string, string]>(script => {
         if (typeof script === 'string') {
             const uri = contextContainer.current ?
@@ -46,22 +56,26 @@ export function html(webview: vscode.Webview, body: string, scripts: (string | D
         styles.map<[string, string]>(style => {
             const nonce = randomString(32);
             if (style instanceof StyleTable) {
+                // The nonce stays on the element, but style-src keeps only 'unsafe-inline': a nonce
+                // anywhere in style-src makes browsers ignore 'unsafe-inline' entirely, and the GUI
+                // windows the previews draw position their elements with style attributes, which a
+                // nonce cannot cover.
                 return [
                     style.toStyleElement(nonce),
-                    `'nonce-${nonce}'`
+                    ''
                 ];
             } else if (typeof style === 'object') {
                 if ('nonce' in style) {
                     return [
                         '',
-                        `'nonce-${style.nonce}'`,
+                        '',
                     ];
                 } else {
                     // Same early-close protection as the inline scripts above: an inline </style
                     // inside CSS content would truncate the stylesheet.
                     return [
                         `<style${style.id ? ` id="${style.id}"` : ''} nonce="${nonce}">${style.content.replace(/<\/style/g, '<\\/style')}</style>`,
-                        `'nonce-${nonce}'`,
+                        '',
                     ];
                 }
             } else {
@@ -82,7 +96,7 @@ export function html(webview: vscode.Webview, body: string, scripts: (string | D
         <meta charset="UTF-8">
         <meta http-equiv="Content-Security-Policy" content="
             default-src 'none';
-            style-src ${preparedStyles.map(v => v[1]).join(' ')} ${webview.cspSource};
+            style-src 'unsafe-inline' ${webview.cspSource};
             script-src ${preparedScripts.map(v => v[1]).filter(v => v.length > 0).join(' ')} ${webview.cspSource};
             img-src data: ${webview.cspSource};
             font-src data: ${webview.cspSource};
@@ -91,7 +105,7 @@ export function html(webview: vscode.Webview, body: string, scripts: (string | D
         ${preparedScripts.map(v => v[0]).join('')}
         ${preparedStyles.map(v => v[0]).join('')}
     </head>
-    <body>${body.replace(/\s\s+/g, ' ')}</body>
+    <body>${options?.collapseWhitespace === false ? body : body.replace(/\s\s+/g, ' ')}</body>
 </html>
 `;
 }
@@ -162,6 +176,60 @@ export function loadingShellHtml(message?: string): string {
 </body>
 </html>`;
 }
+
+/**
+ * The body of the page a preview shows when it could not render: the word "Error" and whatever was
+ * thrown, escaped.
+ *
+ * Every preview had its own copy of this line, eight in all, split across two formatting
+ * conventions so a plain text search did not even find them together.
+ */
+export function errorPageContent(cause: unknown): string {
+    return `${localize('error', 'Error')}: <br/>  <pre>${htmlEscape(forceError(cause).toString())}</pre>`;
+}
+
+/**
+ * The click handler behind the Retry button: posts the `reload` message PreviewBase already
+ * handles. Inline rather than through common.js, because the error page ships no bundle.
+ */
+function reloadButtonScript(buttonId: string): DynamicScript {
+    return {
+        content: `(function(){
+            var api = acquireVsCodeApi();
+            var btn = document.getElementById('${buttonId}');
+            if (btn) { btn.addEventListener('click', function(){ api.postMessage({ command: 'reload' }); }); }
+        })();`,
+    };
+}
+
+/**
+ * The whole error page, for the previews that render one through `html()`. The DDS viewer assigns
+ * the body directly and so uses {@link errorPageContent} on its own.
+ *
+ * Carries a Retry button: a transient failure used to leave a dead page that only a file edit or
+ * reopening the preview could clear. `title` is for the caller that leads with an explanation of
+ * its own, like the focus tree's slow-render panel.
+ */
+export function errorPage(webview: vscode.Webview, uri: vscode.Uri, cause: unknown, title?: string): string {
+    const buttonId = 'preview-reload';
+    const heading = title === undefined ? '' : `<p>${htmlEscape(title)}</p>`;
+    // The body's styles go through the StyleTable rather than a style attribute: html() tightens
+    // style-src to the CSP source whenever a stylesheet is passed, and an inline style attribute
+    // would be refused there.
+    const styleTable = new StyleTable();
+    const bodyClass = styleTable.style('error-page', () => `
+        padding: 16px;
+        font: 13px var(--vscode-font-family);
+        color: var(--vscode-foreground);`);
+    const body = `<div class="${bodyClass}">
+        ${heading}
+        <p>${errorPageContent(cause)}</p>
+        <button id="${buttonId}" type="button"><i class="${iconClassOf('refresh')}" aria-hidden="true"></i> ${htmlEscape(localize('focustree.reload', 'Reload'))}</button>
+    </div>`;
+    return html(webview, body, [previewedFileUriScript(uri), reloadButtonScript(buttonId)], [styleTable, 'codicon.css']);
+}
+
+export { escapeAttr } from './escape';
 
 export function htmlEscape(unsafe: string): string {
     return unsafe

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { PNG } from 'pngjs';
-import { parseHoi4File } from '../../hoiformat/hoiparser';
+import { parseHoi4FileToleratingUnclosedTail } from '../../hoiformat/hoiparser';
 import { getSpriteTypes, SpriteType, CorneredTileSpriteType } from '../../hoiformat/spritetype';
 import { readFileFromModOrHOI4, hoiFileExpiryToken, expiryToken } from '../fileloader';
 import { PromiseCache } from '../cache';
@@ -233,7 +233,7 @@ async function loadGfxMap(path: string): Promise<Record<string, (SpriteType | Co
         iconResolveStats.gfxMapParses++;
         const [buffer, realPath] = await readFileFromModOrHOI4(path);
         const gfx = buffer.toString('utf-8');
-        const node = parseHoi4File(gfx, localize('infile', 'In file {0}:\n', realPath));
+        const node = parseHoi4FileToleratingUnclosedTail(gfx, localize('infile', 'In file {0}:\n', realPath));
         const spriteTypes = getSpriteTypes(node);
 
         spriteTypes.forEach(st => gfxMap[st.name] = st);

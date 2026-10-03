@@ -35,6 +35,18 @@ export interface Background {
 export interface GuiTypes {
     containerwindowtype: ContainerWindowType[];
     windowtype: ContainerWindowType[];
+    positiontype: PositionType[];
+    // An icon outside any window: a template the game copies from code, like `range_bar` in
+    // powerbalanceview.gui.
+    icontype: IconType[];
+}
+
+/** A named point, like `focus_spacing` in nationalfocusview.gui, that the game reads by name. */
+export interface PositionType {
+    name: string;
+    position: Position;
+    _index: number;
+    _token: Token;
 }
 
 export interface ContainerWindowType {
@@ -241,6 +253,11 @@ const containerWindowTypeSchema: SchemaDef<ContainerWindowType> = {
 containerWindowTypeSchema.containerwindowtype._innerType = containerWindowTypeSchema;
 containerWindowTypeSchema.windowtype._innerType = containerWindowTypeSchema;
 
+const positionTypeSchema: SchemaDef<PositionType> = {
+    name: "string",
+    position: positionSchema,
+};
+
 const guiTypesSchema: SchemaDef<GuiTypes> = {
     containerwindowtype: {
         _innerType: containerWindowTypeSchema,
@@ -248,6 +265,14 @@ const guiTypesSchema: SchemaDef<GuiTypes> = {
     },
     windowtype: {
         _innerType: containerWindowTypeSchema,
+        _type: "array",
+    },
+    positiontype: {
+        _innerType: positionTypeSchema,
+        _type: "array",
+    },
+    icontype: {
+        _innerType: iconTypeSchema,
         _type: "array",
     },
 };

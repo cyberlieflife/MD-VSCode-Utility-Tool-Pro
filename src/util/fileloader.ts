@@ -5,7 +5,7 @@ import { isSamePath } from './nodecommon';
 import { getLastModifiedAsync, readDirFiles, isFile, isDirectory, readFile, readDir, isSameUri, fileOrUriStringToUri, ensureFileScheme, readDirFilesRecursively, getConfiguration, getDocumentByUri } from './vsccommon';
 import { parseHoi4File, resolveScriptVariables, Node, ParseOptions } from '../hoiformat/hoiparser';
 import { localize } from './i18n';
-import { convertNodeToJson, SchemaDef, HOIPartial } from '../hoiformat/schema';
+import { convertNodeToJson, Enum, SchemaDef, HOIPartial } from '../hoiformat/schema';
 import { error } from './debug';
 import { updateSelectedModFileStatus, workspaceModFilesCache } from './modfile';
 import { UserError, memoizeWithTtl } from './common';
@@ -124,6 +124,17 @@ export async function clearDlcZipCache() {
     parseCache.clear();
 }
 
+/**
+ * Which of the mod / parent mod / HOI4 / DLC sources a lookup looks in.
+ *
+ * `mod` and `hoi4` select which roots a relative path is resolved against; the opened workspace
+ * folders are searched as part of the mod half (`mod: false` skips them too).
+ */
+export interface FileSourceOptions {
+    mod?: boolean;
+    hoi4?: boolean;
+}
+
 export function getFilePathFromMod(relativePath: string): Promise<vscode.Uri | undefined> {
     return getFilePathFromModOrHOI4(relativePath, { hoi4: false });
 }
@@ -141,12 +152,12 @@ const getFilePathMemo = memoizeWithTtl(
     { ttl: 500, maxSize: 1000 },
 );
 
-export function getFilePathFromModOrHOI4(relativePath: string, options?: { mod?: boolean, hoi4?: boolean }): Promise<vscode.Uri | undefined> {
+export function getFilePathFromModOrHOI4(relativePath: string, options?: FileSourceOptions): Promise<vscode.Uri | undefined> {
     const normalizedPath = relativePath.replace(/\/\/+|\\+/g, '/');
     return getFilePathMemo(JSON.stringify([normalizedPath, options?.mod ?? null, options?.hoi4 ?? null]));
 }
 
-async function getFilePathFromModOrHOI4Impl(relativePath: string, options?: { mod?: boolean, hoi4?: boolean }): Promise<vscode.Uri | undefined> {
+async function getFilePathFromModOrHOI4Impl(relativePath: string, options?: FileSourceOptions): Promise<vscode.Uri | undefined> {
     relativePath = relativePath.replace(/\/\/+|\\+/g, '/');
     let absolutePath: vscode.Uri | undefined = undefined;
 
@@ -317,7 +328,16 @@ async function readFileFromPathImpl(realPath: vscode.Uri, relativePath?: string)
     return [ await readFile(realPath), realPath ];
 }
 
-export async function readFileFromModOrHOI4(relativePath: string, options?: { mod?: boolean, hoi4?: boolean }): Promise<[Buffer, vscode.Uri]> {
+export async function readFileFromModOrHOI4(
+    relativePath: string,
+    options?: FileSourceOptions,
+    // A path a listing already resolved, for callers that have one: skips getFilePathFromModOrHOI4.
+    resolvedUri?: vscode.Uri,
+): Promise<[Buffer, vscode.Uri]> {
+    if (resolvedUri !== undefined) {
+        return await readFileFromPath(resolvedUri, relativePath);
+    }
+
     const realPath = await getFilePathFromModOrHOI4(relativePath, options);
 
     if (!realPath) {
@@ -562,4 +582,117 @@ async function getReplacePathsFromModFile(absolutePath: string): Promise<string[
     const node = parseHoi4File(content, localize('infile', 'In file {0}:\n', absolutePath));
     const modFile = convertNodeToJson<ModFile>(node, modFileSchema);
     return modFile.replace_path.filter((v): v is string => typeof v === 'string');
+}
+
+// The descriptor lists the previews read out of the working mod's .mod file. Upstream MD reads the
+// parent mods' descriptors too and merges them; this implementation covers the working mod only,
+// because a separate parent-mod source is not part of this port yet. Kept apart from
+// replacePathsCache so the replace_path behaviour above is untouched.
+interface DescriptorModFile {
+    modifier_format_files: Enum;
+    idea_placeholder_icon?: string;
+    character_trait_structural_keys?: Enum;
+    decision_gfx?: Enum;
+}
+
+const descriptorModFileSchema: SchemaDef<DescriptorModFile> = {
+    modifier_format_files: "enum",
+    idea_placeholder_icon: "string",
+    character_trait_structural_keys: "enum",
+    decision_gfx: "enum",
+};
+
+interface DescriptorLists {
+    modifierFormatFiles: string[];
+    ideaPlaceholderIcon: string[];
+    characterTraitStructuralKeys: string[];
+    decisionGfx: string[];
+}
+
+const descriptorListsCache = new PromiseCache<DescriptorLists>({
+    factory: getListsFromModFile,
+    expireWhenChange: key => getLastModifiedAsync(vscode.Uri.parse(key)),
+    life: 60 * 1000,
+});
+
+/**
+ * The `modifier_format_files` named by the working mod's descriptor: files in the
+ * `common/modifier_definitions` syntax that say how the previews show a modifier the game defines
+ * internally, where the built-in formats do not match what the mod needs. The game ignores the key.
+ */
+export async function getDescriptorModifierFormatFiles(): Promise<string[]> {
+    return (await getDescriptorList("modifierFormatFiles")) ?? [];
+}
+
+/**
+ * The `idea_placeholder_icon` images named by the working mod's descriptor: what the idea preview
+ * draws for a picture that does not resolve. The game ignores the key; the preview uses the first
+ * of them that exists.
+ */
+export async function getDescriptorIdeaPlaceholderIcon(): Promise<string[]> {
+    return (await getDescriptorList("ideaPlaceholderIcon")) ?? [];
+}
+
+/**
+ * The `character_trait_structural_keys` named by the working mod's descriptor: trait-level block
+ * names the mod's own trait files write that the character preview's built-in structural key list
+ * does not know, so they are not mistaken for modifiers. The game ignores the key.
+ */
+export async function getDescriptorCharacterTraitStructuralKeys(): Promise<string[]> {
+    return (await getDescriptorList("characterTraitStructuralKeys")) ?? [];
+}
+
+/**
+ * The `decision_gfx` .gfx files named by the working mod's descriptor: where the decision preview
+ * looks a decision sprite up when the gfx index cannot place it. The game ignores the key.
+ */
+export async function getDescriptorDecisionGfx(): Promise<string[]> {
+    return (await getDescriptorList("decisionGfx")) ?? [];
+}
+
+async function getDescriptorList(list: keyof DescriptorLists): Promise<string[] | undefined> {
+    const modFile = await getSelectedDescriptorModFile();
+    try {
+        if (modFile && await isFile(modFile)) {
+            const result = await descriptorListsCache.get(modFile.toString());
+            updateSelectedModFileStatus(modFile);
+            return result[list];
+        }
+    } catch (e) {
+        error(e);
+    }
+
+    updateSelectedModFileStatus(modFile, true);
+    return undefined;
+}
+
+// The same mod-file selection getReplacePaths does; kept in step with it deliberately rather than
+// sharing one helper, so the replace_path path stays untouched.
+async function getSelectedDescriptorModFile(): Promise<vscode.Uri | undefined> {
+    const conf = getConfiguration();
+    let modFile = fileOrUriStringToUri(conf.modFile);
+    if (conf.modFile === "") {
+        if (vscode.workspace.workspaceFolders) {
+            for (const workspaceFolder of vscode.workspace.workspaceFolders) {
+                const mods = await workspaceModFilesCache.get(workspaceFolder.uri.toString());
+                if (mods.length > 0) {
+                    modFile = mods[0];
+                    break;
+                }
+            }
+        }
+    }
+    return modFile;
+}
+
+async function getListsFromModFile(absolutePath: string): Promise<DescriptorLists> {
+    const content = (await readFile(vscode.Uri.parse(absolutePath))).toString();
+    const node = parseHoi4File(content, localize('infile', 'In file {0}:\n', absolutePath));
+    const modFile = convertNodeToJson<DescriptorModFile>(node, descriptorModFileSchema);
+    return {
+        modifierFormatFiles: modFile.modifier_format_files._values,
+        ideaPlaceholderIcon: typeof modFile.idea_placeholder_icon === 'string' ? [modFile.idea_placeholder_icon] : [],
+        characterTraitStructuralKeys: modFile.character_trait_structural_keys?._values ?? [],
+        decisionGfx: modFile.decision_gfx?._values ?? [],
+    };
 }

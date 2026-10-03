@@ -96,12 +96,24 @@ class Dropdown extends Subscriber {
     }
 }
 
+// What the closed combobox reads when nothing is selected. The default announces an empty set,
+// which is right for a dropdown that picks things out of a list. A dropdown whose entries are
+// *filters* means the opposite -- selecting none of them leaves every item on screen -- so it
+// passes its own wording instead.
+export interface DivDropdownLabels {
+    empty?: string;
+}
+
 export class DivDropdown extends Subscriber {
     private closeDropdown: (() => void) | undefined = undefined;
 
     public selectedValues$ = new BehaviorSubject<readonly string[]>([]);
 
-    constructor(readonly select: HTMLDivElement, private multiSelection: boolean = false) {
+    constructor(
+        readonly select: HTMLDivElement,
+        private multiSelection: boolean = false,
+        private labels: DivDropdownLabels = {},
+    ) {
         super();
         this.init();
         this.addSubscription(this.selectedValues$.subscribe((value) => {
@@ -215,7 +227,7 @@ export class DivDropdown extends Subscriber {
     private updateSelectedValue(options: Option[]) {
         const selectedOptions = options.filter(o => o.selected);
         const valueSpan = this.select.querySelector('span.value') as HTMLSpanElement;
-        valueSpan.textContent = selectedOptions.length === 0 ? feLocalize('combobox.noselection', '(No selection)') :
+        valueSpan.textContent = selectedOptions.length === 0 ? (this.labels.empty ?? feLocalize('combobox.noselection', '(No selection)')) :
             selectedOptions.length === options.length ? feLocalize('combobox.all', '(All)') :
             selectedOptions.length > 1 ? feLocalize('combobox.multiple', '{0} (+{1})', selectedOptions[0].text, selectedOptions.length - 1) :
             selectedOptions[0].text;

@@ -1,9 +1,15 @@
+import { BehaviorSubject } from 'rxjs';
 import { enableDropdowns, numDropDownOpened$ } from './dropdown';
 import { enableCheckboxes } from './checkbox';
 import { vscode } from './vscode';
 import { sendException } from './telemetry';
 import { forceError } from '../../src/util/common';
 export { arrayToMap } from '../../src/util/common';
+
+// True while the mouse is held down on the drag layer, i.e. while the view is being panned. A
+// preview subscribes to it to keep hover popups out of the way of a drag; the `panning` class on
+// <body> is the same signal for stylesheets.
+export const panning$ = new BehaviorSubject<boolean>(false);
 
 export function setState(obj: Record<string, any>): void {
     const state = getState();
@@ -44,6 +50,14 @@ export function subscribeNavigators() {
     }
 }
 
+// An async function comes back as a void-returning wrapper: its rejection is caught and reported
+// here, so the promise can never reject and a listener API expecting `() => void` may take it.
+export function tryRun<A extends any[]>(
+    func: (...args: A) => Promise<unknown>,
+): (...args: A) => void;
+export function tryRun<T extends (...args: any[]) => any>(
+    func: T,
+): (...args: Parameters<T>) => ReturnType<T> | undefined;
 export function tryRun<T extends (...args: any[]) => any>(func: T): (...args: Parameters<T>) => ReturnType<T> | undefined {
     return function(this: any, ...args) {
         try {
@@ -64,6 +78,13 @@ export function tryRun<T extends (...args: any[]) => any>(func: T): (...args: Pa
 
         return undefined;
     };
+}
+
+// The zoom the reader has the canvas at. Written by enableZoom below, and read by anything drawn
+// outside the canvas -- a hover popup appended to <body> -- which has to scale itself by hand to
+// stay the size of the card it belongs to.
+export function currentScale(): number {
+    return getState().scale || 1;
 }
 
 let shouldDisableZoom = false;

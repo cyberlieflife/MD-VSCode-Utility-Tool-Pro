@@ -4,6 +4,7 @@ import { matchPathEnd } from '../../util/nodecommon';
 import { PreviewProviderDef } from '../previewmanager';
 import { LoaderPreview } from '../loaderpreview';
 import { TechnologyTreeLoader } from './loader';
+import { localize } from '../../util/i18n';
 
 function canPreviewTechnology(document: vscode.TextDocument) {
     const uri = document.uri;
@@ -23,6 +24,7 @@ class TechnologyTreePreview extends LoaderPreview<TechnologyTreeLoader> {
 
 export const technologyPreviewDef: PreviewProviderDef = {
     type: 'technology',
+    displayName: () => localize('preview.type.technology', 'Technology tree (common/technologies/*.txt)'),
     canPreview: canPreviewTechnology,
     previewConstructor: TechnologyTreePreview,
 };

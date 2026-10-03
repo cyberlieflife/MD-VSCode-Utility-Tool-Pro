@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { renderGfxFile } from "./contentbuilder";
 import { PreviewProviderDef } from "../previewmanager";
 import { UpdateablePreviewBase, LoaderRender } from "../updateablepreview";
+import { localize } from "../../util/i18n";
 
 function canPreviewGfx(document: vscode.TextDocument) {
 	const uri = document.uri;
@@ -24,6 +25,7 @@ export class GfxPreview extends UpdateablePreviewBase {
 
 export const gfxPreviewDef: PreviewProviderDef = {
 	type: "gfx",
+	displayName: () => localize("preview.type.gfx", "Sprites (*.gfx)"),
 	canPreview: canPreviewGfx,
 	previewConstructor: GfxPreview,
 };

@@ -2,6 +2,7 @@ import { Background } from '../../hoiformat/gui';
 import { HOIPartial, parseNumberLike } from '../../hoiformat/schema';
 import { NumberPosition, NumberSize } from '../common';
 import { CorneredTileSprite, Sprite } from '../image/sprite';
+import { normalizeForStyle } from '../styletable';
 import { calculateBBox, ParentInfo, RenderCommonOptions } from './common';
 
 export interface RenderNodeCommonOptions extends RenderCommonOptions {
@@ -29,7 +30,7 @@ export function renderSprite(position: NumberPosition, size: NumberSize, sprite:
             width: ${sprite.width * scale}px;
             height: ${sprite.height * scale}px;
         `)}
-        ${options.styleTable.style(`sprite-img-${sprite.id}-${frame}`, () => `
+        ${options.styleTable.style(`sprite-img-${normalizeForStyle(sprite.id)}-${frame}-${normalizeForStyle(String(scale))}`, () => `
             background-image: url(${sprite.frames[frame]?.uri});
             background-size: ${sprite.width * scale}px ${sprite.height * scale}px;
         `)}
