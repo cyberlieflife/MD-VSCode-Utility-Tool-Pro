@@ -112,28 +112,62 @@ export async function getFileMtimes(relativePaths: string[], resolveUri: (relati
     return result;
 }
 
+// 正在构建的索引计时器。构建是后台的，卡住时只有登记在这里的条目能让「显示索引状态」命令与
+// 心跳日志说明它在哪个阶段。
+const liveTimers = new Set<IndexTimer>();
+
+/**
+ * One line per index build currently in flight, e.g.
+ * `gfxIndex.workspace phase=parse 1240/3850 for 12s`. A build that finishes normally logs its
+ * own breakdown; this is what makes a build that *doesn't* finish diagnosable.
+ */
+export function describeLiveIndexBuilds(): string[] {
+    return [...liveTimers].map(t => t.describe());
+}
+
 export class IndexTimer {
     private readonly name: string;
     private readonly start: number;
     private lastMark: number;
     private readonly phases: { name: string; ms: number }[] = [];
+    private currentPhase: string | undefined;
+    private done = 0;
+    private total = 0;
 
     constructor(name: string) {
         this.name = name;
         this.start = Date.now();
         this.lastMark = this.start;
+        liveTimers.add(this);
     }
 
     mark(phaseName: string): void {
         const now = Date.now();
         this.phases.push({ name: phaseName, ms: now - this.lastMark });
         this.lastMark = now;
+        this.currentPhase = phaseName;
+        this.done = 0;
+        this.total = 0;
+    }
+
+    /** 报告当前阶段的进度，供「显示索引状态」命令描述还在跑的构建。 */
+    report(done: number, total: number): void {
+        this.done = done;
+        this.total = total;
+    }
+
+    describe(): string {
+        const elapsed = Math.round((Date.now() - this.start) / 1000);
+        const phase = this.currentPhase === undefined ? 'starting' : `phase=${this.currentPhase}`;
+        const progress = this.total > 0 ? ` ${this.done}/${this.total}` : '';
+        return `${this.name} ${phase}${progress} for ${elapsed}s`;
     }
 
     log(fileCount: number, parsedCount: number): void {
         const total = Date.now() - this.start;
         const breakdown = this.phases.map(p => `${p.name}=${p.ms}ms`).join(', ');
         Logger.info(`[Timer] ${this.name}: ${total}ms total (${breakdown}) | ${fileCount} files, ${parsedCount} parsed`);
+        liveTimers.delete(this);
     }
 }
 

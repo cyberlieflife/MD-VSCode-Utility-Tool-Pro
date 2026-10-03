@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { contextContainer } from '../context';
 import { StyleTable } from './styletable';
-import { forceError, randomString } from './common';
+import { forceError, randomString, jsonForScript } from './common';
 import { localize } from './i18n';
 import { iconClassOf } from '../previewdef/toolbaricons';
+import { previewWheel } from './featureflags';
 
 export interface DynamicScript {
     content: string;
@@ -30,8 +31,19 @@ export function previewedFileUriScript(uri: vscode.Uri): DynamicScript {
     return { content: `window.previewedFileUri = "${uri.toString()}";` };
 }
 
+// What a bare mouse wheel does in a preview, as window.previewWheel. It goes in here rather than in
+// each contentbuilder because the zoom it steers lives in the webview code every preview shares, so
+// one copy in the one function they all build their HTML through is the whole of it. Stringified so
+// a value that is not one of the three (a test stub's bare configuration object has none) cannot
+// reach the page as anything but a string, and read back as "scroll" there. jsonForScript, not
+// JSON.stringify: the value is whatever the workspace settings say it is, and a string holding
+// `</script` would otherwise end the inline script.
+function previewWheelScript(): DynamicScript {
+    return { content: `window.previewWheel = ${jsonForScript(previewWheel ?? 'scroll')};` };
+}
+
 export function html(webview: vscode.Webview, body: string, scripts: (string | DynamicScript)[], styles?: (string | StyleTable | DynamicScript | NonceOnly)[], options?: HtmlOptions): string {
-    const preparedScripts = scripts.map<[string, string]>(script => {
+    const preparedScripts = [previewWheelScript(), ...scripts].map<[string, string]>(script => {
         if (typeof script === 'string') {
             const uri = contextContainer.current ?
                 webview.asWebviewUri(vscode.Uri.joinPath(contextContainer.current.extensionUri, 'static/' + script)) :

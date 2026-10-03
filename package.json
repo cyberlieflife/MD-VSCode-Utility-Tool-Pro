@@ -118,6 +118,22 @@
 						"default": true,
 						"description": "Offer a country dropdown in the technology tree preview and draw each technology with the selected country's own icon when it has one, falling back to the generic icon. The list of countries is read from the GFX index, so it is empty while that index is off."
 					},
+					"mdHoi4Utilities.previewWheel": {
+						"title": "%hoi4modutilities.previewWheel.title%",
+						"type": "string",
+						"default": "scroll",
+						"enum": [
+							"auto",
+							"zoom",
+							"scroll"
+						],
+						"enumDescriptions": [
+							"%hoi4modutilities.previewWheel.enum.auto%",
+							"%hoi4modutilities.previewWheel.enum.zoom%",
+							"%hoi4modutilities.previewWheel.enum.scroll%"
+						],
+						"description": "%hoi4modutilities.previewWheel.desc%"
+					},
 					"mdHoi4Utilities.worldMapRetainContextWhenHidden": {
 						"title": "World map: keep webview in memory when hidden",
 						"type": "boolean",
@@ -307,6 +323,11 @@
 				"category": "%hoi4modutilities.category%"
 			},
 			{
+				"command": "mdhoi4utilities.showindexstatus",
+				"title": "%hoi4modutilities.showindexstatus.title%",
+				"category": "%hoi4modutilities.category%"
+			},
+			{
 				"command": "mdhoi4utilities.auditfocustrees",
 				"title": "%hoi4modutilities.auditfocustrees.title%",
 				"category": "%hoi4modutilities.category%"
@@ -362,6 +383,9 @@
 				},
 				{
 					"command": "mdhoi4utilities.selecthoifolder"
+				},
+				{
+					"command": "mdhoi4utilities.showindexstatus"
 				},
 				{
 					"command": "mdhoi4utilities.auditfocustrees"

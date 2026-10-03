@@ -290,6 +290,8 @@ const table: Partial<typeof __table> = {
     "index.parent": "[Родительский мод]",
     "index.parseFailure": "Ошибка разбора! Проверьте, нет ли проблем в файле!",
     "index.vanilla": "[Оригинал]",
+    "indexStatus.idle": "Построение индексов не выполняется.",
+    "indexStatus.running": "Выполняется построение индексов: {0}",
     "infile": "В файле {0}:\n",
     "loading": "Загрузка...",
     "localisationIndex.builddone": "Localisation index building done.",

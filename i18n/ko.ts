@@ -290,6 +290,8 @@ const table: Partial<typeof __table> = {
     "index.parent": "[상위 모드]",
     "index.parseFailure": "분석 실패! 파일에 문제가 없는지 확인하세요!",
     "index.vanilla": "[원본]",
+    "indexStatus.idle": "실행 중인 인덱스 빌드가 없습니다.",
+    "indexStatus.running": "실행 중인 인덱스 빌드: {0}",
     "infile": "{0} 파일 내:\n",
     "loading": "로딩중...",
     "localisationIndex.builddone": "Localisation index building done.",

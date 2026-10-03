@@ -50,6 +50,12 @@ function buildStub() {
         onDidCreateFiles: disposable,
         onDidDeleteFiles: disposable,
         onDidRenameFiles: disposable,
+        createFileSystemWatcher: () => ({
+            onDidCreate: disposable,
+            onDidDelete: disposable,
+            onDidChange: disposable,
+            dispose: () => undefined,
+        }),
         textDocuments: [],
         fs: {
             stat: async () => ({ type: FileType.File, mtime: 0, ctime: 0, size: 0 }),
@@ -84,10 +90,14 @@ function buildStub() {
             show: noop, hide: noop, dispose: noop,
         }),
         activeTextEditor: undefined,
+        onDidChangeActiveTextEditor: disposable,
+        registerWebviewPanelSerializer: () => disposable(),
     };
 
     const commands = {
         registerCommand: () => disposable(),
+        executeCommand: async () => undefined,
+        getCommands: async () => [],
     };
 
     // Provider-layer tests replace this handler on the shared object to capture the provider

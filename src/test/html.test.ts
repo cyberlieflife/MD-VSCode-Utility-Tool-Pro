@@ -1,5 +1,7 @@
 import * as assert from 'assert';
-import { htmlEscape } from '../util/html';
+import * as vscode from 'vscode';
+import { htmlEscape, html } from '../util/html';
+import * as featureflags from '../util/featureflags';
 
 describe('util/html', () => {
     describe('htmlEscape', () => {
@@ -32,6 +34,24 @@ describe('util/html', () => {
 
         it('returns an empty string unchanged', () => {
             assert.strictEqual(htmlEscape(''), '');
+        });
+    });
+
+    // 每个预览的页面都从 html() 出去，所以滚轮设置在这里注入一次，网页端的缩放就能读到它。
+    describe('previewWheel injection', () => {
+        const webview = { asWebviewUri: (u: unknown) => u, cspSource: '' } as unknown as vscode.Webview;
+
+        it('renders the configured wheel mode into the page as window.previewWheel', () => {
+            const before = featureflags.previewWheel;
+            try {
+                (featureflags as any).previewWheel = 'zoom';
+                assert.ok(html(webview, '<div></div>', []).includes('window.previewWheel = "zoom"'));
+
+                (featureflags as any).previewWheel = 'scroll';
+                assert.ok(html(webview, '<div></div>', []).includes('window.previewWheel = "scroll"'));
+            } finally {
+                (featureflags as any).previewWheel = before;
+            }
         });
     });
 });

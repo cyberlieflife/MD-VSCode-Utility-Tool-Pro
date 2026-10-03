@@ -290,6 +290,8 @@ const table: Partial<typeof __table> = {
     "index.parent": "[父模组]",
     "index.parseFailure": "解析失败！请检查文件是否存在问题！",
     "index.vanilla": "[原版]",
+    "indexStatus.idle": "当前没有正在构建的索引。",
+    "indexStatus.running": "正在构建的索引：{0}",
     "infile": "在文件 {0} 中：\n",
     "loading": "加载中……",
     "localisationIndex.builddone": "本地化索引构建完成。",

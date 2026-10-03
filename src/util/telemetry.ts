@@ -25,6 +25,16 @@ export interface TelemetryMessage {
     args: any[];
 }
 
+const telemetryTypes: ReadonlySet<string> = new Set<TelemetryMessage['telemetryType']>(['event', 'error', 'exception']);
+
+// 校验网页端回发的遥测消息：字段只有过了这道守卫才算数，处理器不读没检查过的东西。
+export function isTelemetryMessage(msg: unknown): msg is TelemetryMessage {
+    return typeof msg === 'object' && msg !== null
+        && (msg as Record<string, unknown>).command === 'telemetry'
+        && telemetryTypes.has((msg as Record<string, unknown>).telemetryType as string)
+        && Array.isArray((msg as Record<string, unknown>).args);
+}
+
 export function registerTelemetryReporter() {
     // Telemetry is disabled: no reporter is constructed, so every send* call is a no-op.
     return {

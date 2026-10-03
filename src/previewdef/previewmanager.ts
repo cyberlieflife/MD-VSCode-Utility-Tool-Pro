@@ -11,6 +11,7 @@ import { PreviewBase } from './previewbase';
 import { contextContainer, setVscodeContext } from '../context';
 import { basename, getDocumentByUri } from '../util/vsccommon';
 import { onGfxIndexBuilt } from '../util/gfxindex';
+import { invalidateFileDiscoveryCache } from '../util/fileloader';
 import { worldMapPreviewDef } from './worldmap';
 import { eventPreviewDef } from './event';
 import { chain } from 'lodash';
@@ -73,6 +74,17 @@ export class PreviewManager implements vscode.WebviewPanelSerializer {
         disposables.push(vscode.commands.registerCommand(Commands.Preview, this.showPreview, this));
         disposables.push(vscode.workspace.onDidCloseTextDocument(this.onCloseTextDocument, this));
         disposables.push(vscode.workspace.onDidChangeTextDocument(this.onChangeTextDocument, this));
+        // A file appearing or disappearing moves the dependency lists of every open preview that
+        // scans a folder (a new national_focus file is a new dependency of the focus tree preview),
+        // so the discovery caches are dropped and the folder subscribers are re-checked.
+        disposables.push(vscode.workspace.onDidCreateFiles(this.onFilesChanged, this));
+        disposables.push(vscode.workspace.onDidDeleteFiles(this.onFilesChanged, this));
+        // The create/delete events only fire for files the extension host already knows; a file the
+        // editor has never opened is announced by the watcher instead, which is what catches a file
+        // added by an external tool while a preview is open.
+        const files = vscode.workspace.createFileSystemWatcher('**/*.txt', false, true, false);
+        disposables.push(files, files.onDidCreate(uri => this.onFileAddedOrRemoved(uri)),
+            files.onDidDelete(uri => this.onFileAddedOrRemoved(uri)));
         disposables.push(vscode.window.onDidChangeActiveTextEditor(this.updateHoi4PreviewContextValue, this));
         disposables.push(vscode.window.registerWebviewPanelSerializer(WebviewType.Preview, this));
         // A preview restored right after VS Code startup races the background GFX index build and
@@ -132,6 +144,17 @@ export class PreviewManager implements vscode.WebviewPanelSerializer {
         }
 
         this.updatePreviewItemsInSubscription(document.uri);
+    }
+
+    private onFilesChanged(e: vscode.FileCreateEvent | vscode.FileDeleteEvent): void {
+        for (const uri of e.files) {
+            this.onFileAddedOrRemoved(uri);
+        }
+    }
+
+    private onFileAddedOrRemoved(uri: vscode.Uri): void {
+        invalidateFileDiscoveryCache();
+        this.updatePreviewItemsInSubscription(uri);
     }
 
     private updateHoi4PreviewContextValue(textEditor: vscode.TextEditor | undefined): void {

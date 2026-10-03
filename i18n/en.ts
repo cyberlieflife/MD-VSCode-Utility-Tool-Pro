@@ -290,6 +290,8 @@ const internalTable = /* SOT Do not remove this comment */{
     "index.parent": "[Parent mod]",
     "index.parseFailure": "Parsing failed! Please check if the file has issues!",
     "index.vanilla": "[Vanilla]",
+    "indexStatus.idle": "No index build is running.",
+    "indexStatus.running": "Index builds running: {0}",
     "infile": "In file {0}:\n",
     "loading": "Loading...",
     "localisationIndex.builddone": "Localisation index building done.",

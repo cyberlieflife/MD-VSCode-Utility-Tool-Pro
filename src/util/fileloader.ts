@@ -125,6 +125,15 @@ export async function clearDlcZipCache() {
 }
 
 /**
+ * 目录与文件发现缓存（列表 + 路径解析）作废。新建/删除文件后由预览管理器调用：这些缓存的 TTL
+ * 是给同一批渲染里的重复查询用的，跨事件必须失效，否则刚创建的文件在几秒内仍查不到。
+ */
+export function invalidateFileDiscoveryCache(): void {
+    fileListCache.clear();
+    getFilePathMemo.clear();
+}
+
+/**
  * Which of the mod / parent mod / HOI4 / DLC sources a lookup looks in.
  *
  * `mod` and `hoi4` select which roots a relative path is resolved against; the opened workspace
