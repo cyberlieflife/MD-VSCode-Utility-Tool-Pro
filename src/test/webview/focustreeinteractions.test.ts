@@ -516,4 +516,107 @@ describe('webview/focustree interactions', function () {
             undefined,
         );
     });
+
+    // 警告标记：涉及焦点的收集、同格计数与红框/角标落到渲染出的节点上。
+    describe('warning markers', () => {
+        const treeWithWarnings = (warnings: any[]) => ({
+            id: 'test', focuses: {}, inlayWindowRefs: [], inlayWindows: [], inlayConditionExprs: [],
+            allowBranchOptions: [], conditionExprs: [], isSharedFocues: false, searchFilters: [], warnings,
+        });
+        const safeItem = (id: string, gridX: number, gridY: number) => ({ id, gridX, gridY, connections: [] });
+
+        it('collects the source and every related focus of a warning', async () => {
+            const mod: any = await import('../../../webviewsrc/focustree');
+            const ids = mod.warningFocusIdsFor(treeWithWarnings([
+                { source: 'a', text: 'w1', relatedSources: ['b', 'c'] },
+                { source: 'd', text: 'w2' },
+            ]));
+            assert.deepStrictEqual([...ids].sort(), ['a', 'b', 'c', 'd']);
+        });
+
+        it('counts warned focuses that share one cell, and nothing else', async () => {
+            const mod: any = await import('../../../webviewsrc/focustree');
+            const counts = mod.warningCellCountsFor(
+                [safeItem('a', 0, 0), safeItem('b', 0, 0), safeItem('c', 1, 0), safeItem('plain', 0, 0)],
+                new Set(['a', 'b', 'c']),
+            );
+            assert.strictEqual(counts['a'], 2);
+            assert.strictEqual(counts['b'], 2);
+            assert.strictEqual(counts['c'], 1);
+            assert.strictEqual(counts['plain'], undefined);
+        });
+
+        it('puts a box and a badge on every focus the warning involves', async () => {
+            const mod: any = await import('../../../webviewsrc/focustree');
+            const { warningBoxClass, warningBadgeClass } = await import('../../../src/previewdef/focustree/warningstyles');
+
+            // 与 before 里已渲染的真实焦点（id a/b）区分开，getElementById 才命中本测试的元素。
+            const host = document.createElement('div');
+            host.innerHTML = [
+                '<div id="focus_warn_a"><div class="navigator" title="warn_a"></div></div>',
+                '<div id="focus_warn_b"><div class="navigator" title="warn_b"></div></div>',
+            ].join('');
+            document.body.appendChild(host);
+
+            mod.applyWarningMarkers(
+                treeWithWarnings([{ source: 'warn_a', text: 'Focuses warn_a and warn_b overlap.', relatedSources: ['warn_b'] }]),
+                [safeItem('warn_a', 0, 0), safeItem('warn_b', 0, 0)],
+            );
+
+            for (const id of ['warn_a', 'warn_b']) {
+                const marker = host.querySelector(`#focus_${id} .${warningBoxClass}`);
+                assert.ok(marker, `focus_${id} must carry a warning box; html=${host.innerHTML}`);
+                const badge = marker!.querySelector(`.${warningBadgeClass}`);
+                assert.strictEqual(badge!.textContent, '⚠×2', 'the badge counts the stack');
+            }
+            const navigator = host.querySelector('#focus_warn_a .navigator') as HTMLElement;
+            assert.ok(navigator.title.includes('overlap'), navigator.title);
+
+            host.remove();
+        });
+
+        it('leaves a focus without a warning alone', async () => {
+            const mod: any = await import('../../../webviewsrc/focustree');
+            const { warningBoxClass } = await import('../../../src/previewdef/focustree/warningstyles');
+
+            const host = document.createElement('div');
+            host.innerHTML = '<div id="focus_warn_clean"><div class="navigator"></div></div>';
+            document.body.appendChild(host);
+
+            mod.applyWarningMarkers(
+                treeWithWarnings([{ source: 'warn_a', text: 'w' }]),
+                [safeItem('warn_a', 0, 0), safeItem('warn_clean', 1, 0)],
+            );
+            assert.strictEqual(host.querySelector(`#focus_warn_clean .${warningBoxClass}`), null);
+            host.remove();
+        });
+
+        // 增量 patch 按 innerHTML 比较格子：标记与 title 上的警告行都必须能在 patch 前撤干净，
+        // 否则被标记过的格子每次都判为变化、整格重建。
+        it('clears the markers and restores the navigator title', async () => {
+            const mod: any = await import('../../../webviewsrc/focustree');
+            const { warningBoxClass } = await import('../../../src/previewdef/focustree/warningstyles');
+
+            const host = document.createElement('div');
+            host.innerHTML = '<div id="focus_warn_a"><div class="navigator" title="warn_a (1, 1)"></div></div>';
+            document.body.appendChild(host);
+
+            mod.applyWarningMarkers(
+                treeWithWarnings([{ source: 'warn_a', text: 'Focuses warn_a and warn_b overlap.' }]),
+                [safeItem('warn_a', 0, 0)],
+            );
+            const navigator = host.querySelector('#focus_warn_a .navigator') as HTMLElement;
+            assert.ok(navigator.title.includes('⚠'), navigator.title);
+
+            mod.clearWarningMarkers();
+
+            assert.strictEqual(host.querySelector(`#focus_${'warn_a'} .${warningBoxClass}`), null);
+            assert.strictEqual(navigator.title, 'warn_a (1, 1)', 'the original title comes back');
+            assert.ok(!navigator.hasAttribute('data-warning-base-title'), 'the bookkeeping attribute is gone');
+            // 幂等：再清一次不应报错，也不改动任何东西。
+            mod.clearWarningMarkers();
+            assert.strictEqual(navigator.title, 'warn_a (1, 1)');
+            host.remove();
+        });
+    });
 });

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import { buildFocusTreeHtml, buildNoFocusTreeHtml, buildFocusTreeErrorHtml, buildFocusTreePayload, loadFocusTreesOnly, FocusTreePayload, FocusTreeUpdatePayload, ToolbarFlags } from './contentbuilder';
+import { buildFocusTreeHtml, buildNoFocusTreeHtml, buildFocusTreeErrorHtml, buildFocusTreePayload, loadFocusTreesOnly, FocusTreePayload, FocusTreeUpdatePayload, ToolbarFlags, toolbarFlagsEqual } from './contentbuilder';
 import { FocusTreeLayout, focusTreeGridBoxFor } from './layout';
+import { copyTreeWarnings } from './warningreport';
 import { matchPathEnd } from '../../util/nodecommon';
 import { PreviewBase } from '../previewbase';
 import { PreviewProviderDef } from '../previewmanager';
@@ -35,13 +36,6 @@ function canPreviewFocusTree(document: vscode.TextDocument) {
     }
 
     return undefined;
-}
-
-function toolbarFlagsEqual(a: ToolbarFlags | undefined, b: ToolbarFlags | undefined): boolean {
-    if (a === undefined || b === undefined) {return a === b;}
-    return a.hasCustomTitlebar === b.hasCustomTitlebar &&
-        a.hasFocusOverlay === b.hasFocusOverlay &&
-        a.hasInlayWindows === b.hasInlayWindows;
 }
 
 class FocusTreePreview extends PreviewBase {
@@ -119,6 +113,10 @@ class FocusTreePreview extends PreviewBase {
             }
             if (msg?.command === 'requestUiState') {
                 void sendPreviewUiState(this);
+                return;
+            }
+            if (msg?.command === 'copyWarnings') {
+                void copyTreeWarnings(msg, getRelativePathInWorkspace(this.uri));
                 return;
             }
             if (msg?.command === 'requestFocusIcons') {
@@ -610,8 +608,10 @@ class FocusTreePreview extends PreviewBase {
             // the full-reload path: getContent writes webview.html directly (works while hidden) and
             // re-derives the fingerprints; its phase-2 icon push waits on webviewReady, which fires
             // from the `ready` handler when the panel is shown and the reloaded webview loads.
+            // renderFullContent runs in place -- we are already inside the render queue, so
+            // enqueueing another render here would deadlock on this very task.
             this.panelInitialized = false;
-            await super.onDocumentChange(document);
+            await super.renderFullContent(document, dependencyChanged);
             return;
         }
         this.content = document.getText();
@@ -694,18 +694,19 @@ class FocusTreePreview extends PreviewBase {
                     return;
                 }
                 // No good render yet and the file is genuinely empty: do a full reload so the
-                // "No focus tree" panel is shown. Use the base (non-queued) method to avoid
-                // deadlocking on the update queue we are already running inside.
+                // "No focus tree" panel is shown. renderFullContent runs in place -- we are inside
+                // the render queue already, so enqueueing another render here would deadlock it.
                 this.panelInitialized = false;
-                await super.onDocumentChange(document);
+                await super.renderFullContent(document, dependencyChanged);
                 return;
             }
 
             if (!toolbarFlagsEqual(structure.toolbarFlags, this.lastToolbarFlags)) {
                 // The toolbar lives in the baked-in shell, not in the updatable content, so a
-                // change to which toggles it shows needs a full HTML reload.
+                // change to which toggles it shows needs a full HTML reload. renderFullContent
+                // runs in place -- we are inside the render queue already.
                 this.panelInitialized = false;
-                await super.onDocumentChange(document);
+                await super.renderFullContent(document, dependencyChanged);
                 return;
             }
 

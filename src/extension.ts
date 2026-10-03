@@ -17,6 +17,7 @@ import { registerFeatureFlags } from "./util/featureflags";
 import { registerIdeaPictureHover } from "./hover/ideaPictureHover";
 import { registerIdeaSwapIndex } from "./util/ideaSwapIndex";
 import { registerModifierInlayHint } from "./inlayhint/modifierInlayHint";
+import { registerAuditFocusTreesCommand } from "./previewdef/focustree/warningreport";
 
 export function activate(context: vscode.ExtensionContext) {
     let locale = (context as any).extension?.packageJSON.locale;
@@ -43,6 +44,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(registerModFile());
     context.subscriptions.push(worldMap.register());
     context.subscriptions.push(registerScanReferencesCommand());
+    context.subscriptions.push(registerAuditFocusTreesCommand());
     context.subscriptions.push(registerHoiFs());
     context.subscriptions.push(vscode.window.registerCustomEditorProvider(ViewType.DDS, new DDSViewProvider()));
     context.subscriptions.push(vscode.window.registerCustomEditorProvider(ViewType.TGA, new TGAViewProvider()));

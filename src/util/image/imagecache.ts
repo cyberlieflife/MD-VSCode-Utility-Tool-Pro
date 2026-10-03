@@ -68,6 +68,15 @@ export function resetIconResolveStats(): void {
     negativeScanMemo.clear();
 }
 
+// 清空 gfx/sprite/图片解析缓存。挂桩的测试在收尾调用它：这些缓存在 200ms 内无条件命中（不看过期
+// token），一套桩解析出的结果会被另一套桩的测试直接复用。
+export function clearGfxCaches(): void {
+    gfxMapCache.clear();
+    spriteCache.clear();
+    imageCache.clear();
+    negativeScanMemo.clear();
+}
+
 export function getImageByPath(relativePath: string): Promise<Image | undefined> {
     return imageCache.get(relativePath);
 }

@@ -203,6 +203,18 @@
 						},
 						"description": "%hoi4modutilities.focusOverlayGfxFiles.desc%"
 					},
+					"mdHoi4Utilities.auditor.reportFolder": {
+						"title": "%hoi4modutilities.auditor.reportFolder.title%",
+						"type": "string",
+						"default": "",
+						"description": "%hoi4modutilities.auditor.reportFolder.desc%"
+					},
+					"mdHoi4Utilities.auditor.includeVanilla": {
+						"title": "%hoi4modutilities.auditor.includeVanilla.title%",
+						"type": "boolean",
+						"default": false,
+						"description": "%hoi4modutilities.auditor.includeVanilla.desc%"
+					},
 					"mdHoi4Utilities.ideaPlaceholderIcon": {
 						"title": "%hoi4modutilities.ideaPlaceholderIcon.title%",
 						"type": "string",
@@ -287,6 +299,11 @@
 				"command": "mdhoi4utilities.selecthoifolder",
 				"title": "%hoi4modutilities.selecthoifolder.title%",
 				"category": "%hoi4modutilities.category%"
+			},
+			{
+				"command": "mdhoi4utilities.auditfocustrees",
+				"title": "%hoi4modutilities.auditfocustrees.title%",
+				"category": "%hoi4modutilities.category%"
 			}
 		],
 		"customEditors": [
@@ -339,6 +356,9 @@
 				},
 				{
 					"command": "mdhoi4utilities.selecthoifolder"
+				},
+				{
+					"command": "mdhoi4utilities.auditfocustrees"
 				}
 			]
 		}

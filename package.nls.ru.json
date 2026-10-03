@@ -54,6 +54,11 @@
     "hoi4modutilities.previewworld.title": "Предпросмотр карты мира",
     "hoi4modutilities.scanreferences.title": "Найти похожее",
     "hoi4modutilities.selecthoifolder.title": "Выбрать путь установки HOI4",
+    "hoi4modutilities.auditfocustrees.title": "Проверить деревья фокусов",
+    "hoi4modutilities.auditor.reportFolder.title": "Аудит: папка отчёта",
+    "hoi4modutilities.auditor.reportFolder.desc": "Папка, в которую пишется отчёт аудита деревьев фокусов (focus-tree-audit.md). Пустое значение открывает отчёт в безымянном редакторе.",
+    "hoi4modutilities.auditor.includeVanilla.title": "Аудит: включая деревья игры",
+    "hoi4modutilities.auditor.includeVanilla.desc": "Проверять также деревья фокусов из папки установки HOI4, не только рабочего мода.",
     "hoi4modutilities.selectmodfile.title": "Выбрать файл мода",
     "hoi4modutilities.enableSupplyArea.title": "Включить зону снабжения",
     "hoi4modutilities.enableSupplyArea.desc": "Если вы разрабатываете мод для HOI4(version<=1.10). Проверьте этот параметр перед включением зоны снабжения."

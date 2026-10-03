@@ -50,18 +50,31 @@ export abstract class PreviewBase {
         }
         try {
             if (!this.panelInitialized) {
-                const html = await this.getContent(document, dependencyChanged);
-                if (this.disposed) {
-                    return;
-                }
-                this.panel.webview.html = html;
-                this.panelInitialized = true;
+                await this.renderFullContent(document, dependencyChanged);
             } else {
                 await this.sendPartialUpdate(document, dependencyChanged);
             }
         } catch(e) {
             error(e);
         }
+    }
+
+    /**
+     * Writes the full page html and marks the panel initialized. Runs in place without enqueueing,
+     * so a partial update that discovers it needs a full reload -- the toolbar shell changed, the
+     * page was torn down while hidden, the tree became empty -- can call it from inside the render
+     * queue; enqueueing another render there would deadlock on the queue it is already running on.
+     */
+    protected async renderFullContent(document: vscode.TextDocument, dependencyChanged = false): Promise<void> {
+        if (this.disposed) {
+            return;
+        }
+        const html = await this.getContent(document, dependencyChanged);
+        if (this.disposed) {
+            return;
+        }
+        this.panel.webview.html = html;
+        this.panelInitialized = true;
     }
 
     protected async sendPartialUpdate(document: vscode.TextDocument, dependencyChanged = false): Promise<void> {

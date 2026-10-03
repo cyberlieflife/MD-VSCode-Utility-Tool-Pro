@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { assembleFocusHtml, FocusHtmlClasses } from '../previewdef/focustree/contentbuilder';
+import { assembleFocusHtml, FocusHtmlClasses, toolbarFlagsEqual } from '../previewdef/focustree/contentbuilder';
 import { Focus } from '../previewdef/focustree/schema';
 
 function makeFocus(overrides: Partial<Focus> = {}): Focus {
@@ -88,5 +88,27 @@ describe('previewdef/focustree/assembleFocusHtml', function () {
         const a = assembleFocusHtml(makeFocus(), 'f.txt', makeClasses());
         const b = assembleFocusHtml(makeFocus({ id: 'focus_b' }), 'f.txt', makeClasses());
         assert.notStrictEqual(a, b);
+    });
+});
+
+describe('previewdef/focustree/toolbarFlagsEqual', function () {
+    const flags = { hasCustomTitlebar: false, hasFocusOverlay: false, hasInlayWindows: false, hasWarnings: false };
+
+    it('treats identical flags and a missing pair as equal', function () {
+        assert.ok(toolbarFlagsEqual({ ...flags }, { ...flags }));
+        assert.ok(toolbarFlagsEqual(undefined, undefined));
+        assert.ok(!toolbarFlagsEqual(flags, undefined));
+    });
+
+    // 工具栏是烘焙进外壳的：警告按钮的出现或消失必须走全量重载，不能就地更新。
+    it('flags a warnings change so the warning buttons appear or disappear via a full reload', function () {
+        assert.ok(!toolbarFlagsEqual({ ...flags, hasWarnings: true }, flags));
+        assert.ok(!toolbarFlagsEqual(flags, { ...flags, hasWarnings: true }));
+    });
+
+    it('flags every other toolbar-affecting field too', function () {
+        assert.ok(!toolbarFlagsEqual({ ...flags, hasCustomTitlebar: true }, flags));
+        assert.ok(!toolbarFlagsEqual({ ...flags, hasFocusOverlay: true }, flags));
+        assert.ok(!toolbarFlagsEqual({ ...flags, hasInlayWindows: true }, flags));
     });
 });

@@ -55,6 +55,11 @@
     "hoi4modutilities.previewworld.title": "세계지도 미리보기",
     "hoi4modutilities.scanreferences.title": "레퍼런스 스캔",
     "hoi4modutilities.selecthoifolder.title": "HOI4 설치 경로 선택",
+    "hoi4modutilities.auditfocustrees.title": "포커스 트리 감사",
+    "hoi4modutilities.auditor.reportFolder.title": "감사: 보고서 폴더",
+    "hoi4modutilities.auditor.reportFolder.desc": "포커스 트리 감사 보고서(focus-tree-audit.md)를 쓸 폴더입니다. 비우면 보고서를 제목 없는 편집기에서 엽니다.",
+    "hoi4modutilities.auditor.includeVanilla.title": "감사: 게임 포커스 트리 포함",
+    "hoi4modutilities.auditor.includeVanilla.desc": "작업 중인 모드뿐 아니라 HOI4 설치 경로의 포커스 트리도 검사합니다.",
     "hoi4modutilities.selectmodfile.title": "모드파일 선택",
     "hoi4modutilities.enableSupplyArea.title": "Enable Supply Area",
     "hoi4modutilities.enableSupplyArea.desc": "If you are developing mod for HOI4(version<=1.10). Check this to enable supply area."

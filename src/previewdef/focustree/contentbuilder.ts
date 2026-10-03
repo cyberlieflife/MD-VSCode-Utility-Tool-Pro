@@ -18,6 +18,7 @@ import { registerExclusiveLinkStyles } from "../../util/hoi4gui/exclusivelink";
 import { loadExclusiveLinkImages, nationalFocusViewGfxFile } from "../../util/hoi4gui/exclusivelinkimages";
 import { registerFocusLinkStyles } from "../../util/hoi4gui/focuslink";
 import { loadFocusLinkImages } from "../../util/hoi4gui/focuslinkimages";
+import { registerWarningStyles, warningListClass } from "./warningstyles";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
 import { renderInstantTextBox } from "../../util/hoi4gui/instanttextbox";
@@ -145,6 +146,7 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             hasCustomTitlebar: focusTrees.some(ft => Object.values(ft.focuses).some(f => resolveTitlebarGfxName(f.textIcon, titlebarStyles) !== undefined)),
             hasFocusOverlay: focusTrees.some(ft => Object.values(ft.focuses).some(f => f.overlay !== undefined)),
             hasInlayWindows: focusTrees.some(ft => ft.inlayWindows.length > 0),
+            hasWarnings: focusTrees.some(ft => ft.warnings.length > 0),
         };
 
         return {
@@ -299,10 +301,26 @@ interface ToolbarFlags {
     hasCustomTitlebar: boolean;
     hasFocusOverlay: boolean;
     hasInlayWindows: boolean;
+    // Warning buttons live in the baked toolbar, so a 0 -> 1+ warning transition must take the
+    // full-reload path instead of the in-place structure update (see toolbarFlagsEqual).
+    hasWarnings: boolean;
+}
+
+// The toolbar is part of the baked-in shell, so any change to which controls it shows (including
+// the 0 -> 1+ warning transition that adds the warning buttons) has to go through a full reload.
+// Exported so the reload trigger is locked by tests.
+export function toolbarFlagsEqual(a: ToolbarFlags | undefined, b: ToolbarFlags | undefined): boolean {
+    if (a === undefined || b === undefined) { return a === b; }
+    return a.hasCustomTitlebar === b.hasCustomTitlebar &&
+        a.hasFocusOverlay === b.hasFocusOverlay &&
+        a.hasInlayWindows === b.hasInlayWindows &&
+        a.hasWarnings === b.hasWarnings;
 }
 
 function renderWarningContainer(styleTable: StyleTable) {
-    styleTable.style('warnings', () => 'outline: none;', ':focus');
+    // 警告标记与警告条目的类名必须在外壳样式表里注册，网页端才能随时把类挂到新渲染的焦点上。
+    // 见 warningstyles.ts 的时序说明。
+    registerWarningStyles(styleTable);
     return `
     <div id="warnings-container" class="${styleTable.style('warnings-container', () => `
         height: 100vh;
@@ -315,18 +333,7 @@ function renderWarningContainer(styleTable: StyleTable) {
         box-sizing: border-box;
         display: none;
     `)}">
-        <textarea id="warnings" readonly wrap="off" class="${styleTable.style('warnings', () => `
-            height: 100%;
-            width: 100%;
-            font-family: 'Consolas', monospace;
-            resize: none;
-            background: var(--vscode-editor-background);
-            padding: 10px;
-            border-top: none;
-            border-left: none;
-            border-bottom: none;
-            box-sizing: border-box;
-        `)}"></textarea>
+        <div id="warnings" class="${warningListClass}"></div>
     </div>`;
 }
 
@@ -424,9 +431,15 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
             </div>
         </div>`;
     
-    const warningsButton = focusTrees.every(ft => ft.warnings.length === 0) ? '' : `
+    const warningsButton = !flags.hasWarnings ? '' : `
         <button id="show-warnings" title="${localize('focustree.warnings', 'Toggle warnings')}">
             <i class="codicon codicon-warning"></i>
+        </button>
+        <button id="toggle-warning-markers" title="${localize('focustree.warningmarkers', 'Toggle warning markers')}">
+            <i class="codicon codicon-location"></i>
+        </button>
+        <button id="copy-warnings" title="${localize('focustree.copywarnings', 'Copy warnings')}">
+            <i class="codicon codicon-copy"></i>
         </button>`;
 
     const hasAllowBranch = focusTrees.some(ft => ft.allowBranchOptions.length > 0);

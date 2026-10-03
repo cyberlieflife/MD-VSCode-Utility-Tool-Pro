@@ -128,6 +128,7 @@ function buildStub() {
         Range,
         InlayHint,
         InlayHintKind: { Type: 1, Parameter: 2 },
+        ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
         WorkspaceEdit: class {
             public ops: { kind: string; pos?: any; range?: any; text?: string }[] = [];
             public insert(_uri: any, pos: any, text: string) { this.ops.push({ kind: 'insert', pos, text }); }
