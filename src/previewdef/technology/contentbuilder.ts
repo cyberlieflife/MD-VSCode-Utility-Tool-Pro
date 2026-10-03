@@ -2,14 +2,14 @@ import * as vscode from 'vscode';
 import { localize } from '../../util/i18n';
 import { Technology, TechnologyTree, TechnologyFolder } from './schema';
 import { getSpriteByGfxName, Sprite } from '../../util/image/imagecache';
-import { arrayToMap, forceError, UserError } from '../../util/common';
+import { arrayToMap, forceError, UserError, jsonForScript } from '../../util/common';
 import { HOIPartial } from '../../hoiformat/schema';
 import { renderContainerWindow, renderContainerWindowChildren } from '../../util/hoi4gui/containerwindow';
 import { ParentInfo, RenderCommonOptions } from '../../util/hoi4gui/common';
 import { renderGridBox, GridBoxItem, GridBoxConnection, GridBoxConnectionItem } from '../../util/hoi4gui/gridbox';
 import { renderInstantTextBox } from '../../util/hoi4gui/instanttextbox';
 import { renderIcon } from '../../util/hoi4gui/icon';
-import { html, htmlEscape, previewedFileUriScript } from '../../util/html';
+import { html, htmlEscape, escapeAttr, previewedFileUriScript } from '../../util/html';
 import { ContainerWindowType, GridBoxType, IconType, InstantTextBoxType, Format } from '../../hoiformat/gui';
 import { TechnologyTreeLoader, TechnologyTreeLoaderResult } from './loader';
 import { EquipmentArchetype } from './equipmentschema';
@@ -19,8 +19,10 @@ import { flatMap, sumBy, min, flatten, chain, uniq } from 'lodash';
 import { StyleTable } from '../../util/styletable';
 import { RenderNodeCommonOptions } from '../../util/hoi4gui/nodecommon';
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
-import { localisationIndex } from "../../util/featureflags";
+import { localisationIndex, technologyCountryIcons, gfxIndex } from "../../util/featureflags";
 import { LoaderRender } from '../loaderpreview';
+import { getPreviewOptions } from '../../util/previewoptions';
+import { technologyCountryOption } from './countryicons';
 
 const techTreeViewName = 'countrytechtreeview';
 const doctrineTreeViewName = 'countrydoctrineview';
@@ -46,13 +48,25 @@ export async function renderTechnologyFile(loader: TechnologyTreeLoader, uri: vs
         for (const mode of techNameModes) {
             styleTable.raw(`#techtreecontent.name-mode-${mode.id} .tech-name-${mode.id}`, 'display: contents;');
         }
-        const { baseContent, contentHtml, folderOptionsHtml } = await renderTechnologyFolders(technologyTrees, folders, styleTable, loadResult.result);
+        const countryTagsByFolder = loadResult.result.countryTagsByFolder ?? {};
+        const country = getSelectedCountry(countryTagsByFolder);
+        const { baseContent, contentHtml, folderOptionsHtml, countries } = await renderTechnologyFolders(technologyTrees, folders, styleTable, loadResult.result, country);
+
+        // The two inline data scripts the page reads. jsonForScript, not JSON.stringify: the tags
+        // come from the workspace, and one containing `</script` would end the inline script.
+        const countriesScript = { content: `window.techCountries = ${jsonForScript(countries)};` };
+        const countryScript = { content: `window.techCountry = ${jsonForScript(country ?? '')};` };
 
         const fullHtml = html(
             webview,
             baseContent,
             [
                 previewedFileUriScript(uri),
+                // The country dropdown is re-listed per folder on the page, so the page needs the
+                // whole map rather than one folder's options; the update carries it too, so an edit
+                // that moves a technology re-lists as well.
+                countriesScript,
+                countryScript,
                 'common.js',
                 'techtree.js',
             ],
@@ -73,7 +87,12 @@ export async function renderTechnologyFile(loader: TechnologyTreeLoader, uri: vs
         // unchanged edit hashes equal and the LoaderPreview skips.
         return {
             html: fullHtml,
-            update: { styleCss: styleTable.toRawCss(), data: { contentHtml, folderOptionsHtml, folders } },
+            // `country` is the country the tree was actually drawn for, which is not always the
+            // stored one: getSelectedCountry drops a tag no folder in this file has art for. The page
+            // cannot know that on its own, and updateCountryOptions would re-add the dropped tag and
+            // leave the selector claiming a country the tree is not drawn for. Carrying it is also
+            // what keeps a country-only change from hashing equal and being skipped.
+            update: { styleCss: styleTable.toRawCss(), data: { contentHtml, folderOptionsHtml, folders, countries, country: country ?? '' } },
         };
 
     } catch (e) {
@@ -90,9 +109,19 @@ interface TechnologyFoldersRender {
     contentHtml: string;
     // The <option> list for #folderSelector, shared between the baseline select and the update.
     folderOptionsHtml: string;
+    // Folder -> the countries that have their own icons there, as the page draws them. Empty when
+    // the country-icon setting is off.
+    countries: Record<string, CountryOption[]>;
 }
 
-async function renderTechnologyFolders(technologyTrees: TechnologyTree[], folders: string[], styleTable: StyleTable, loadResult: TechnologyTreeLoaderResult): Promise<TechnologyFoldersRender> {
+// One entry of the country dropdown. The label is resolved on this side, where the localisation
+// index lives; the page writes it as text.
+export interface CountryOption {
+    tag: string;
+    label: string;
+}
+
+async function renderTechnologyFolders(technologyTrees: TechnologyTree[], folders: string[], styleTable: StyleTable, loadResult: TechnologyTreeLoaderResult, country: string | undefined): Promise<TechnologyFoldersRender> {
     const guiFiles = loadResult.guiFiles.map(f => f.file);
     const guiTypes = flatMap(loadResult.guiFiles, f => f.data.guitypes);
 
@@ -104,11 +133,12 @@ async function renderTechnologyFolders(technologyTrees: TechnologyTree[], folder
 
     const gfxFiles = loadResult.gfxFiles;
     const equipmentArchetypes = loadResult.equipmentArchetypes;
-    const techFolders = (await Promise.all(folders.map(folder => renderTechnologyFolder(technologyTrees, folder, techTreeViews, containerWindowTypes, styleTable, guiFiles, gfxFiles, equipmentArchetypes)))).join('');
+    const techFolders = (await Promise.all(folders.map(folder => renderTechnologyFolder(technologyTrees, folder, techTreeViews, containerWindowTypes, styleTable, guiFiles, gfxFiles, equipmentArchetypes, country)))).join('');
     // Collapse whitespace exactly as html() does to the whole body, so the innerHTML the update swaps
     // in is byte-identical to what the baseline reload renders inside #techtreecontent.
     const contentHtml = techFolders.replace(/\s\s+/g, ' ');
-    const folderOptionsHtml = renderFolderOptions(folders);
+    const folderOptionsHtml = await renderFolderOptions(folders);
+    const countries = await renderCountryOptions(loadResult.countryTagsByFolder ?? {});
 
     const baseContent = `
     ${await renderFolderSelector(folderOptionsHtml, styleTable)}
@@ -135,14 +165,44 @@ async function renderTechnologyFolders(technologyTrees: TechnologyTree[], folder
         ${techFolders}
     </div>`;
 
-    return { baseContent, contentHtml, folderOptionsHtml };
+    return { baseContent, contentHtml, folderOptionsHtml, countries };
 }
 
-function renderFolderOptions(folders: string[]): string {
-    return folders.map((folder) => {
-        const localizedText = localisationIndex ? `${getLocalisedTextQuick(folder)} (${folder})` : folder;
-        return `<option value="techfolder_${folder}">${localizedText}</option>`;
-    }).join('');
+async function renderFolderOptions(folders: string[]): Promise<string> {
+    return (await Promise.all(folders.map(async (folder) => {
+        const localizedText = localisationIndex ? `${await getLocalisedTextQuick(folder)} (${folder})` : folder;
+        return `<option value="techfolder_${escapeAttr(folder)}">${htmlEscape(localizedText)}</option>`;
+    }))).join('');
+}
+
+// Labels the country tags the same way the folder options are labelled: the localised name with the
+// tag beside it, or the bare tag when there is no localisation index to ask.
+async function renderCountryOptions(countryTagsByFolder: Record<string, string[]>): Promise<Record<string, CountryOption[]>> {
+    const result: Record<string, CountryOption[]> = {};
+    for (const folder of Object.keys(countryTagsByFolder)) {
+        result[folder] = await Promise.all((countryTagsByFolder[folder] ?? []).map(async tag => ({
+            tag,
+            label: localisationIndex ? `${await getLocalisedTextQuick(tag)} (${tag})` : tag,
+        })));
+    }
+
+    return result;
+}
+
+// The country the reader last picked, held in globalState so it survives the panel; ignored when it
+// is not a tag this file has art for, so a selection made in another preview cannot strand this one
+// on a country its dropdown does not offer.
+function getSelectedCountry(countryTagsByFolder: Record<string, string[]>): string | undefined {
+    if (!technologyCountryIcons) {
+        return undefined;
+    }
+
+    const stored = getPreviewOptions([technologyCountryOption])[technologyCountryOption];
+    if (typeof stored !== 'string' || stored === '') {
+        return undefined;
+    }
+
+    return Object.values(countryTagsByFolder).some(tags => tags.includes(stored)) ? stored : undefined;
 }
 
 async function renderFolderSelector(folderOptionsHtml: string, styleTable: StyleTable): Promise<string> {
@@ -188,7 +248,32 @@ async function renderFolderSelector(folderOptionsHtml: string, styleTable: Style
                 class="${styleTable.style('showLocWarning', () => `color:var(--vscode-editorWarning-foreground); margin-left:8px; display:none`)}"
             >⚠ ${localize('techtree.showlocnoindex', 'Localisation index is off — raw ids are shown. Enable the localisation index setting to see localised names.')}</span>
         </div>
+        ${renderCountrySelector(styleTable)}
     </div>`;
+}
+
+// The country dropdown holds only the "Generic" entry here: which countries are worth offering
+// depends on the technology folder the reader is looking at, and the page picks that. Deliberately
+// no selected option and no country attribute either -- keeping the selection out of the shell is
+// what lets a country change be applied by an in-place update instead of a full page reload.
+function renderCountrySelector(styleTable: StyleTable): string {
+    if (!technologyCountryIcons) {
+        return '';
+    }
+
+    return `<div class="${styleTable.style('techCountryContainer', () => `display:inline-flex; align-items:center; margin-left:15px`)}">
+            <label for="tech-country">${localize('techtree.country', 'Country')}</label>
+            <select
+                id="tech-country"
+                class="${styleTable.style('techCountry', () => `margin-left:5px; min-width:150px`)}"
+            >
+                <option value="">${localize('techtree.country.generic', 'Generic')}</option>
+            </select>
+            <span
+                id="country-index-warning"
+                class="${styleTable.style('countryIndexWarning', () => `color:var(--vscode-editorWarning-foreground); margin-left:8px; display:${gfxIndex ? 'none' : 'inline'}`)}"
+            >⚠ ${localize('techtree.countrynoindex', 'GFX index is off — country icons can\'t be listed. Enable the GFX index setting to pick a country.')}</span>
+        </div>`;
 }
 
 async function renderTechnologyFolder(
@@ -200,6 +285,7 @@ async function renderTechnologyFolder(
     guiFiles: string[],
     gfxFiles: string[],
     equipmentArchetypes: Record<string, EquipmentArchetype>,
+    country: string | undefined,
 ): Promise<string> {
     const folderTreeView = flatMap(techTreeViews, tv => tv.containerwindowtype).find(c => c.name === folder);
     let children: string;
@@ -230,7 +316,7 @@ async function renderTechnologyFolder(
                         const tree = technologyTrees.find(t => t.startTechnology + '_tree' === child.name);
                         if (tree) {
                             const gridboxType = child as HOIPartial<GridBoxType>;
-                            return await renderTechnologyTreeGridBox(tree, gridboxType, folder, folderItem, folderSmallItem, lineItem, xorItem, parentInfo, commonOptions, guiFiles, gfxFiles, equipmentArchetypes);
+                            return await renderTechnologyTreeGridBox(tree, gridboxType, folder, folderItem, folderSmallItem, lineItem, xorItem, parentInfo, commonOptions, guiFiles, gfxFiles, equipmentArchetypes, country);
                         }
                     }
 
@@ -261,6 +347,7 @@ async function renderTechnologyTreeGridBox(
     guiFiles: string[],
     gfxFiles: string[],
     equipmentArchetypes: Record<string, EquipmentArchetype>,
+    country: string | undefined,
 ): Promise<string> {
     const xorJointKey = "#xorJoint#";
     const treeMap = arrayToMap(tree.technologies, 'id');
@@ -325,7 +412,7 @@ async function renderTechnologyTreeGridBox(
             } else {
                 const technology = treeMap[item.id];
                 const technologyItem = technology.enableEquipments ? folderItem : folderSmallItem;
-                return await renderTechnology(technologyItem, technology, technology.folders[folder], parent, commonOptions, guiFiles, gfxFiles, equipmentArchetypes);
+                return await renderTechnology(technologyItem, technology, technology.folders[folder], parent, commonOptions, guiFiles, gfxFiles, equipmentArchetypes, country);
             }
         },
         onRenderLineBox: async (item, parent) => {
@@ -459,6 +546,7 @@ async function renderTechnology(
     guiFiles: string[],
     gfxFiles: string[],
     equipmentArchetypes: Record<string, EquipmentArchetype>,
+    country: string | undefined,
 ): Promise<string> {
     if (!item) {
         return `<div>${localize('techtree.cantfindtechitemin', "Can't find containerwindowtype \"{0}\" in {1}", `techtree_${folder.name}_item`, guiFiles)}</div>`;
@@ -477,7 +565,7 @@ async function renderTechnology(
         ...commonOptions,
         noSize: true,
         classNames: specialProjectClass,
-        getSprite: (sprite, callerType, callerName) => getTechnologySprite(sprite, technology, folder.name, callerType, callerName, gfxFiles),
+        getSprite: (sprite, callerType, callerName) => getTechnologySprite(sprite, technology, folder.name, callerType, callerName, gfxFiles, country),
         onRenderChild: async (type, child, parentInfo) => {
             if (type === 'icon' && child.name === 'bonus_icon') {
                 return '';
@@ -532,7 +620,7 @@ async function renderTechnology(
         </div>`;
 }
 
-async function getTechnologySprite(sprite: string, technology: Technology, folder: string, callerType: 'bg' | 'icon', _callerName: string | undefined, gfxFiles: string[]): Promise<Sprite | undefined> {
+async function getTechnologySprite(sprite: string, technology: Technology, folder: string, callerType: 'bg' | 'icon', _callerName: string | undefined, gfxFiles: string[], country: string | undefined): Promise<Sprite | undefined> {
     let imageTryList: string[] = [sprite];
     if (sprite === 'GFX_technology_unavailable_item_bg' && callerType === 'bg') {
         imageTryList = technology.enableEquipments ? [
@@ -555,11 +643,7 @@ async function getTechnologySprite(sprite: string, technology: Technology, folde
             imageTryList = [...specialProjectVariants, ...imageTryList];
         }
     } else if (sprite === 'GFX_technology_medium' && callerType === 'icon') {
-        const result = await getSpriteByGfxName(`GFX_${technology.id}_medium`, gfxFiles);
-        if (result !== undefined) { return result; }
-        const result2 = await getSpriteByGfxName(`GFX_${technology.id}`, gfxFiles);
-        if (result2 !== undefined) { return result2; }
-        return await getSpriteByGfxName(sprite, gfxFiles);
+        imageTryList = getTechnologyIconNames(technology.id, country, sprite);
     }
 
     return await getSpriteFromTryList(imageTryList, gfxFiles);
@@ -687,6 +771,21 @@ async function renderLineItem(
 
 // Subtle inner-glow marker shared by SP techs and SP sub-techs. The style key is stable so both call
 // sites resolve to the same generated class.
+/**
+ * Sprite-name try-list for a technology's icon, in the order the game resolves it: the selected
+ * country's own art first, then the generic icon, then the placeholder the .gui asked for. A
+ * technology whose only art belongs to a country draws nothing without the first two entries, and a
+ * country with no art of its own for it simply falls through to the generic one.
+ */
+export function getTechnologyIconNames(technologyId: string, country: string | undefined, placeholder: string): string[] {
+    return [
+        ...(country ? [`GFX_${country}_${technologyId}_medium`, `GFX_${country}_${technologyId}`] : []),
+        `GFX_${technologyId}_medium`,
+        `GFX_${technologyId}`,
+        placeholder,
+    ];
+}
+
 function technologySpecialProjectClass(styleTable: StyleTable): string {
     return styleTable.style('techSpecialProject', () => `box-shadow: inset 0 0 6px 1px rgba(160, 100, 230, 0.6);`);
 }

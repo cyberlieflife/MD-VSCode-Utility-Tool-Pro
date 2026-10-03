@@ -6,9 +6,7 @@ import { FolderLoader, FileLoader, Loader, LoadResult, LoadResultOD, mergeInLoad
 import { localize } from "../../../util/i18n";
 import { LoaderSession } from "../../../util/loader/loader";
 import { flatMap } from "lodash";
-
-interface CountryTagsFile extends CustomMap<string> {
-}
+import { Tag, countryTagsFolder, loadCountryTagsFile } from "../../../util/countrytags";
 
 interface CountryFile {
     color: DetailValue<Enum>;
@@ -20,11 +18,6 @@ interface ColorsFile extends CustomMap<ColorForCountry> {
 interface ColorForCountry {
     color: DetailValue<Enum>;
 }
-
-const countryTagsFileSchema: SchemaDef<CountryTagsFile> = {
-    _innerType: "string",
-    _type: "map",
-};
 
 const countryFileSchema: SchemaDef<CountryFile> = {
     color: {
@@ -42,8 +35,6 @@ const colorsFileSchema: SchemaDef<ColorsFile> = {
     },
     _type: "map",
 };
-
-type Tag = { tag: string, file: string };
 
 export class CountriesLoader extends Loader<Country[]> {
     private countryTagsLoader: CountryTagsLoader;
@@ -129,7 +120,7 @@ class CountryLoader extends FileLoader<Country | undefined> {
 
 class CountryTagsLoader extends FolderLoader<Tag[], Tag[]> {
     constructor() {
-        super('common/country_tags', CountryTagLoader);
+        super(countryTagsFolder, CountryTagLoader);
     }
 
     protected mergeFiles(fileResults: LoadResult<Tag[]>[]): Promise<LoadResult<Tag[]>> {
@@ -147,7 +138,7 @@ class CountryTagsLoader extends FolderLoader<Tag[], Tag[]> {
 
 class CountryTagLoader extends FileLoader<Tag[]> {
     protected async loadFromFile(): Promise<LoadResultOD<Tag[]>> {
-        return { result: await loadCountryTags(this.file), warnings: [] };
+        return { result: await loadCountryTagsFile(this.file), warnings: [] };
     }
 
     public toString() {
@@ -177,28 +168,6 @@ class ColorsLoader extends FileLoader<HOIPartial<ColorsFile>> {
 
     public toString() {
         return `[Colors]`;
-    }
-}
-
-async function loadCountryTags(countryTagsFile: string): Promise<Tag[]> {
-    try {
-        const data = await readFileFromModOrHOI4AsJson<CountryTagsFile>(countryTagsFile, countryTagsFileSchema);
-        const result: { tag: string, file: string }[] = [];
-
-        for (const tag of Object.values(data._map)) {
-            if (!tag._value || tag._key === 'dynamic_tags') {
-                continue;
-            }
-            result.push({
-                tag: tag._key,
-                file: tag._value,
-            });
-        }
-
-        return result;
-    } catch (e) {
-        error(e);
-        return [];
     }
 }
 

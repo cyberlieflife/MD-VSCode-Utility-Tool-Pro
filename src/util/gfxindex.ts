@@ -36,6 +36,20 @@ export const onGfxIndexBuilt = gfxIndexBuiltEmitter.event;
 // Sprite-name count of the last completed build, kept for the telemetry in ensureGfxIndex.
 let gfxIndexSize = 0;
 
+// The sprite namespace has no file of its own for a cache built from it to stat, so every mutation
+// of either half moves this instead. Bumped *after* the write everywhere: a bump before it would let
+// a reader store the new version alongside the old data and then never refetch it.
+let gfxIndexVersion = 0;
+
+function bumpGfxIndexVersion(): void {
+    gfxIndexVersion++;
+}
+
+/** Changes whenever getIndexedGfxNames or getGfxContainerFile may answer differently. */
+export function getGfxIndexVersion(): number {
+    return gfxIndexVersion;
+}
+
 // Builds the global + workspace indexes once and reuses that promise for every caller. A build
 // failure must not poison the shared promise: it resets so a later lookup retries, and resolves
 // instead of rejecting so icon resolution falls through to the scan-based fallback paths rather
@@ -96,6 +110,21 @@ export async function getGfxContainerFile(gfxName: string | undefined): Promise<
 
 export async function getGfxContainerFiles(gfxNames: (string | undefined)[]): Promise<string[]> {
     return uniq((await Promise.all(gfxNames.map(getGfxContainerFile))).filter((v): v is string => v !== undefined));
+}
+
+/**
+ * Every sprite name the index holds, from both halves. For a caller that has to look at the names
+ * themselves rather than resolve one it already knows -- listing which countries ship art for a
+ * technology means reading the whole namespace once, not probing every tag against every id.
+ * Empty when the index is off, like `getGfxContainerFile`.
+ */
+export async function getIndexedGfxNames(): Promise<string[]> {
+    if (!gfxIndex) {
+        return [];
+    }
+
+    await ensureGfxIndex();
+    return uniq([...Object.keys(globalGfxIndex), ...Object.keys(workspaceGfxIndex)]);
 }
 
 const GFX_CACHE_VERSION = 2;
@@ -166,6 +195,8 @@ async function buildGfxIndexWithCache(
     await mapLimit(filesToParse, 8, f => fillGfxItems(f, targetIndex, fileToKeysMap, options, estimatedSize));
     timer.mark('parse');
     timer.log(gfxFiles.length, filesToParse.length);
+    // Both the cache-restore writes above and the parses just finished are in targetIndex now.
+    bumpGfxIndexVersion();
 
     const serializedFileToKeys: Record<string, string[]> = {};
     if (fileToKeysMap) {
@@ -210,6 +241,8 @@ async function fillGfxItems(gfxFile: string, gfxIndex: Record<string, GfxIndexIt
 function onChangeWorkspaceFolders(_: vscode.WorkspaceFoldersChangeEvent) {
     workspaceGfxIndex = {};
     workspaceGfxFileToKeys.clear();
+    // The cleared index answers differently right now, before the rebuild finishes.
+    bumpGfxIndexVersion();
     const estimatedSize: [number] = [0];
     const task = buildWorkspaceGfxIndex(estimatedSize);
     vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('gfxindex.workspace.building', 'Building workspace GFX index...'), task);
@@ -284,6 +317,7 @@ function removeWorkspaceGfxIndex(file: vscode.Uri) {
                     delete workspaceGfxIndex[key];
                 }
                 workspaceGfxFileToKeys.delete(relative);
+                bumpGfxIndexVersion();
             }
         }
     }
@@ -294,7 +328,8 @@ function addWorkspaceGfxIndex(file: vscode.Uri) {
     if (wsFolder) {
         const relative = path.relative(wsFolder.uri.path, file.path).replace(/\\+/g, '/');
         if (relative && relative.startsWith('interface/')) {
-            void fillGfxItems(relative, workspaceGfxIndex, workspaceGfxFileToKeys, { hoi4: false });
+            void fillGfxItems(relative, workspaceGfxIndex, workspaceGfxFileToKeys, { hoi4: false })
+                .then(() => bumpGfxIndexVersion());
         }
     }
 }

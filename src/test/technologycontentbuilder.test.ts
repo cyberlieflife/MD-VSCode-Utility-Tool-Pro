@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { renderTechnologyFile } from '../previewdef/technology/contentbuilder';
+import { getTechnologyIconNames, renderTechnologyFile } from '../previewdef/technology/contentbuilder';
 import { serializeUpdate, renderedHtml, LoaderRenderResult } from '../previewdef/loaderpreview';
 
 // renderTechnologyFile returns the in-place update parts { html, update } on success and a plain html
@@ -12,7 +12,7 @@ import { serializeUpdate, renderedHtml, LoaderRenderResult } from '../previewdef
 const webview = { asWebviewUri: (u: unknown) => u, cspSource: '' } as unknown as vscode.Webview;
 const uri = vscode.Uri.file('/tmp/common/technologies/test.txt');
 
-function loaderFor(folders: string[]): any {
+function loaderFor(folders: string[], countryTagsByFolder: Record<string, string[]> = {}): any {
     return {
         load: async () => ({
             result: {
@@ -23,6 +23,7 @@ function loaderFor(folders: string[]): any {
                 }],
                 gfxFiles: [],
                 equipmentArchetypes: {},
+                countryTagsByFolder,
             },
         }),
     };
@@ -89,5 +90,33 @@ describe('previewdef/technology renderTechnologyFile in-place update', () => {
         const throwing: any = { load: async () => { throw new Error('boom'); } };
         const rendered = await renderTechnologyFile(throwing, uri, webview);
         assert.strictEqual(typeof rendered, 'string');
+    });
+});
+
+// 国家图标的解析顺序与载荷：图标按「所选国家的专属图 → 通用图 → .gui 里的占位名」依次回退，
+// 国家清单随 update 一起下发，供网页端按文件夹重列下拉。
+describe('previewdef/technology country icons', () => {
+    it('resolves a technology icon through the country art first, then the generic name, then the placeholder', () => {
+        assert.deepStrictEqual(
+            getTechnologyIconNames('tank', 'AAA', 'GFX_technology_medium'),
+            ['GFX_AAA_tank_medium', 'GFX_AAA_tank', 'GFX_tank_medium', 'GFX_tank', 'GFX_technology_medium'],
+        );
+        assert.deepStrictEqual(
+            getTechnologyIconNames('tank', undefined, 'GFX_technology_medium'),
+            ['GFX_tank_medium', 'GFX_tank', 'GFX_technology_medium'],
+        );
+    });
+
+    it('carries the country lists and the chosen country in the update payload', async () => {
+        const rendered = await renderTechnologyFile(
+            loaderFor(['artillery'], { artillery: ['AAA'] }),
+            uri,
+            webview,
+        ) as LoaderRenderResult;
+
+        const data = rendered.update!.data as { countries: unknown; country: unknown };
+        // 没有本地化索引时标签退化为裸 tag；没有存过选择时 country 是空串（通用树）。
+        assert.deepStrictEqual(data.countries, { artillery: [{ tag: 'AAA', label: 'AAA' }] });
+        assert.strictEqual(data.country, '');
     });
 });

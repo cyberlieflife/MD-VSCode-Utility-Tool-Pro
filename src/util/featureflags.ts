@@ -19,6 +19,8 @@ export let characterPreview = getConfiguration().characterPreview;
 export let bopPreview = getConfiguration().bopPreview;
 // Gates the idea swap chain index the idea preview reads.
 export let ideaSwapIndex = getConfiguration().ideaSwapIndex;
+// 科技树预览是否提供国家下拉、并按国家解析科技图标；同时决定 loader 是否构建国家清单。
+export let technologyCountryIcons = getConfiguration().technologyCountryIcons;
 // 焦点树的布局模式：standard 用预览内置的网格，gui 读游戏 nationalfocusview.gui 的几何。
 export let focusTreeLayout = getConfiguration().focusTreeLayout ?? 'standard';
 // 前置连线按哪种状态取色：available（蓝）或 completed（绿）。
@@ -36,6 +38,7 @@ export function refreshFeatureFlags(): void {
     characterPreview = config.characterPreview;
     bopPreview = config.bopPreview;
     ideaSwapIndex = config.ideaSwapIndex;
+    technologyCountryIcons = config.technologyCountryIcons;
     focusTreeLayout = config.focusTreeLayout ?? 'standard';
     focusTreePrerequisiteLines = config.focusTreePrerequisiteLines ?? 'available';
 }

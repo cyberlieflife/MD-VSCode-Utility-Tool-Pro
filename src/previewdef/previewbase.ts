@@ -6,6 +6,7 @@ import { isEqual } from 'lodash';
 import { sendByMessage } from '../util/telemetry';
 import { loadingShellHtml } from '../util/html';
 import { openOrCopyHoiFile } from '../util/previewfileopener';
+import { setPreviewOption } from '../util/previewoptions';
 import { ConfigurationKey } from '../constants';
 import { Logger } from '../util/logger';
 
@@ -138,6 +139,13 @@ export abstract class PreviewBase {
                 case 'reload':
                     this.reload();
                     break;
+                // A toolbar toggle the reader flipped. Held on this side because the webview's own
+                // state dies with the panel; see previewoptions.ts.
+                case 'setPreviewOption':
+                    if (typeof msg.key === 'string') {
+                        void this.onPreviewOptionSet(msg.key, msg.value);
+                    }
+                    break;
                 // A diagnostic line a preview page reports about its own state; written to the
                 // HOI4 Modding channel so a blank page can be investigated without the webview
                 // developer tools.
@@ -185,6 +193,15 @@ export abstract class PreviewBase {
         return true;
     }
     
+    /**
+     * Persists a toolbar option the page just changed. Most previews draw the option themselves and
+     * need nothing more; one whose content is rendered on this side overrides this to re-render
+     * after the write, which is why the write is awaited rather than fired and forgotten.
+     */
+    protected async onPreviewOptionSet(key: string, value: unknown): Promise<void> {
+        await setPreviewOption(key, value);
+    }
+
     protected updateDependencies(dependencies: string[]): void {
         if (this.cachedDependencies === undefined || !isEqual(this.cachedDependencies, dependencies)) {
             this.dependencyChangedEmitter.fire(dependencies);

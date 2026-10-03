@@ -61,6 +61,7 @@ describe('util/gfxindex', () => {
         it('short-circuits lookups to undefined / [] without starting a build', async () => {
             assert.strictEqual(await gfxindex.getGfxContainerFile('GFX_focus_test_sprite'), undefined);
             assert.deepStrictEqual(await gfxindex.getGfxContainerFiles(['GFX_a', 'GFX_b']), []);
+            assert.deepStrictEqual(await gfxindex.getIndexedGfxNames(), []);
         });
     });
 
@@ -121,6 +122,14 @@ describe('util/gfxindex', () => {
                 await gfxindex.getGfxContainerFiles(['GFX_focus_test_sprite', 'GFX_missing']),
                 ['interface/goals_test.gfx'],
             );
+        });
+
+        // The technology country-icon list reads the whole namespace rather than probing names, so it
+        // needs the sprite names themselves -- and a version counter for a derived cache to compose
+        // into its expiry token.
+        it('lists every indexed sprite name and moves the index version once built', async () => {
+            assert.deepStrictEqual(await gfxindex.getIndexedGfxNames(), ['GFX_focus_test_sprite']);
+            assert.ok(gfxindex.getGfxIndexVersion() > 0, 'a completed build must move the version');
         });
     });
 });

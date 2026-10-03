@@ -112,6 +112,12 @@
 						},
 						"description": "Workspace/mod-relative root folders to scan recursively for .gfx files used by the technology tree preview (e.g. \"interface/technologies\")."
 					},
+					"mdHoi4Utilities.technologyCountryIcons": {
+						"title": "Technology: country icons",
+						"type": "boolean",
+						"default": true,
+						"description": "Offer a country dropdown in the technology tree preview and draw each technology with the selected country's own icon when it has one, falling back to the generic icon. The list of countries is read from the GFX index, so it is empty while that index is off."
+					},
 					"mdHoi4Utilities.worldMapRetainContextWhenHidden": {
 						"title": "World map: keep webview in memory when hidden",
 						"type": "boolean",
