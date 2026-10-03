@@ -19,6 +19,10 @@ export let characterPreview = getConfiguration().characterPreview;
 export let bopPreview = getConfiguration().bopPreview;
 // Gates the idea swap chain index the idea preview reads.
 export let ideaSwapIndex = getConfiguration().ideaSwapIndex;
+// 焦点树的布局模式：standard 用预览内置的网格，gui 读游戏 nationalfocusview.gui 的几何。
+export let focusTreeLayout = getConfiguration().focusTreeLayout ?? 'standard';
+// 前置连线按哪种状态取色：available（蓝）或 completed（绿）。
+export let focusTreePrerequisiteLines = getConfiguration().focusTreePrerequisiteLines ?? 'available';
 
 export function refreshFeatureFlags(): void {
     const config = getConfiguration();
@@ -32,6 +36,8 @@ export function refreshFeatureFlags(): void {
     characterPreview = config.characterPreview;
     bopPreview = config.bopPreview;
     ideaSwapIndex = config.ideaSwapIndex;
+    focusTreeLayout = config.focusTreeLayout ?? 'standard';
+    focusTreePrerequisiteLines = config.focusTreePrerequisiteLines ?? 'available';
 }
 
 export function registerFeatureFlags(): vscode.Disposable {

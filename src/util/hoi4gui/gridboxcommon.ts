@@ -12,6 +12,8 @@ export interface GridBoxConnection {
     targetType: GridBoxConnectionType;
     style?: string;
     classNames?: string;
+    // 用 connectionTiles 绘制连接时选取虚线贴图。
+    dashed?: boolean;
 }
 
 export interface GridBoxItem {
@@ -44,6 +46,26 @@ export interface RenderGridBoxCommonOptions extends RenderCommonOptions {
     onRenderLineBox?(item: GridBoxConnectionItem, parentInfo: ParentInfo): Promise<string>;
     lineRenderMode?: 'line' | 'control';
     cornerPosition?: number;
+    // 把 'parent' 连接的端点移离槽位中心：`child` 在声明连接的一端，`parent` 在它的目标端。仅线段模式。
+    connectionOffsets?: GridBoxConnectionOffsets;
+    // 把 'parent' 连接按游戏铺贴图的方式画成沿同一路径的方形贴图而不是边框。仅线段模式。
+    connectionTiles?: GridBoxConnectionTiles;
+}
+
+export interface GridBoxConnectionOffsets {
+    parent: NumberPosition;
+    child: NumberPosition;
+}
+
+// 沿一个轴的直线段，或由两个方向命名的转角。
+export type GridBoxTileShape = 'up_down' | 'left_right' | 'up_left' | 'up_right' | 'down_left' | 'down_right';
+
+export interface GridBoxConnectionTiles {
+    // 一块方形贴图的边长，以线为中心。
+    size: number;
+    // 平移每一块贴图，用于把贴图放离线中心的 gui。
+    offset?: NumberPosition;
+    className(shape: GridBoxTileShape, dashed: boolean): string;
 }
 
 const offsetMap: Record<Format['_name'], { x: number, y: number }> = {
@@ -72,6 +94,21 @@ function getLeftUpPosition(gridX: number, gridY: number, format: Format['_name']
         x: gridX * slotSize.width + offset.x * gridSize.width - offset.x * slotSize.width,
         y: gridY * slotSize.height + offset.y * gridSize.height - offset.y * slotSize.height,
     };
+}
+
+/**
+ * 各 item 的槽位越出网格自身角点的距离，用非正的偏移表示：朝 down 或 right 生长的网格会排向
+ * 负坐标，left/right 会把第一行居中到盒边上。把网格位置减去它，全部 item 才落在可见区域内。
+ */
+export function gridBoxContentOffset(items: Pick<GridBoxItem, 'gridX' | 'gridY'>[],format: Format['_name'], slotSize: NumberSize, gridSize: NumberSize): NumberPosition {
+    let x = 0;
+    let y = 0;
+    for (const item of items) {
+        const position = getLeftUpPosition(item.gridX, item.gridY, format, slotSize, gridSize);
+        x = Math.min(x, position.x);
+        y = Math.min(y, position.y);
+    }
+    return { x, y };
 }
 
 function getCenterPosition(gridX: number, gridY: number, format: Format['_name'], slotSize: NumberSize, gridSize: NumberSize): NumberPosition {
@@ -120,7 +157,7 @@ export async function renderGridBoxCommon(
     }));
 
     const renderedConnections = options.lineRenderMode !== 'control' ?
-        renderLineConnections(options.items, format, slotSize, size, options.styleTable, cornerPosition) :
+        renderLineConnections(options.items, format, slotSize, size, options.styleTable, cornerPosition, options.connectionOffsets, options.connectionTiles) :
         await renderControlConnections(options.items, format, slotSize, size, options.onRenderLineBox, options.styleTable, childrenParentInfo);
 
     return `<div
@@ -144,7 +181,7 @@ export async function renderGridBoxCommon(
     </div>`;
 }
 
-export function renderLineConnections(items: Record<string, GridBoxItem>, format: Format['_name'], slotSize: NumberSize, size: NumberSize, styleTable: StyleTable, cornerPosition: number): string {
+export function renderLineConnections(items: Record<string, GridBoxItem>, format: Format['_name'], slotSize: NumberSize, size: NumberSize, styleTable: StyleTable, cornerPosition: number, connectionOffsets?: GridBoxConnectionOffsets, connectionTiles?: GridBoxConnectionTiles): string {
     return Object.values(items).map(item =>
         item.connections.map(conn => {
             const target = items[conn.target];
@@ -154,9 +191,161 @@ export function renderLineConnections(items: Record<string, GridBoxItem>, format
 
             const itemPosition = getCenterPosition(item.gridX, item.gridY, format, slotSize, size);
             const targetPosition = getCenterPosition(target.gridX, target.gridY, format, slotSize, size);
+            if (connectionOffsets && conn.targetType === 'parent') {
+                itemPosition.x += connectionOffsets.child.x;
+                itemPosition.y += connectionOffsets.child.y;
+                targetPosition.x += connectionOffsets.parent.x;
+                targetPosition.y += connectionOffsets.parent.y;
+            }
+            if (connectionTiles && conn.targetType === 'parent') {
+                return renderTiledConnection(
+                    connectionPath(itemPosition, targetPosition, conn.targetType, format, slotSize, cornerPosition),
+                    connectionTiles, conn.dashed ?? false, conn.style ?? '', conn.targetType, conn.classNames, styleTable, item.id, conn.target,
+                );
+            }
             return renderGridBoxConnection(itemPosition, targetPosition, conn.style ?? '', conn.targetType, format, slotSize, conn.classNames, styleTable, cornerPosition, item.id, conn.target);
         }).join('')
     ).join('');
+}
+
+/**
+ * renderGridBoxConnection 的边框画法经过的折点，从 a 到 b，'parent' 连接的两端同样互换，
+ * 使贴图线走同一条路径。
+ */
+export function connectionPath(a: NumberPosition, b: NumberPosition, type: GridBoxConnectionType, format: Format['_name'], gridSize: NumberSize, cornerPosition: number = 1.5): NumberPosition[] {
+    if (a.y === b.y || a.x === b.x) {
+        return [a, b];
+    }
+
+    if (type === 'parent') {
+        const c = a;
+        a = b;
+        b = c;
+    }
+
+    const bx = b.x - a.x;
+    const by = b.y - a.y;
+    if (format === 'left' || format === 'right') {
+        const cornerWidth = gridSize.width * cornerPosition;
+        if (Math.abs(bx) < cornerWidth) {
+            return [a, { x: b.x, y: a.y }, b];
+        }
+        const x = a.x + cornerWidth * Math.sign(bx);
+        return [a, { x, y: a.y }, { x, y: b.y }, b];
+    }
+
+    const cornerHeight = gridSize.height * cornerPosition;
+    if (Math.abs(by) < cornerHeight) {
+        return [a, { x: a.x, y: b.y }, b];
+    }
+    const y = a.y + cornerHeight * Math.sign(by);
+    return [a, { x: a.x, y }, { x: b.x, y }, b];
+}
+
+// 去掉重复点与三点共线中的中间点，剩下的内部点都是拐角。
+function turningPoints(points: NumberPosition[]): NumberPosition[] {
+    const result: NumberPosition[] = [];
+    for (const point of points) {
+        const last = result[result.length - 1];
+        if (last && last.x === point.x && last.y === point.y) {
+            continue;
+        }
+        const beforeLast = result[result.length - 2];
+        if (last && beforeLast && ((beforeLast.x === last.x && last.x === point.x) || (beforeLast.y === last.y && last.y === point.y))) {
+            result.pop();
+        }
+        result.push(point);
+    }
+    return result;
+}
+
+// 每一对相邻点，以及每个点连同它的两个邻居。
+function segmentsOf(points: NumberPosition[]): [NumberPosition, NumberPosition][] {
+    return points.slice(1).map((q, i) => [points[i] as NumberPosition, q]);
+}
+
+function turnsOf(points: NumberPosition[]): [NumberPosition, NumberPosition, NumberPosition][] {
+    return points.slice(1, -1).map((p, i) => [points[i] as NumberPosition, p, points[i + 2] as NumberPosition]);
+}
+
+function directionTo(from: NumberPosition, to: NumberPosition): 'up' | 'down' | 'left' | 'right' {
+    if (to.x === from.x) {
+        return to.y < from.y ? 'up' : 'down';
+    }
+    return to.x < from.x ? 'left' : 'right';
+}
+
+function cornerShape(prev: NumberPosition, point: NumberPosition, next: NumberPosition): GridBoxTileShape {
+    const directions = [directionTo(point, prev), directionTo(point, next)];
+    const vertical = directions.find(d => d === 'up' || d === 'down');
+    const horizontal = directions.find(d => d === 'left' || d === 'right');
+    return `${vertical}_${horizontal}` as GridBoxTileShape;
+}
+
+// 贴图的几何逐块不同，用内联 style 定尺寸；用类名注册要为每块贴图解析一条规则。
+function renderTileBox(diag: string, classNames: string | undefined, styleTable: StyleTable, left: number, top: number, width: number, height: number, tileClass: string): string {
+    return `<div${diag}
+        class="
+            ${classNames ? classNames : ''}
+            ${tileClass}
+            ${styleTable.style('positionAbsolute', () => `position: absolute;`)}
+            ${styleTable.style('pointerEventsNone', () => `pointer-events: none;`)}
+        "
+        style="left: ${left}px; top: ${top}px; width: ${width}px; height: ${height}px;"></div>`;
+}
+
+// 路径每个转角一块贴图，每段直线之间铺一排贴图，每排到转角处短半块，避免盖住转角贴图。
+function renderTiledConnection(
+    path: NumberPosition[],
+    tiles: GridBoxConnectionTiles,
+    dashed: boolean,
+    style: string,
+    type: GridBoxConnectionType,
+    classNames: string | undefined,
+    styleTable: StyleTable,
+    fromId: string,
+    toId: string,
+): string {
+    const diag = ` data-conn-from="${fromId}" data-conn-to="${toId}" data-conn-type="${type}" data-conn-style="${style.replace(/"/g, '&quot;')}"`;
+    const points = turningPoints(path);
+    const size = tiles.size;
+    const half = size / 2;
+    const offsetX = tiles.offset?.x ?? 0;
+    const offsetY = tiles.offset?.y ?? 0;
+    let result = '';
+
+    const segments = segmentsOf(points);
+    segments.forEach(([p, q], i) => {
+        const startTrim = i > 0 ? half : 0;
+        const endTrim = i < segments.length - 1 ? half : 0;
+        if (p.y === q.y) {
+            const sign = Math.sign(q.x - p.x);
+            const from = p.x + sign * startTrim;
+            const to = q.x - sign * endTrim;
+            if ((to - from) * sign > 0) {
+                result += renderTileBox(diag, classNames, styleTable,
+                    Math.min(from, to) + offsetX, p.y - half + offsetY, Math.abs(to - from), size,
+                    tiles.className('left_right', dashed));
+            }
+        } else {
+            const sign = Math.sign(q.y - p.y);
+            const from = p.y + sign * startTrim;
+            const to = q.y - sign * endTrim;
+            if ((to - from) * sign > 0) {
+                result += renderTileBox(diag, classNames, styleTable,
+                    p.x - half + offsetX, Math.min(from, to) + offsetY, size, Math.abs(to - from),
+                    tiles.className('up_down', dashed));
+            }
+        }
+    });
+
+    for (const [prev, point, next] of turnsOf(points)) {
+        result += renderTileBox(diag, classNames, styleTable,
+            point.x - half + offsetX, point.y - half + offsetY, size, size,
+            tiles.className(cornerShape(prev, point, next), dashed));
+    }
+
+    return result;
 }
 
 export function renderGridBoxConnection(a: NumberPosition, b: NumberPosition, style: string, type: GridBoxConnectionType, format: Format['_name'], gridSize: NumberSize, classNames: string | undefined, styleTable: StyleTable, cornerPosition: number = 1.5, fromId: string = '', toId: string = ''): string {

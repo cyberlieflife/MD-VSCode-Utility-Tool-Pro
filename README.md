@@ -64,6 +64,9 @@
 | `mdHoi4Utilities.decisionPreview` | `boolean` | Enable the decision preview. / 启用决议预览。 |
 | `mdHoi4Utilities.decisionGfxFiles` | `string[]` | `.gfx` files or folders that define the mod's decision sprites. / 定义模组决议精灵的 `.gfx` 文件或文件夹。 |
 | `mdHoi4Utilities.bopPreview` | `boolean` | Enable the balance of power preview. / 启用权力平衡预览。 |
+| `mdHoi4Utilities.focusTreeLayout` | `enum` | Where the focus tree preview takes its layout from: `standard`, or the mod's `interface/nationalfocusview.gui`. / 焦点树预览的布局来源：`standard` 内置布局，或模组的 `interface/nationalfocusview.gui`。 |
+| `mdHoi4Utilities.focusTreePrerequisiteLines` | `enum` | Which of the game's prerequisite line colours the focus tree preview draws: `available` (blue) or `completed` (green). / 焦点树预览按游戏的哪种前置连线颜色绘制：`available` 蓝色或 `completed` 绿色。 |
+| `mdHoi4Utilities.focusOverlayGfxFiles` | `string[]` | `.gfx` files or folders that define the mod's focus overlay sprites, searched after the game's `interface/goals.gfx`. / 定义模组焦点覆盖层精灵的 `.gfx` 文件或文件夹，在游戏的 `interface/goals.gfx` 之后查找。 |
 
 ## Known Issues / 已知问题
 

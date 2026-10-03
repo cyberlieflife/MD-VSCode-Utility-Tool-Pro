@@ -443,4 +443,77 @@ describe('webview/focustree interactions', function () {
         await flush();
         assert.strictEqual(countWrappers(), 1, 'replaced cell must wrap its checkbox exactly once');
     });
+
+    // 载荷带上 focusLinkTiles 时，前置连线要按贴图格铺出来（不带时保持纯色线，由上面的用例覆盖）。
+    it('lays prerequisite lines as tiles when the update payload carries tile parameters', async function () {
+        const focusFixture = (id: string, y: number, prerequisites: string[][]) => ({
+            id, x: 0, y, icon: [], textIcon: undefined, overlay: undefined,
+            prerequisite: prerequisites, exclusive: [], hasAllowBranch: false, inAllowBranch: [],
+            allowBranch: undefined, relativePositionId: undefined, offset: [],
+            token: { start: 10, end: 20 }, xToken: undefined, yToken: undefined, file: 'x.txt',
+        });
+        const cell = (id: string) => '<div class="navigator" data-focus-id="' + id + '" start="10" end="20">' +
+            '<span data-focus-id="' + id + '">{{iconClass}} {{position}}</span></div>';
+
+        (window as any).focusLinkTiles = { size: 16, offset: { x: 0, y: 0 } };
+        window.dispatchEvent(new MessageEvent('message', {
+            data: {
+                type: 'update',
+                focusTrees: [{
+                    id: 'test', focuses: { a: focusFixture('a', 0, [['b']]), b: focusFixture('b', 1, []) },
+                    inlayWindowRefs: [], inlayWindows: [], inlayConditionExprs: [],
+                    allowBranchOptions: [], conditionExprs: [], isSharedFocues: false, warnings: [],
+                }],
+                renderedFocus: { a: cell('a'), b: cell('b') },
+                renderedInlayWindows: {},
+                gridBox: {
+                    position: { x: { _value: 50 }, y: { _value: 50 } },
+                    size: { width: { _value: 96 }, height: undefined },
+                    slotsize: { width: { _value: 96 }, height: { _value: 130 } },
+                },
+                useConditionInFocus: false,
+                xGridSize: 96,
+                layout: {
+                    mode: 'standard', format: 'up', grid: { x: 50, y: 50 }, spacing: { x: 96, y: 130 },
+                    item: { iconOffsetX: 0, iconOffsetY: -18, titlebarOffsetX: 0, titlebarTop: 70, overlayOffsetX: 0, overlayOffsetY: -3, textOffsetX: 0, textTop: 85 },
+                    exclusive: { offsetY: 33, startX: 48, endX: -48 },
+                    prerequisiteLink: { size: 16, offset: { x: 0, y: 0 } },
+                    continuous: { width: 770, height: 380 },
+                },
+            },
+        }));
+
+        for (let i = 0; i < 50 && document.querySelectorAll('[class*="st-focus-link-"]').length === 0; i++) {
+            await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        const tiles = document.querySelectorAll('[class*="st-focus-link-"]');
+        assert.ok(tiles.length > 0, 'expected textured prerequisite tiles in the rebuilt content');
+        delete (window as any).focusLinkTiles;
+    });
+
+    // 首次打开居中：initial_show_position 与布局解析出的 national_focus_center 求出的像素点。
+    it('computes the initial show point from the tree position and the gui centre', async function () {
+        const mod: any = await import('../../../webviewsrc/focustree');
+        const focusPosition = { a: { x: 2, y: 3 } };
+        const origin = { x: 50, y: 50 };
+        const spacing = { x: 96, y: 130 };
+        const center = { x: 130, y: 32 };
+
+        assert.deepStrictEqual(
+            mod.initialShowPoint({ initialShowPosition: { focus: 'a', x: 0, y: 0 } } as any, focusPosition, origin, spacing, center),
+            { x: 50 + 2 * 96 + 130, y: 50 + 3 * 130 + 32 },
+        );
+        assert.deepStrictEqual(
+            mod.initialShowPoint({ initialShowPosition: { x: 4, y: 1 } } as any, focusPosition, origin, spacing, center),
+            { x: 50 + 4 * 96 + 130, y: 50 + 1 * 130 + 32 },
+        );
+        assert.strictEqual(
+            mod.initialShowPoint({ initialShowPosition: { x: 4, y: 1 } } as any, focusPosition, origin, spacing, undefined),
+            undefined,
+        );
+        assert.strictEqual(
+            mod.initialShowPoint({} as any, focusPosition, origin, spacing, center),
+            undefined,
+        );
+    });
 });

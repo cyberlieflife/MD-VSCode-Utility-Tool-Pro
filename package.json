@@ -166,6 +166,43 @@
 						"default": false,
 						"description": "%hoi4modutilities.ideaSwapIndex.desc%"
 					},
+					"mdHoi4Utilities.focusTreeLayout": {
+						"title": "%hoi4modutilities.focusTreeLayout.title%",
+						"type": "string",
+						"enum": [
+							"standard",
+							"gui"
+						],
+						"enumDescriptions": [
+							"%hoi4modutilities.focusTreeLayout.enum.standard%",
+							"%hoi4modutilities.focusTreeLayout.enum.gui%"
+						],
+						"default": "standard",
+						"description": "%hoi4modutilities.focusTreeLayout.desc%"
+					},
+					"mdHoi4Utilities.focusTreePrerequisiteLines": {
+						"title": "%hoi4modutilities.focusTreePrerequisiteLines.title%",
+						"type": "string",
+						"enum": [
+							"available",
+							"completed"
+						],
+						"enumDescriptions": [
+							"%hoi4modutilities.focusTreePrerequisiteLines.enum.available%",
+							"%hoi4modutilities.focusTreePrerequisiteLines.enum.completed%"
+						],
+						"default": "available",
+						"description": "%hoi4modutilities.focusTreePrerequisiteLines.desc%"
+					},
+					"mdHoi4Utilities.focusOverlayGfxFiles": {
+						"title": "%hoi4modutilities.focusOverlayGfxFiles.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.focusOverlayGfxFiles.desc%"
+					},
 					"mdHoi4Utilities.ideaPlaceholderIcon": {
 						"title": "%hoi4modutilities.ideaPlaceholderIcon.title%",
 						"type": "string",

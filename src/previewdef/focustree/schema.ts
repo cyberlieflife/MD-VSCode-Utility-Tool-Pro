@@ -22,6 +22,9 @@ export interface FocusTree {
     isSharedFocues: boolean;
     continuousFocusPositionX?: number;
     continuousFocusPositionY?: number;
+    // 文件声明的初始视图位置（命中了 focus 时用该焦点所在格，否则用给定的 x/y 格）；未声明时
+    // undefined，预览仍在左上角打开。
+    initialShowPosition?: { focus?: string; x: number; y: number };
     searchFilters: string[];
     warnings: FocusWarning[];
 }
@@ -108,11 +111,16 @@ interface Offset {
     trigger: ConditionComplexExpr | undefined;
 }
 
+interface InitialShowPositionDef extends Position {
+    focus?: string;
+}
+
 interface FocusTreeDef {
     id: string;
     shared_focus: string[];
     focus: FocusDef[];
     continuous_focus_position: Position;
+    initial_show_position: InitialShowPositionDef;
     inlay_window: Raw[];
 }
 
@@ -215,6 +223,10 @@ const focusTreeSchema: SchemaDef<FocusTreeDef> = {
         _type: 'array',
     },
     continuous_focus_position: positionSchema,
+    initial_show_position: {
+        ...positionSchema,
+        focus: "string",
+    },
     inlay_window: {
         _innerType: 'raw',
         _type: 'array',
@@ -317,6 +329,17 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
             allowBranchOptions: getAllowBranchOptions(focuses),
             continuousFocusPositionX: normalizeNumberLike(focusTree.continuous_focus_position?.x, 0) ?? 50,
             continuousFocusPositionY: normalizeNumberLike(focusTree.continuous_focus_position?.y, 0) ?? 1000,
+            ...(focusTree.initial_show_position
+                ? {
+                    initialShowPosition: {
+                        ...(focusTree.initial_show_position.focus
+                            ? { focus: focusTree.initial_show_position.focus }
+                            : {}),
+                        x: normalizeNumberLike(focusTree.initial_show_position.x, 0) ?? 0,
+                        y: normalizeNumberLike(focusTree.initial_show_position.y, 0) ?? 0,
+                    },
+                }
+                : {}),
             conditionExprs,
             isSharedFocues: false,
             searchFilters: chain(focuses).flatMap(f => f.searchFilters).uniq().value(),

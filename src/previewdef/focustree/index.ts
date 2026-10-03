@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { buildFocusTreeHtml, buildNoFocusTreeHtml, buildFocusTreeErrorHtml, buildFocusTreePayload, loadFocusTreesOnly, focusTreeGridBox, focusTreeXGridSize, FocusTreePayload, FocusTreeUpdatePayload, ToolbarFlags } from './contentbuilder';
+import { buildFocusTreeHtml, buildNoFocusTreeHtml, buildFocusTreeErrorHtml, buildFocusTreePayload, loadFocusTreesOnly, FocusTreePayload, FocusTreeUpdatePayload, ToolbarFlags } from './contentbuilder';
+import { FocusTreeLayout, focusTreeGridBoxFor } from './layout';
 import { matchPathEnd } from '../../util/nodecommon';
 import { PreviewBase } from '../previewbase';
 import { PreviewProviderDef } from '../previewmanager';
@@ -400,6 +401,22 @@ class FocusTreePreview extends PreviewBase {
         }
     }
 
+    // 这些设置会改变页面网格、焦点标记或连线取帧，改了就整页重载（焦点树的渲染结果随设置变化，
+    // 而不是随文档内容变化）。inlayWindowGfxRoots 以前没有任何监听，修好缺失的内插贴图要等下次编辑。
+    protected override get reloadOnConfigurationChange(): readonly string[] {
+        return [
+            'useConditionInFocus',
+            'focusTreeLayout',
+            'focusTreePrerequisiteLines',
+            'focusOverlayGfxFiles',
+            'sharedFocusIndex',
+            'inlayWindowGfxRoots',
+            'gfxIndex',
+            'localisationIndex',
+            'previewLocalisation',
+        ];
+    }
+
     private repushCachedUpdate(): void {
         if (this.lastUpdateMessage !== undefined && this.lastUpdateGeneration === this.iconRenderGeneration && !this.isDisposed) {
             this.panel.webview.postMessage(this.lastUpdateMessage);
@@ -424,19 +441,18 @@ class FocusTreePreview extends PreviewBase {
         };
     }
 
-    // Object-level fingerprints of the parsed trees. gridBox/useConditionInFocus/xGridSize are static, so
-    // sourcing them from the shared const here reproduces the exact values a full payload carries, letting
-    // the early-out compare against a baseline seeded from structure.focusTrees without a payload in hand.
+    // Object-level fingerprints of the parsed trees. gridBox 与 xGridSize 由布局派生，和完整载荷
+    // 携带的值一致，让早退分支不必持有 payload 就能与已渲染基线比较。
     // The localisation config is deliberately NOT folded in: the focus-tree render never embeds localised
     // text, so a config flip cannot change the rendered structure and must not move the hash. Read the
-    // static inputs once here per call so the early-out compare and the baseline seed use the same values.
-    private treeFingerprintsFor(focusTrees: FocusTree[]): { structural: string; icon: string } {
+    // layout-derived inputs here per call so the early-out compare and the baseline seed use the same values.
+    private treeFingerprintsFor(focusTrees: FocusTree[], layout: FocusTreeLayout): { structural: string; icon: string } {
         return {
             structural: computeTreeStructuralFingerprint({
                 focusTrees,
-                gridBox: focusTreeGridBox,
+                gridBox: focusTreeGridBoxFor(layout),
                 useConditionInFocus,
-                xGridSize: focusTreeXGridSize,
+                xGridSize: layout.spacing.x,
             }),
             icon: computeTreeIconFingerprint(focusTrees),
         };
@@ -458,7 +474,7 @@ class FocusTreePreview extends PreviewBase {
         return run;
     }
 
-    protected async getContent(document: vscode.TextDocument): Promise<string> {
+    protected async getContent(document: vscode.TextDocument, dependencyChanged = false): Promise<string> {
         this.content = document.getText();
         // Captured synchronously at entry: the loader's content provider reads the same text (the
         // parse starts in the same sync slice), so this is the text the rendered baseline was built
@@ -480,7 +496,7 @@ class FocusTreePreview extends PreviewBase {
             // appears immediately even when the (slow) DDS->PNG icon conversion would blow the
             // render budget. The timeout now only guards this fast structural pass. (plan Stap 3)
             const structure = await withTimeout(
-                buildFocusTreePayload(this.focusTreeLoader, progress, { resolveIcons: false }),
+                buildFocusTreePayload(this.focusTreeLoader, progress, { resolveIcons: false, dependencyChanged }),
                 focusTreeRenderTimeout,
                 () => {
                     progress(localize('focustree.loading.slow', 'Still working on a heavy focus tree...'));
@@ -491,7 +507,7 @@ class FocusTreePreview extends PreviewBase {
                 const fingerprints = this.fingerprintsFor(structure);
                 this.lastStructuralFingerprint = fingerprints.structural;
                 this.lastIconSourceFingerprint = fingerprints.iconSource;
-                const treeFingerprints = this.treeFingerprintsFor(structure.focusTrees);
+                const treeFingerprints = this.treeFingerprintsFor(structure.focusTrees, structure.layout);
                 this.lastTreeStructural = treeFingerprints.structural;
                 this.lastTreeIcon = treeFingerprints.icon;
                 this.seedTextState(contentHash, contentLength);
@@ -624,9 +640,9 @@ class FocusTreePreview extends PreviewBase {
             // per-focus HTML/style rendering, skip when the parsed structure and icon set are both
             // unchanged. loadFocusTreesOnly shares the loader's content-hash cache, so the fall-through
             // buildFocusTreePayload reuses this same parse -- there is no double parse.
-            let trees: FocusTree[] | null = null;
+            let trees: { focusTrees: FocusTree[]; layout: FocusTreeLayout } | null = null;
             try {
-                trees = await withTimeout(loadFocusTreesOnly(this.focusTreeLoader), focusTreeRenderTimeout);
+                trees = await withTimeout(loadFocusTreesOnly(this.focusTreeLoader, dependencyChanged), focusTreeRenderTimeout);
             } catch (e) {
                 // A slow/stuck object-level load must not throw; drop the early-out and let the existing
                 // structure pass (with its own timeout handling) take over.
@@ -635,7 +651,7 @@ class FocusTreePreview extends PreviewBase {
             }
             if (trees !== null && !dependencyChanged &&
                 this.lastTreeStructural !== undefined && this.lastTreeIcon !== undefined) {
-                const treeFingerprints = this.treeFingerprintsFor(trees);
+                const treeFingerprints = this.treeFingerprintsFor(trees.focusTrees, trees.layout);
                 if (treeFingerprints.structural === this.lastTreeStructural && treeFingerprints.icon === this.lastTreeIcon) {
                     // Unchanged parsed structure + icon set and no dependency changed => the focuses and
                     // icons already on screen are current, so we can skip the whole render (mirrors the
@@ -661,7 +677,7 @@ class FocusTreePreview extends PreviewBase {
             let structure: FocusTreePayload | null = null;
             try {
                 structure = await withTimeout(
-                    buildFocusTreePayload(this.focusTreeLoader, undefined, { resolveIcons: false }),
+                    buildFocusTreePayload(this.focusTreeLoader, undefined, { resolveIcons: false, dependencyChanged }),
                     focusTreeRenderTimeout,
                 );
             } catch (e) {
@@ -720,7 +736,7 @@ class FocusTreePreview extends PreviewBase {
 
             this.lastStructuralFingerprint = fingerprints.structural;
             this.lastIconSourceFingerprint = fingerprints.iconSource;
-            const treeFingerprints = this.treeFingerprintsFor(structure.focusTrees);
+            const treeFingerprints = this.treeFingerprintsFor(structure.focusTrees, structure.layout);
             this.lastTreeStructural = treeFingerprints.structural;
             this.lastTreeIcon = treeFingerprints.icon;
             // The render baseline now matches the text the structure pass parsed (the loader's
@@ -741,6 +757,7 @@ class FocusTreePreview extends PreviewBase {
                     gridBox: structure.gridBox,
                     useConditionInFocus: structure.useConditionInFocus,
                     xGridSize: structure.xGridSize,
+                    layout: structure.layout,
                 };
                 this.panel.webview.postMessage(updateMsg);
                 this.lastUpdateMessage = updateMsg;

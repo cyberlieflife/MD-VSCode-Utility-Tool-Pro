@@ -1,9 +1,11 @@
-import { getState, setState, arrayToMap, scrollToState, tryRun, enableZoom, initCommon, setZoomEnabled } from "./util/common";
+import { getState, setState, arrayToMap, scrollToState, tryRun, enableZoom, initCommon, setZoomEnabled, currentScale } from "./util/common";
 import { SelectionState, emptySelection, selectFocusIds, idsInRect, Rect, RectItem } from "./focusselection";
 import { computeGridDelta, buildFocusDragMoves, DragMove } from "./focusdrag";
 import { DivDropdown } from "./util/dropdown";
-import { difference, minBy } from "lodash";
-import { renderGridBoxCommon, GridBoxItem, GridBoxConnection } from "../src/util/hoi4gui/gridboxcommon";
+import { difference } from "lodash";
+import { renderGridBoxCommon, GridBoxItem, GridBoxConnection, GridBoxConnectionTiles, gridBoxContentOffset } from "../src/util/hoi4gui/gridboxcommon";
+import { focusLinkClass } from "../src/util/hoi4gui/focuslink";
+import { applyExclusiveLinkStyle } from "../src/util/hoi4gui/exclusivelink";
 import { StyleTable, normalizeForStyle } from "../src/util/styletable";
 import { FocusTree, Focus } from "../src/previewdef/focustree/schema";
 import { applyCondition, ConditionItem } from "../src/hoiformat/condition";
@@ -89,6 +91,10 @@ const focusSpanOriginalHtml = new Map<string, string>();
 // Multi-selection of focus cells. Selection is per-session (not persisted); the set is cleared on
 // tree switches and DOM rebuilds keep it (it is id-based and re-applied as highlight).
 let selectionState: SelectionState = emptySelection();
+// 最近一次渲染的网格原点与各焦点的格位：文件声明 initial_show_position 时用它把首次视图
+// 居中到游戏打开树的位置。
+let renderedOrigin: NumberPosition = { x: 0, y: 0 };
+let renderedFocusPosition: Record<string, NumberPosition> = {};
 
 // Pointer state while a mouse button is down: `move` started on a focus cell (drag the
 // selection), `rubber-band` started on empty canvas (box-select). `moved` flips once the pointer
@@ -1188,10 +1194,27 @@ async function buildContent() {
     calculateFocusAllowed(focusTree, allowBranchOptionsValue);
     const focusGrixBoxItems = focuses.map(focus => focusToGridItem(focus, focusTree, allowBranchOptionsValue, focusPosition, exprs)).filter((v): v is GridBoxItem => !!v);
     
-    const minX = minBy(Object.values(focusPosition), 'x')?.x ?? 0;
-    const leftPadding = gridbox.position.x._value - Math.min(minX * (window as any).xGridSize, 0);
+    const format = gridbox.format?._name ?? 'up';
+    // 同一行内互斥焦点之间的连线改用游戏的贴图（其余配对保留 L 形折线的纯色画法）。
+    applyExclusiveLinkStyle(focusGrixBoxItems, format);
 
-    const focusTreeContent = await renderGridBoxCommon({ ...gridbox, position: {...gridbox.position, x: toNumberLike(leftPadding)} }, {
+    // 朝 down/left/right 生长的树会排向负坐标：把网格按焦点越过自身角点的距离整体平移，
+    // 所有焦点才落在可见区域内（网格本身只有一个槽位宽、不占高）。
+    const xGridSize = (window as any).xGridSize;
+    const contentOffset = gridBoxContentOffset(
+        Object.values(focusPosition).map(p => ({ gridX: p.x, gridY: p.y })),
+        format,
+        { width: xGridSize, height: gridbox.slotsize?.height?._value ?? xGridSize },
+        { width: gridbox.size?.width?._value ?? xGridSize, height: 0 },
+    );
+
+    const focusTreeContent = await renderGridBoxCommon({
+        ...gridbox,
+        position: {
+            x: toNumberLike(gridbox.position.x._value - contentOffset.x),
+            y: toNumberLike(gridbox.position.y._value - contentOffset.y),
+        },
+    }, {
         size: { width: 0, height: 0 },
         orientation: 'upper_left'
     }, {
@@ -1201,9 +1224,18 @@ async function buildContent() {
             renderedFocus[item.id]
                 .replace('{{position}}', item.gridX + ', ' + item.gridY)
                 .replace('{{iconClass}}', getFocusIcon(focusTree.focuses[item.id], exprs, styleTable))
-            ),
+        ),
         cornerPosition: 0.5,
+        connectionOffsets: (window as any).focusLinkOffsets,
+        connectionTiles: focusLinkTiles(),
     });
+
+    // 记录本次渲染的原点与各焦点的格位，供首次打开按 initial_show_position 居中。
+    renderedOrigin = {
+        x: gridbox.position.x._value - contentOffset.x,
+        y: gridbox.position.y._value - contentOffset.y,
+    };
+    renderedFocusPosition = focusPosition;
 
     patchFocusTreeContent(focustreeplaceholder, focusTreeContent, styleTable, (window as any).styleNonce);
     const inlayWindowPlaceholder = document.getElementById('inlaywindowplaceholder') as HTMLDivElement;
@@ -1220,6 +1252,54 @@ async function buildContent() {
     // Refresh the search element cache against the rebuilt DOM.
     focusElementsCache = Array.from(document.getElementsByClassName('focus')) as HTMLDivElement[];
     applySearchFilters();
+}
+
+/**
+ * 文件声明了 initial_show_position、且布局解析出 national_focus_center 时，游戏打开树会把这个点
+ * 居中；首次打开时照做。命中了 focus 时用它所在的格，否则用给定的 x/y 格。
+ */
+export function initialShowPoint(
+    focusTree: FocusTree,
+    focusPosition: Record<string, NumberPosition>,
+    origin: NumberPosition,
+    spacing: NumberPosition,
+    center: NumberPosition | undefined,
+): NumberPosition | undefined {
+    const show = focusTree.initialShowPosition;
+    if (!center || !show) {
+        return undefined;
+    }
+    const slot = (show.focus !== undefined ? focusPosition[show.focus] : undefined) ?? show;
+    return {
+        x: origin.x + slot.x * spacing.x + center.x,
+        y: origin.y + slot.y * spacing.y + center.y,
+    };
+}
+
+function scrollToInitialShowPosition(): boolean {
+    const focusTree = focusTrees[selectedFocusTreeIndex];
+    const gridbox: GridBoxType | undefined = (window as any).gridBox;
+    if (!focusTree || !gridbox) {
+        return false;
+    }
+    const point = initialShowPoint(
+        focusTree,
+        renderedFocusPosition,
+        renderedOrigin,
+        { x: (window as any).xGridSize ?? 96, y: gridbox.slotsize?.height?._value ?? 0 },
+        (window as any).focusTreeCenter,
+    );
+    const placeholder = document.getElementById('focustreeplaceholder');
+    if (!point || !placeholder) {
+        return false;
+    }
+    const rect = placeholder.getBoundingClientRect();
+    const scale = currentScale();
+    window.scroll(
+        Math.max(0, rect.left + window.scrollX + point.x * scale - window.innerWidth / 2),
+        Math.max(0, rect.top + window.scrollY + point.y * scale - window.innerHeight / 2),
+    );
+    return true;
 }
 
 function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Record<string, boolean>) {
@@ -1239,8 +1319,11 @@ function updateSelectedFocusTree(clearCondition: boolean) {
     const continuousFocuses = document.getElementById('continuousFocuses') as HTMLDivElement;
 
     if (focusTree.continuousFocusPositionX !== undefined && focusTree.continuousFocusPositionY !== undefined) {
+        const size = (window as any).continuousFocusSize as { width: number; height: number } | undefined;
         continuousFocuses.style.left = (focusTree.continuousFocusPositionX - 59) + 'px';
         continuousFocuses.style.top = (focusTree.continuousFocusPositionY + 7) + 'px';
+        continuousFocuses.style.width = (size?.width ?? 770) + 'px';
+        continuousFocuses.style.height = (size?.height ?? 380) + 'px';
         continuousFocuses.style.display = 'block';
     } else {
         continuousFocuses.style.display = 'none';
@@ -1373,6 +1456,12 @@ function getFocusIcon(focus: Focus, exprs: ConditionItem[], styleTable: StyleTab
     return styleTable.name('focus-icon-' + normalizeForStyle('-empty'));
 }
 
+// 前置连线的贴图参数由载荷提供；没有时（安装路径不可解析）留给纯色线。
+function focusLinkTiles(): GridBoxConnectionTiles | undefined {
+    const tiles = (window as any).focusLinkTiles as { size: number; offset: NumberPosition } | undefined;
+    return tiles ? { size: tiles.size, offset: tiles.offset, className: focusLinkClass } : undefined;
+}
+
 function focusToGridItem(
     focus: Focus,
     focustree: FocusTree,
@@ -1405,6 +1494,8 @@ function focusToGridItem(
                 targetType: 'parent',
                 style: style,
                 classNames: classNames + ' ' + classNames2,
+                // 贴图线按这个标记选虚线帧（OR 组画虚线）。
+                dashed: prerequisites.length > 1,
             });
         });
     }
@@ -1678,6 +1769,9 @@ window.addEventListener('message', async (event) => {
     useConditionInFocus = msg.useConditionInFocus;
     (window as any).useConditionInFocus = msg.useConditionInFocus;
     (window as any).xGridSize = msg.xGridSize;
+    (window as any).focusLinkOffsets = msg.layout?.links;
+    (window as any).focusLinkTiles = msg.layout?.prerequisiteLink;
+    (window as any).continuousFocusSize = msg.layout?.continuous;
 
     if (selectedFocusTreeIndex >= focusTrees.length) {
         selectedFocusTreeIndex = Math.max(0, focusTrees.length - 1);
@@ -2057,9 +2151,15 @@ window.addEventListener('load', tryRun(async function() {
         }
     });
 
+    // A preview with no scroll saved yet is opening for the first time: open it where the game opens
+    // the tree. A reopened one goes back to where the reader left it.
+    const state = getState();
+    const firstOpen = state.xOffset === undefined && state.yOffset === undefined;
     updateSelectedFocusTree(false);
     await buildContent();
-    scrollToState();
+    if (!firstOpen || !scrollToInitialShowPosition()) {
+        scrollToState();
+    }
 
     // Tells the extension the structure is on screen so it can post the deferred focus-icon CSS.
     vscode.postMessage({ command: 'ready' });

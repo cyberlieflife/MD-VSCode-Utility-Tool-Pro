@@ -2,16 +2,23 @@ import { ContentLoader, LoadResultOD, Dependency, LoaderSession, mergeInLoadResu
 import { convertFocusFileNodeToJson, FocusTree, getFocusTreeWithFocusFile, getGfxNameForSearchFilter } from "./schema";
 import { parseHoi4File } from "../../hoiformat/hoiparser";
 import { localize } from "../../util/i18n";
+import { Logger } from "../../util/logger";
 import { uniq, flatten, chain } from "lodash";
 import { getGfxContainerFiles } from "../../util/gfxindex";
-import { sharedFocusIndex } from "../../util/featureflags";
+import { sharedFocusIndex, focusTreeLayout } from "../../util/featureflags";
 import { findFileByFocusKey, ensureFocusIndex } from "../../util/sharedFocusIndex";
-import { focusTitlebarStylesFile, nationalFocusViewGfxFile, goalsOverlaysGfxFile } from "./titlebar";
+import { focusTitlebarStylesFile, nationalFocusViewGfxFile, getFocusOverlayGfxFiles } from "./titlebar";
+import { GuiFileLoader } from "../gui/loader";
+import { buildFocusTreeLayout, FocusTreeLayout, FocusTreeLayoutMode, nationalFocusViewGuiFile } from "./layout";
 import { addInlayGfxWarnings, listGuiGfxFiles, loadFocusInlayWindows, resolveInlayGfxFiles, resolveInlayGuiWindows, resolveInlaysForTree } from "./inlay";
 
 export interface FocusTreeLoaderResult {
     focusTrees: FocusTree[];
     gfxFiles: string[];
+    // 焦点覆盖层查图的 .gfx 文件（游戏 goals.gfx，再是设置与 descriptor 命名的）。
+    overlayGfxFiles: string[];
+    // 仅在 focusTreeLayout 设置为 gui 时存在；否则预览使用标准布局。
+    layout?: FocusTreeLayout;
 }
 
 export type ProgressCallback = (message: string, current?: number, total?: number) => void;
@@ -20,6 +27,16 @@ const focusesGFX = 'interface/goals.gfx';
 
 export class FocusTreeLoader extends ContentLoader<FocusTreeLoaderResult> {
     private progressListener: ProgressCallback | undefined;
+    // 上一次加载使用的布局设置。设置不属于文档内容，不记录的话，翻转布局设置会命中"文本未变"
+    // 的加载缓存而得不到新布局。
+    private loadedLayoutMode: FocusTreeLayoutMode | undefined;
+
+    public override async shouldReloadImpl(session: LoaderSession): Promise<boolean> {
+        if (this.loadedLayoutMode !== undefined && this.loadedLayoutMode !== focusTreeLayout) {
+            return true;
+        }
+        return super.shouldReloadImpl(session);
+    }
 
     public setProgressListener(cb: ProgressCallback | undefined): void {
         this.progressListener = cb;
@@ -124,22 +141,43 @@ export class FocusTreeLoader extends ContentLoader<FocusTreeLoaderResult> {
             ...inlayResolvedGfxFiles,
         ];
 
+        this.loadedLayoutMode = focusTreeLayout;
+        let layout: FocusTreeLayout | undefined = undefined;
+        let layoutDependencies: string[] = [];
+        if (focusTreeLayout === 'gui') {
+            // 通过依赖加载器加载，nationalfocusview.gui 被编辑时会重载这棵树。gui 文件缺失或
+            // 读不动时按标准布局继续，而不是让整个预览报错消失。
+            try {
+                const layoutGui = await this.loaderDependencies.loadMultiple([nationalFocusViewGuiFile], session, GuiFileLoader);
+                const guiFiles = layoutGui.flatMap(r => r.result.guiFiles).map(g => g.data);
+                layout = buildFocusTreeLayout(guiFiles);
+                layoutDependencies = [nationalFocusViewGuiFile, ...mergeInLoadResult(layoutGui, 'dependencies')];
+            } catch (e) {
+                Logger.error(`Cannot read ${nationalFocusViewGuiFile} for the focus tree layout; using the standard layout: ${e}`);
+            }
+        }
+
+        const overlayGfxFiles = await getFocusOverlayGfxFiles();
+
         return {
             result: {
                 focusTrees,
                 gfxFiles: uniq([...gfxDependencies, focusesGFX]),
+                overlayGfxFiles,
+                layout,
             },
             dependencies: uniq([
                 this.file,
                 focusesGFX,
                 focusTitlebarStylesFile,
                 nationalFocusViewGfxFile,
-                goalsOverlaysGfxFile,
+                ...overlayGfxFiles,
                 ...gfxDependencies,
                 ...chain(focusTrees).flatMap(ft => ft.inlayWindows).map(inlay => inlay.file).uniq().value(),
                 ...inlayGuiFiles,
                 ...focusTreeDependencies,
-                ...mergeInLoadResult(focusTreeDepFiles, 'dependencies')
+                ...mergeInLoadResult(focusTreeDepFiles, 'dependencies'),
+                ...layoutDependencies,
             ]),
         };
     }

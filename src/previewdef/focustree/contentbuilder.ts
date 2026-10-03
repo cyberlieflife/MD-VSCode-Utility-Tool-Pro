@@ -10,9 +10,14 @@ import { FocusTreeLoader, ProgressCallback } from './loader';
 import { LoaderSession } from '../../util/loader/loader';
 import { debug, error } from '../../util/debug';
 import { StyleTable, normalizeForStyle } from '../../util/styletable';
-import { useConditionInFocus } from '../../util/featureflags';
+import { useConditionInFocus, focusTreePrerequisiteLines } from '../../util/featureflags';
 import { flatMap, chain } from 'lodash';
 import { getFocusTitlebarImage, getFocusOverlayImage, loadFocusTitlebarStyles, resolveTitlebarGfxName } from "./titlebar";
+import { FocusItemLayout, FocusTreeLayout, focusTreeGridBoxFor, standardFocusTreeLayout } from "./layout";
+import { registerExclusiveLinkStyles } from "../../util/hoi4gui/exclusivelink";
+import { loadExclusiveLinkImages, nationalFocusViewGfxFile } from "../../util/hoi4gui/exclusivelinkimages";
+import { registerFocusLinkStyles } from "../../util/hoi4gui/focuslink";
+import { loadFocusLinkImages } from "../../util/hoi4gui/focuslinkimages";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
 import { renderInstantTextBox } from "../../util/hoi4gui/instanttextbox";
@@ -31,6 +36,8 @@ export interface FocusTreeUpdatePayload {
     gridBox: HOIPartial<GridBoxType>;
     useConditionInFocus: boolean;
     xGridSize: number;
+    // 棋盘与各图层偏移的来源；网页端用它铺连线贴图、定位 continuous 框与初始视图。
+    layout: FocusTreeLayout;
 }
 
 export interface FocusTreePayload extends FocusTreeUpdatePayload {
@@ -42,17 +49,18 @@ export interface FocusTreePayload extends FocusTreeUpdatePayload {
 
 export type { ToolbarFlags };
 
-export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: ProgressCallback, options?: { resolveIcons?: boolean }): Promise<FocusTreePayload | null> {
+export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: ProgressCallback, options?: { resolveIcons?: boolean; dependencyChanged?: boolean }): Promise<FocusTreePayload | null> {
     const resolveIcons = options?.resolveIcons !== false;
     try {
         // Per-phase timing of parsing/loading, icon resolution, and DDS->PNG conversion, logged via debug() in dev builds.
         resetIconResolveStats();
         const tStart = Date.now();
 
-        const session = new LoaderSession(false);
+        // 依赖变更（覆盖层 gfx 清单的设置或 .mod 列表、连线贴图文件等）必须把强制开关传进会话，
+        // 否则 loader 按未变的文本哈希返回依赖变更前读到的结果。
+        const session = new LoaderSession(options?.dependencyChanged ?? false);
         const loadResult = await loader.load(session);
-        const loadedLoaders = Array.from((session as any).loadedLoader).map<string>(v => (v as any).toString());
-        debug('Loader session focus tree', loadedLoaders);
+        debug('Loader session focus tree', session.loadedLoaderNames());
         const tLoaded = Date.now();
 
         const focusTrees = loadResult.result.focusTrees;
@@ -60,12 +68,35 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             return null;
         }
 
+        const layout = loadResult.result.layout ?? standardFocusTreeLayout;
         const styleTable = new StyleTable();
         const styleNonce = randomString(32);
         const renderedFocus: Record<string, string> = {};
         const renderedInlayWindows: Record<string, string> = {};
 
         const titlebarStyles = await loadFocusTitlebarStyles();
+
+        // 两遍渲染都注册：贴图未解析时类下退化为纯色线，结构遍也照画互斥连线。
+        const exclusiveLinkImages = !resolveIcons ? undefined : layout.mode === 'gui'
+            ? await loadExclusiveLinkImages(layout.exclusive.sprites, [nationalFocusViewGfxFile, ...loadResult.result.gfxFiles])
+            : await loadExclusiveLinkImages();
+        registerExclusiveLinkStyles(styleTable, exclusiveLinkImages, layout.spacing.x, {
+            startX: layout.exclusive.startX,
+            endX: layout.exclusive.endX,
+            y: layout.exclusive.offsetY,
+        }, layout.spacing.y, {
+            // 压过 z-index 3 的名条与复选框，连线在名条行会横穿焦点。
+            zIndex: 4,
+            gapUnderMid: true,
+            clampToCentre: true,
+        });
+
+        // 前置连线同样两遍注册：网页端怎么都是画同一批贴图。
+        const focusLinkState = focusTreePrerequisiteLines;
+        const focusLinkImages = !resolveIcons ? undefined : layout.mode === 'gui'
+            ? await loadFocusLinkImages(layout.prerequisiteLink.sprites, [nationalFocusViewGfxFile, ...loadResult.result.gfxFiles], focusLinkState)
+            : await loadFocusLinkImages(undefined, undefined, focusLinkState);
+        registerFocusLinkStyles(styleTable, focusLinkImages, focusLinkState);
 
         const allFocuses = flatMap(focusTrees, tree => Object.values(tree.focuses));
         const focusMessage = localize('focustree.loading.rendering_focuses', 'Rendering focuses');
@@ -74,7 +105,7 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
         }
         let renderedFocusCount = 0;
         await mapLimit(allFocuses, renderConcurrency, async (focus) => {
-            renderedFocus[focus.id] = (await renderFocus(focus, styleTable, loadResult.result.gfxFiles, loader.file, titlebarStyles, resolveIcons)).replace(/\s\s+/g, ' ');
+            renderedFocus[focus.id] = (await renderFocus(focus, styleTable, loadResult.result.gfxFiles, loadResult.result.overlayGfxFiles, loader.file, titlebarStyles, layout.item, resolveIcons)).replace(/\s\s+/g, ' ');
             renderedFocusCount++;
             if (progress) {
                 progress(focusMessage, renderedFocusCount, allFocuses.length);
@@ -120,9 +151,10 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             focusTrees,
             renderedFocus,
             renderedInlayWindows,
-            gridBox: focusTreeGridBox,
+            gridBox: focusTreeGridBoxFor(layout),
             useConditionInFocus,
-            xGridSize,
+            xGridSize: layout.spacing.x,
+            layout,
             styleTable,
             styleNonce,
             toolbarFlags,
@@ -139,11 +171,14 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
  * buildFocusTreePayload does. The partial-update early-out uses this to fingerprint structure cheaply.
  * Because it shares the loader's content-hash cache, a same-tick buildFocusTreePayload reuses this parse
  * instead of re-parsing, so the fall-through path never double-parses. Returns null when empty or on error.
+ * The layout comes back too so the early-out fingerprints the same grid a full payload would carry.
  */
-export async function loadFocusTreesOnly(loader: FocusTreeLoader): Promise<FocusTree[] | null> {
+export async function loadFocusTreesOnly(loader: FocusTreeLoader, dependencyChanged = false): Promise<{ focusTrees: FocusTree[]; layout: FocusTreeLayout } | null> {
     try {
-        const r = await loader.load(new LoaderSession(false));
-        return r.result.focusTrees.length ? r.result.focusTrees : null;
+        const r = await loader.load(new LoaderSession(dependencyChanged));
+        return r.result.focusTrees.length
+            ? { focusTrees: r.result.focusTrees, layout: r.result.layout ?? standardFocusTreeLayout }
+            : null;
     } catch {
         return null;
     }
@@ -160,12 +195,20 @@ export async function buildFocusTreeHtml(payload: FocusTreePayload, webview: vsc
     jsCodes.push('window.renderedFocus = ' + JSON.stringify(payload.renderedFocus));
     jsCodes.push('window.renderedInlayWindows = ' + JSON.stringify(payload.renderedInlayWindows));
     jsCodes.push('window.gridBox = ' + JSON.stringify(payload.gridBox));
+    if (payload.layout.links) {
+        jsCodes.push('window.focusLinkOffsets = ' + JSON.stringify(payload.layout.links));
+    }
+    jsCodes.push('window.focusLinkTiles = ' + JSON.stringify(payload.layout.prerequisiteLink));
+    if (payload.layout.center) {
+        jsCodes.push('window.focusTreeCenter = ' + JSON.stringify(payload.layout.center));
+    }
+    jsCodes.push('window.continuousFocusSize = ' + JSON.stringify(payload.layout.continuous));
     jsCodes.push('window.styleNonce = ' + JSON.stringify(payload.styleNonce));
     jsCodes.push('window.useConditionInFocus = ' + payload.useConditionInFocus);
     jsCodes.push('window.xGridSize = ' + payload.xGridSize);
     jsCodes.push(i18nTableAsScript());
 
-    const baseContent = await renderFocusTreeShell(payload.focusTrees, payload.styleTable, payload.toolbarFlags, payload.styleNonce, payload.gfxFiles);
+    const baseContent = await renderFocusTreeShell(payload.focusTrees, payload.styleTable, payload.toolbarFlags, payload.styleNonce, payload.gfxFiles, payload.layout);
 
     return html(
         webview,
@@ -214,35 +257,19 @@ export function buildFocusTreeErrorHtml(webview: vscode.Webview, uri: vscode.Uri
     return html(webview, baseContent, [ previewedFileUriScript(uri), reloadScript ], []);
 }
 
-const leftPaddingBase = 50;
-const topPaddingBase = 50;
-const xGridSize = 96;
-const yGridSize = 130;
-
-// The grid layout is derived entirely from these constants, so the payload gridBox is identical on every
-// render. It is a shared const (not rebuilt per call) so the partial-update early-out can reproduce the
-// exact same gridBox fingerprint contribution as a full buildFocusTreePayload without re-deriving it.
-export const focusTreeXGridSize = xGridSize;
-export const focusTreeGridBox: HOIPartial<GridBoxType> = {
-    position: { x: toNumberLike(leftPaddingBase), y: toNumberLike(topPaddingBase) },
-    format: toStringAsSymbolIgnoreCase('up'),
-    size: { width: toNumberLike(xGridSize), height: undefined },
-    slotsize: { width: toNumberLike(xGridSize), height: toNumberLike(yGridSize) },
-} as HOIPartial<GridBoxType>;
-
 /**
  * Renders the static page shell (dragger, content placeholders, warnings container,
  * toolbar). Focuses and inlays themselves are rendered separately into the payload and
  * injected by the webview, so this is a cheap synchronous step.
  */
-async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string, gfxFiles: string[]): Promise<string> {
+async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string, gfxFiles: string[], layout: FocusTreeLayout): Promise<string> {
     // CSP-nonced <style> element the webview later fills with the resolved focus-icon background CSS.
     const progressiveIconStyles = `<style id="ft-progressive-icons" nonce="${styleNonce}"></style>`;
     const continuousFocusContent =
         `<div id="continuousFocuses" class="${styleTable.oneTimeStyle('continuousFocuses', () => `
             position: absolute;
-            width: 770px;
-            height: 380px;
+            width: ${layout.continuous.width}px;
+            height: ${layout.continuous.height}px;
             margin: 20px;
             background: rgba(128, 128, 128, 0.2);
             text-align: center;
@@ -628,11 +655,14 @@ async function renderFocus(
     focus: Focus,
     styleTable: StyleTable,
     gfxFiles: string[],
+    overlayGfxFiles: string[],
     file: string,
     titlebarStyles: Record<string, string>,
+    itemLayout: FocusItemLayout,
     resolveIcons: boolean = true,
 ): Promise<string> {
-    // Skips the expensive per-texture DDS->PNG conversions in the structure-only pass and registers a neutral placeholder.
+    // Skips the expensive per-texture DDS->PNG conversions in the structure-only pass and registers a
+    // neutral placeholder. 元素尺寸取图片尺寸：图标层是焦点的拖动命中区，必须与图片同宽高。
     for (const focusIcon of focus.icon) {
         const iconName = focusIcon.icon;
         const iconObject = resolveIcons && iconName ? await getFocusIcon(iconName, gfxFiles) : null;
@@ -658,7 +688,7 @@ async function renderFocus(
             display: none;
         `
     );
-    const overlayObject = await getFocusOverlayImage(focus.overlay);
+    const overlayObject = await getFocusOverlayImage(focus.overlay, overlayGfxFiles);
     const overlayClass = styleTable.style('focus-overlay-' + normalizeForStyle(focus.overlay ?? '-empty'), () =>
         overlayObject ? `
             background-image: url(${overlayObject.uri});
@@ -680,42 +710,12 @@ async function renderFocus(
         text-align: center;
         cursor: pointer;
     `);
-    const focusIconLayerClass = styleTable.style('focus-icon-layer', () => `
-        position: absolute;
-        left: 50%;
-        top: calc(50% - 18px);
-        transform: translate(-50%, -50%);
-        background-position-x: center;
-        background-position-y: center;
-        background-repeat: no-repeat;
-        z-index: 1;
-    `);
-    const focusTitlebarLayerClass = styleTable.style('focus-titlebar-layer', () => `
-        position: absolute;
-        left: 50%;
-        top: 70px;
-        transform: translateX(-50%);
-        background-repeat: no-repeat;
-        z-index: 0;
-    `);
-    const focusOverlayLayerClass = styleTable.style('focus-overlay-layer', () => `
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, calc(-50% - 3px));
-        background-repeat: no-repeat;
-        z-index: 2;
-    `);
+    const layerStyles = focusLayerStyles(itemLayout);
+    const focusIconLayerClass = styleTable.style('focus-icon-layer', () => layerStyles.iconLayer);
+    const focusTitlebarLayerClass = styleTable.style('focus-titlebar-layer', () => layerStyles.titlebarLayer);
+    const focusOverlayLayerClass = styleTable.style('focus-overlay-layer', () => layerStyles.overlayLayer);
     const focusCheckboxClass = styleTable.style('focus-checkbox', () => `position: absolute; top: 1px; z-index: 3;`);
-    const focusSpanClass = styleTable.style('focus-span', () => `
-        position: relative;
-        z-index: 3;
-        margin: 10px -400px;
-        margin-top: 85px;
-        text-align: center;
-        display: inline-block;
-        pointer-events: none;
-    `);
+    const focusSpanClass = styleTable.style('focus-span', () => layerStyles.span);
 
     const cachedHtml = renderedFocusHtmlCache.get(focus);
     if (cachedHtml !== undefined) {
@@ -735,6 +735,57 @@ async function renderFocus(
     });
     renderedFocusHtmlCache.set(focus, html);
     return html;
+}
+
+// `base` 按 `offset` 像素平移，标准布局的写法保持不变。
+function withOffset(base: string, offset: number): string {
+    return offset === 0 ? base : `calc(${base} ${offset < 0 ? '-' : '+'} ${Math.abs(offset)}px)`;
+}
+
+/**
+ * 焦点各图层的 CSS，由布局的 item 偏移参数化。两条契约由测试锁定：图标层必须保持可命中（它是
+ * 焦点的拖动命中区——网页端的 move/框选判定按命中的元素区分，绝不能是 pointer-events: none），
+ * 且各层位置随布局设置移动。
+ */
+export function focusLayerStyles(itemLayout: FocusItemLayout): { iconLayer: string; titlebarLayer: string; overlayLayer: string; span: string } {
+    return {
+        iconLayer: `
+            position: absolute;
+            left: ${withOffset('50%', itemLayout.iconOffsetX)};
+            top: ${withOffset('50%', itemLayout.iconOffsetY)};
+            transform: translate(-50%, -50%);
+            background-position-x: center;
+            background-position-y: center;
+            background-repeat: no-repeat;
+            z-index: 1;
+        `,
+        titlebarLayer: `
+            position: absolute;
+            left: ${withOffset('50%', itemLayout.titlebarOffsetX)};
+            top: ${itemLayout.titlebarTop}px;
+            transform: translateX(-50%);
+            background-repeat: no-repeat;
+            z-index: 0;
+        `,
+        overlayLayer: `
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(${withOffset('-50%', itemLayout.overlayOffsetX)}, ${withOffset('-50%', itemLayout.overlayOffsetY)});
+            background-repeat: no-repeat;
+            z-index: 2;
+        `,
+        span: `
+            position: relative;
+            z-index: 3;
+            margin: 10px -400px;
+            margin-top: ${itemLayout.textTop}px;${itemLayout.textOffsetX === 0 ? '' : `
+            left: ${itemLayout.textOffsetX}px;`}
+            text-align: center;
+            display: inline-block;
+            pointer-events: none;
+        `,
+    };
 }
 
 export interface FocusHtmlClasses {

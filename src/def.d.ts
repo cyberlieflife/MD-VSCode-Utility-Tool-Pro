@@ -23,6 +23,9 @@ declare module 'vscode' {
             readonly characterTraitStructuralKeys: string[];
             readonly decisionGfxFiles: string[];
             readonly ideaSwapIndex: boolean;
+            readonly focusTreeLayout: 'standard' | 'gui';
+            readonly focusTreePrerequisiteLines: 'available' | 'completed';
+            readonly focusOverlayGfxFiles: string[];
         };
     }
 }

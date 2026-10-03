@@ -593,6 +593,7 @@ interface DescriptorModFile {
     idea_placeholder_icon?: string;
     character_trait_structural_keys?: Enum;
     decision_gfx?: Enum;
+    focus_overlay_gfx?: Enum;
 }
 
 const descriptorModFileSchema: SchemaDef<DescriptorModFile> = {
@@ -600,6 +601,7 @@ const descriptorModFileSchema: SchemaDef<DescriptorModFile> = {
     idea_placeholder_icon: "string",
     character_trait_structural_keys: "enum",
     decision_gfx: "enum",
+    focus_overlay_gfx: "enum",
 };
 
 interface DescriptorLists {
@@ -607,6 +609,7 @@ interface DescriptorLists {
     ideaPlaceholderIcon: string[];
     characterTraitStructuralKeys: string[];
     decisionGfx: string[];
+    focusOverlayGfx: string[];
 }
 
 const descriptorListsCache = new PromiseCache<DescriptorLists>({
@@ -648,6 +651,15 @@ export async function getDescriptorCharacterTraitStructuralKeys(): Promise<strin
  */
 export async function getDescriptorDecisionGfx(): Promise<string[]> {
     return (await getDescriptorList("decisionGfx")) ?? [];
+}
+
+/**
+ * The `focus_overlay_gfx` .gfx files named by the working mod's descriptor: where the focus tree
+ * preview looks a focus overlay up, besides the game's own interface/goals.gfx. The game ignores
+ * the key.
+ */
+export async function getDescriptorFocusOverlayGfx(): Promise<string[]> {
+    return (await getDescriptorList("focusOverlayGfx")) ?? [];
 }
 
 async function getDescriptorList(list: keyof DescriptorLists): Promise<string[] | undefined> {
@@ -694,5 +706,6 @@ async function getListsFromModFile(absolutePath: string): Promise<DescriptorList
         ideaPlaceholderIcon: typeof modFile.idea_placeholder_icon === 'string' ? [modFile.idea_placeholder_icon] : [],
         characterTraitStructuralKeys: modFile.character_trait_structural_keys?._values ?? [],
         decisionGfx: modFile.decision_gfx?._values ?? [],
+        focusOverlayGfx: modFile.focus_overlay_gfx?._values ?? [],
     };
 }

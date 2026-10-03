@@ -1,0 +1,255 @@
+import * as assert from 'assert';
+import { parseHoi4File, resolveScriptVariables } from '../hoiformat/hoiparser';
+import { convertNodeToJson } from '../hoiformat/schema';
+import { GuiFile, guiFileSchema } from '../hoiformat/gui';
+import { buildFocusTreeLayout, focusTreeGridBoxFor, standardFocusTreeLayout } from '../previewdef/focustree/layout';
+
+function parseGui(text: string) {
+    return convertNodeToJson<GuiFile>(resolveScriptVariables(parseHoi4File(text)), guiFileSchema);
+}
+
+// Millennium Dawn 的 interface/nationalfocusview.gui 中布局读取到的部分，按模组的写法：带引号的
+// name 与 sprite、带引号的 "UP"、大小写混写的键，以及 `tree > grid_window` 之外的第二个 `grid`
+// gridbox（它不是焦点网格）。
+const mdGui = `guiTypes = {
+	containerWindowType = {
+		name = "nationalfocusview"
+		position = { x=-3 y=78 }
+		containerWindowType = {
+			name = "tree"
+			position = { x=0 y=47 }
+			containerWindowType = {
+				name = "grid_window"
+				position = { x=0 y=0 }
+				gridboxtype = {
+					name = "grid"
+					position = { x = 50 y = 50 }
+					slotsize = { width = 1 height = 1 }
+					format = "UP"
+				}
+				containerWindowType = {
+					name = "continuous_focus_window"
+					position = { x=0 y=0 }
+					size = { width = 770 height = 380 }
+					margin = { top = 13 left = 0 bottom = 13 right = 13}
+				}
+			}
+		}
+		containerWindowType = {
+			name = "continuous_window"
+			gridboxtype = {
+				name = "grid"
+				position = { x = 7 y = 9 }
+			}
+		}
+	}
+	containerWindowType = {
+		name = "national_focus_item"
+		position = { x=0 y=0 }
+		size = { width = 165 height = 128 }
+		buttonType = {
+			name = "bg"
+			quadTextureSprite ="GFX_technology_unavailable_item_bg"
+			position = { x= 5 y = 40 }
+		}
+		buttonType = {
+			name = "symbol"
+			position = { x = 5 y = -44 }
+			quadTextureSprite = "GFX_goal_unknown"
+			centerposition = yes
+			Orientation = CENTER
+		}
+		iconType = {
+		    name = "overlay"
+		    position = { x = -9 y = -28 }
+		    alwaystransparent = yes
+		}
+		instantTextboxType = {
+			name = "name"
+			position = { x = 15 y = 58 }
+			font = "hoi_16mbs"
+			maxWidth = 147
+			maxHeight = 20
+			format = center
+		}
+	}
+	containerWindowType = {
+		name = "national_focus_exclusive_item"
+		position = { x=-5 y=28 }
+		size = { width = 1 height = 12 }
+		iconType = { name = "link1" position = { x = 16 y = 10 } spriteType = "GFX_focus_exclusive_line1" frame = 1 }
+		iconType = { name = "left" spriteType = "GFX_focus_link_exclusive" frame = 2 }
+		iconType = { name = "right" spriteType = "GFX_focus_link_exclusive" frame = 3 }
+		iconType = { name = "mid" spriteType = "GFX_focus_link_exclusive" frame = 1 }
+	}
+	containerWindowType = {
+		name = "national_focus_link"
+		position = { x=-2 y=0 }
+		size = { width = 16 height = 16 }
+		clipping = no
+		iconType = { name = "link" spriteType = "GFX_focus_link_up_down" frame = 1 alwaystransparent = yes }
+	}
+	positionType = { name = "focus_spacing" position = { x = 96 y = 130 } }
+	positionType = { name = "national_focus_center" position = { x = 130 y = 32 } }
+	positionType = { name = "link_begin" position = { x = 80 y = 64 } }
+	positionType = { name = "link_end" position = { x = 80  y = 0 } }
+	positionType = { name = "exclusive_offset" position = { x = 172 y = 24 } }
+	positionType = { name = "exclusive_offset_left" position = { x = 12 y = 24 } }
+	positionType = { name = "exclusive_positioning" position = { x = 2 y = 0 } }
+}`;
+
+describe('previewdef/focustree/layout', () => {
+    it('reads the game layout as the standard one', () => {
+        const { center, ...layout } = buildFocusTreeLayout([parseGui(mdGui)]);
+        assert.deepStrictEqual({ ...layout, mode: 'standard' }, standardFocusTreeLayout);
+        assert.strictEqual(layout.mode, 'gui');
+        assert.deepStrictEqual(center, { x: 130, y: 32 });
+    });
+
+    it('has no centre unless the file declares national_focus_center', () => {
+        assert.strictEqual(standardFocusTreeLayout.center, undefined);
+        assert.strictEqual(buildFocusTreeLayout([]).center, undefined);
+        const withoutCenter = mdGui.replace('positionType = { name = "national_focus_center" position = { x = 130 y = 32 } }', '');
+        assert.notStrictEqual(withoutCenter, mdGui);
+        assert.strictEqual(buildFocusTreeLayout([parseGui(withoutCenter)]).center, undefined);
+    });
+
+    it('keeps every standard value when the file declares none of them', () => {
+        const layout = buildFocusTreeLayout([parseGui('guiTypes = { containerWindowType = { name = "unrelated" } }')]);
+        assert.deepStrictEqual({ ...layout, mode: 'standard' }, standardFocusTreeLayout);
+        assert.deepStrictEqual({ ...buildFocusTreeLayout([]), mode: 'standard' }, standardFocusTreeLayout);
+    });
+
+    it('sizes the continuous focus box from continuous_focus_window', () => {
+        const gui = (size: string) => `guiTypes = { containerWindowType = {
+            name = "nationalfocusview"
+            containerWindowType = {
+                name = "tree"
+                containerWindowType = {
+                    name = "grid_window"
+                    containerWindowType = { name = "continuous_focus_window" ${size} }
+                }
+            }
+        } }`;
+        assert.deepStrictEqual(buildFocusTreeLayout([parseGui(gui('size = { width = 600 height = 300 }'))]).continuous, { width: 600, height: 300 });
+        assert.deepStrictEqual(buildFocusTreeLayout([parseGui(gui('size = { width = 500 }'))]).continuous, { width: 500, height: 380 });
+        assert.deepStrictEqual(buildFocusTreeLayout([parseGui(gui('size = { width = 100%% height = 200 }'))]).continuous, { width: 770, height: 200 });
+        assert.deepStrictEqual(buildFocusTreeLayout([parseGui(gui(''))]).continuous, standardFocusTreeLayout.continuous);
+        assert.deepStrictEqual(standardFocusTreeLayout.continuous, { width: 770, height: 380 });
+    });
+
+    it('takes the spacing and the grid from the file, resolving @constants', () => {
+        const layout = buildFocusTreeLayout([parseGui(`@spacing_x = 110
+guiTypes = {
+	containerWindowType = {
+		name = "nationalfocusview"
+		containerWindowType = {
+			name = "tree"
+			containerWindowType = {
+				name = "grid_window"
+				gridboxtype = { name = "grid" position = { x = 70 y = 40 } format = "UP" }
+			}
+		}
+	}
+	positionType = { name = "focus_spacing" position = { x = @spacing_x y = 140 } }
+}`)]);
+        assert.deepStrictEqual(layout.spacing, { x: 110, y: 140 });
+        assert.deepStrictEqual(layout.grid, { x: 70, y: 40 });
+        const gridBox = focusTreeGridBoxFor(layout);
+        assert.strictEqual(gridBox.slotsize?.width?._value, 110);
+        assert.strictEqual(gridBox.slotsize?.height?._value, 140);
+        assert.strictEqual(gridBox.position?.x?._value, 70);
+    });
+
+    it('takes the way the tree grows from the grid format', () => {
+        for (const [written, format] of [['"DOWN"', 'down'], ['left', 'left'], ['RIGHT', 'right'], ['center', 'up']] as const) {
+            const layout = buildFocusTreeLayout([parseGui(mdGui.replace('format = "UP"', `format = ${written}`))]);
+            assert.strictEqual(layout.format, format);
+            assert.strictEqual(focusTreeGridBoxFor(layout).format?._name, format);
+        }
+        assert.strictEqual(focusTreeGridBoxFor(standardFocusTreeLayout).format?._name, 'up');
+    });
+
+    it('moves the focus layers by how far the file moves them from the game layout', () => {
+        const moved = mdGui
+            .replace('position = { x = 5 y = -44 }', 'position = { x = 5 y = -34 }')
+            .replace('position = { x= 5 y = 40 }', 'position = { x= 11 y = 45 }')
+            .replace('position = { x = -9 y = -28 }', 'position = { x = -4 y = -30 }')
+            .replace('position = { x = 15 y = 58 }', 'position = { x = 19 y = 50 }');
+        const item = buildFocusTreeLayout([parseGui(moved)]).item;
+        assert.deepStrictEqual(item, {
+            iconOffsetX: 0,
+            iconOffsetY: -8,
+            titlebarOffsetX: 6,
+            titlebarTop: 75,
+            overlayOffsetX: 5,
+            overlayOffsetY: -5,
+            textOffsetX: 4,
+            textTop: 77,
+        });
+    });
+
+    it('moves the prerequisite line ends and the exclusive link', () => {
+        const moved = mdGui
+            .replace('name = "link_begin" position = { x = 80 y = 64 }', 'name = "link_begin" position = { x = 80 y = 74 }')
+            .replace('name = "link_end" position = { x = 80  y = 0 }', 'name = "link_end" position = { x = 80  y = -6 }')
+            .replace('name = "exclusive_offset" position = { x = 172 y = 24 }', 'name = "exclusive_offset" position = { x = 172 y = 30 }');
+        const layout = buildFocusTreeLayout([parseGui(moved)]);
+        assert.deepStrictEqual(layout.links, { parent: { x: 0, y: 10 }, child: { x: 0, y: -6 } });
+        assert.strictEqual(layout.exclusive.offsetY, 39);
+        assert.strictEqual(layout.exclusive.startX, 48);
+        assert.strictEqual(layout.exclusive.endX, -48);
+    });
+
+    it('moves the exclusive link ends sideways from exclusive_offset, exclusive_offset_left and the item x', () => {
+        const moved = mdGui
+            .replace('name = "exclusive_offset" position = { x = 172 y = 24 }', 'name = "exclusive_offset" position = { x = 180 y = 24 }')
+            .replace('name = "exclusive_offset_left" position = { x = 12 y = 24 }', 'name = "exclusive_offset_left" position = { x = 8 y = 24 }')
+            .replace('position = { x=-5 y=28 }', 'position = { x=-3 y=28 }');
+        const exclusive = buildFocusTreeLayout([parseGui(moved)]).exclusive;
+        assert.strictEqual(exclusive.startX, 58);
+        assert.strictEqual(exclusive.endX, -50);
+        assert.strictEqual(exclusive.offsetY, 33);
+    });
+
+    it('takes the exclusive link sprites and 1 based frames from the file', () => {
+        const moved = mdGui
+            .replace('spriteType = "GFX_focus_exclusive_line1" frame = 1', 'spriteType = "GFX_my_line" frame = 2')
+            .replace('name = "mid" spriteType = "GFX_focus_link_exclusive" frame = 1', 'name = "mid" spriteType = "GFX_my_mid"');
+        const sprites = buildFocusTreeLayout([parseGui(moved)]).exclusive.sprites;
+        assert.strictEqual(sprites.lineGfx, 'GFX_my_line');
+        assert.strictEqual(sprites.lineFrame, 1);
+        assert.strictEqual(sprites.midGfx, 'GFX_my_mid');
+        assert.strictEqual(sprites.midFrame, 0);
+        assert.strictEqual(sprites.leftFrame, 1);
+        assert.strictEqual(sprites.rightFrame, 2);
+    });
+
+    it('takes the prerequisite line tiles from national_focus_link', () => {
+        const moved = mdGui
+            .replace('position = { x=-2 y=0 }', 'position = { x=1 y=4 }')
+            .replace('size = { width = 16 height = 16 }', 'size = { width = 20 height = 20 }')
+            .replace('spriteType = "GFX_focus_link_up_down" frame = 1', 'spriteType = "GFX_md_link_up_down" frame = 3');
+        const link = buildFocusTreeLayout([parseGui(moved)]).prerequisiteLink;
+        assert.strictEqual(link.size, 20);
+        assert.deepStrictEqual(link.offset, { x: 3, y: 4 });
+        assert.strictEqual(link.sprites.gfx.up_down, 'GFX_md_link_up_down');
+        assert.strictEqual(link.sprites.gfx.down_left, 'GFX_md_link_down_left');
+    });
+
+    // gui 的 frame 只是图标起始帧：每条线的帧由游戏按状态取，gui 的 frame = 1 是绿色已完成线。
+    it('takes no frame from national_focus_link', () => {
+        for (const frame of ['1', '3']) {
+            const moved = mdGui.replace('spriteType = "GFX_focus_link_up_down" frame = 1', `spriteType = "GFX_focus_link_up_down" frame = ${frame}`);
+            const sprites = buildFocusTreeLayout([parseGui(moved)]).prerequisiteLink.sprites;
+            assert.deepStrictEqual(Object.keys(sprites), ['gfx']);
+        }
+    });
+
+    it('keeps the standard corner sprites when the line sprite is not named after its shape', () => {
+        const moved = mdGui.replace('spriteType = "GFX_focus_link_up_down" frame = 1', 'spriteType = "GFX_md_line"');
+        const sprites = buildFocusTreeLayout([parseGui(moved)]).prerequisiteLink.sprites;
+        assert.strictEqual(sprites.gfx.up_down, 'GFX_md_line');
+        assert.strictEqual(sprites.gfx.up_right, 'GFX_focus_link_up_right');
+    });
+});

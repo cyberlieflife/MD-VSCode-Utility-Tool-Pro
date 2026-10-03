@@ -4,6 +4,7 @@ import { FocusTreeLoader } from '../previewdef/focustree/loader';
 import { LoaderSession } from '../util/loader/loader';
 import { listGuiGfxFiles, resolveInlayGuiWindows, resolveInlayGfxFiles } from '../previewdef/focustree/inlay';
 import { clearDlcZipCache } from '../util/fileloader';
+import { refreshFeatureFlags } from '../util/featureflags';
 
 // Drives FocusTreeLoader.postLoad against a stubbed interface/ tree (two .gfx, one .gui) served from
 // the HOI4 install path (no workspace folders). Feature flags are off, so getGfxContainerFiles is a
@@ -92,5 +93,72 @@ describe('previewdef/focustree/loader inlay short-circuit', function () {
         assert.deepStrictEqual(gui.gfxFiles, listed);
         assert.deepStrictEqual(gfx.resolvedFiles, []);
         assert.deepStrictEqual(listed, ['interface/a.gfx', 'interface/b.gfx']);
+    });
+
+    // 焦点覆盖层清单与布局设置是本轮新增的 loader 输出：覆盖层清单每次加载都重新解析（设置与
+    // descriptor 都能改它），布局只在 gui 模式构建。
+    describe('overlay gfx list and layout mode', function () {
+        const File = vscode.FileType.File;
+        const Directory = vscode.FileType.Directory;
+        const realGetConfig = (vscode.workspace as any).getConfiguration;
+        const realStat = (vscode.workspace.fs as any).stat;
+        const realReadDir = (vscode.workspace.fs as any).readDirectory;
+        const config: any = {
+            get: () => undefined, update: () => Promise.resolve(), inspect: () => undefined,
+            modFile: '', loadDlcContents: false, inlayWindowGfxRoots: [],
+            focusTreeLayout: 'standard', focusOverlayGfxFiles: [],
+        };
+
+        function uriPath(uri: any): string {
+            return String(uri.fsPath ?? uri.path ?? '');
+        }
+        function underInterface(uri: any): boolean {
+            return /(^|[/:])interface(\/|$)/.test(uriPath(uri));
+        }
+
+        beforeEach(function () {
+            config.focusTreeLayout = 'standard';
+            config.focusOverlayGfxFiles = [];
+            (vscode.workspace as any).getConfiguration = () => config;
+            refreshFeatureFlags();
+            (vscode.workspace.fs as any).stat = async (uri: any) => ({
+                type: underInterface(uri) && !/\.(gfx|gui)$/.test(uriPath(uri)) ? Directory : File,
+                mtime: 1, ctime: 0, size: 0,
+            });
+            (vscode.workspace.fs as any).readDirectory = async (uri: any) =>
+                underInterface(uri) ? [['a.gfx', File], ['b.gfx', File], ['c.gui', File]] : [];
+        });
+
+        afterEach(async function () {
+            (vscode.workspace as any).getConfiguration = realGetConfig;
+            (vscode.workspace.fs as any).stat = realStat;
+            (vscode.workspace.fs as any).readDirectory = realReadDir;
+            refreshFeatureFlags();
+            await clearDlcZipCache();
+        });
+
+        function postLoad2(content: string): Promise<any> {
+            const loader = new FocusTreeLoader('common/national_focus/test_tree.txt');
+            return (loader as any).postLoad(content, [], undefined, new LoaderSession(true));
+        }
+
+        it('lists the game goals.gfx for overlays, then the configured files', async function () {
+            const plain = await postLoad2(noInlayTree);
+            assert.deepStrictEqual(plain.result.overlayGfxFiles, ['interface/goals.gfx']);
+            // 未声明 national_focus_center 之外的东西：标准模式下不构建布局。
+            assert.strictEqual(plain.result.layout, undefined);
+
+            config.focusOverlayGfxFiles = ['interface/extra_overlays.gfx'];
+            const configured = await postLoad2(noInlayTree);
+            assert.deepStrictEqual(configured.result.overlayGfxFiles, ['interface/goals.gfx', 'interface/extra_overlays.gfx']);
+        });
+
+        it('forces a reload once the layout setting differs from the last load', async function () {
+            const loader = new FocusTreeLoader('common/national_focus/test_tree.txt');
+            (loader as any).loadedLayoutMode = 'standard';
+            config.focusTreeLayout = 'gui';
+            refreshFeatureFlags();
+            assert.strictEqual(await loader.shouldReloadImpl(new LoaderSession(false)), true);
+        });
     });
 });
