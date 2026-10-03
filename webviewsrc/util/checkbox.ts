@@ -24,7 +24,7 @@ export function syncCheckbox(input: HTMLInputElement): void {
 export class Checkbox extends Subscriber {
     private checkboxContainer: HTMLDivElement | undefined;
 
-    constructor(readonly input: HTMLInputElement, private text?: string, private html?: string) {
+    constructor(readonly input: HTMLInputElement, private text?: string, private html?: string, private glyphClassName?: string) {
         super();
         this.init();
     }
@@ -61,6 +61,13 @@ export class Checkbox extends Subscriber {
         checkbox.classList.add('codicon');
         checkbox.classList.add('codicon-check');
         checkboxContainer.appendChild(checkbox);
+
+        // 空类名也保留这个元素：格子宽度不变，没有字形的条目不会把标签挤歪。
+        if (this.glyphClassName !== undefined) {
+            const glyph = document.createElement('div');
+            glyph.className = ('checkbox-glyph ' + this.glyphClassName).trim();
+            checkboxContainer.appendChild(glyph);
+        }
 
         const label = document.createElement('div');
         label.textContent = text;

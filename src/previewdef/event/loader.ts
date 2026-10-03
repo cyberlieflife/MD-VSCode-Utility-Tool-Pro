@@ -1,8 +1,8 @@
-import { HOIEvents, getEvents } from "./schema";
+import { HOIEvents, HOIEvent, getEvents } from "./schema";
 import { ContentLoader, Dependency, LoadResultOD, LoaderSession, mergeInLoadResult } from "../../util/loader/loader";
 import { parseHoi4File } from "../../hoiformat/hoiparser";
 import { localize } from "../../util/i18n";
-import { uniq, flatten } from "lodash";
+import { uniq, flatten, uniqBy } from "lodash";
 import { YamlLoader } from "../../util/loader/yaml";
 import { getGfxContainerFiles } from "../../util/gfxindex";
 import { getLanguageIdInYml } from "../../util/vsccommon";
@@ -71,8 +71,21 @@ export class EventsLoader extends ContentLoader<EventsLoaderResult> {
 }
 
 function mergeEvents(...events: HOIEvents[]): HOIEvents {
+    // 同名命名空间按文件顺序拼接而不是整体覆盖：依赖文件与主文件都声明同一命名空间时，
+    // 覆盖会让主文件的事件整批消失。同一 id 出现两次由下游的 id 映射按后加载者覆盖。
+    const eventItemsByNamespace: Record<string, HOIEvent[]> = {};
+    for (const e of events) {
+        for (const [namespace, items] of Object.entries(e.eventItemsByNamespace)) {
+            eventItemsByNamespace[namespace] = [...(eventItemsByNamespace[namespace] ?? []), ...items];
+        }
+    }
+
     return {
-        eventItemsByNamespace: events.map(e => e.eventItemsByNamespace).reduce((p, c) => Object.assign(p, c), {}),
+        eventItemsByNamespace,
+        conditionExprs: uniqBy(
+            flatten(events.map(e => e.conditionExprs)),
+            e => e.scopeName + '@' + e.nodeContent,
+        ),
     };
 }
 

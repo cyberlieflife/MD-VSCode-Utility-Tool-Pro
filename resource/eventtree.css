@@ -1,0 +1,156 @@
+/*
+ * 事件工作流视图。
+ *
+ * 主题 token 与卡片原语在 hoicard.css，卡片布局的画布（拖动层、轨道、箭头与标签）在
+ * hoigraph.css；事件预览会把两者与本文件一起加载。这里只剩事件独有的部分。
+ *
+ * 颜色只承载含义：每种字形有一个色相并在所有卡片上保持不变，因此一张带三种字形的卡片显示
+ * 三种颜色而不是一种；高亮色标记受限选项及其门槛条件；"immediate" 色标记不是由玩家选择
+ * 触发的调用。
+ */
+
+/*
+ * 画布铺满整张图并盖在固定的 #dragger 之上，没有这条它会吞掉每次 mousedown、拖动平移永远
+ * 起不来。只有节点收回鼠标；箭头、轨道与标签不带监听，在它们上面也能起拖。
+ */
+#eventtreecontent {
+	position: relative;
+	z-index: var(--ev-layer-canvas);
+	transform-origin: 0 0;
+	pointer-events: none;
+}
+
+/* 标签与计数都是单行文本，旁边是 20px 高的控件，flex 行默认不给它们垂直居中。 */
+.toolbar > label[for="ev-searchbox"],
+.toolbar > .ev-search-count {
+	align-self: center;
+}
+
+.toolbar > #ev-searchbox {
+	width: 190px;
+	margin-right: 8px;
+}
+
+/* 足够宽，计数从 "1/9" 变到 "no matches" 时整条工具栏不横向跳动；与第一个开关的间距和开关
+   之间的间距一致。 */
+.toolbar > .ev-search-count {
+	min-width: 5em;
+	margin-right: 12px;
+	font-size: 11px;
+	color: var(--ev-fg-muted);
+}
+
+.ev-card-event {
+	width: 250px;
+}
+
+.ev-card-option {
+	width: 228px;
+}
+
+/* 用 background-color 而不是简写：简写会丢掉 .ev-card 画的浮起效果。 */
+.ev-card-hidden,
+.ev-card-unresolved {
+	border-style: dashed;
+	background-color: var(--ev-surface-alt);
+}
+
+.ev-card-gated {
+	border-color: var(--ev-accent);
+}
+
+/* 画布上唯一的非圆形字形，受限选项一眼可辨。 */
+.ev-marker-decision {
+	border-radius: 1px;
+	background: var(--ev-accent);
+	transform: rotate(45deg);
+}
+
+/*
+ * 一张事件卡片按它属于的每种类型各带一个字形的点，而不是所有类型共用一个圆点：这些类型并不
+ * 互斥——新闻事件常常同时是 major、也按平均时间触发——挑一个赢家会藏掉其余。这一行从不为空，
+ * 因为每个事件要么等自己的时钟、要么等被调用。
+ *
+ * 形状与颜色说的是同一件事且写死在一起，因此带三种字形的卡片显示三种颜色，读者不用数角就能
+ * 分辨。菱形不在下面的形状里：它属于受限选项。
+ */
+.ev-markers {
+	display: flex;
+	flex: none;
+	gap: 3px;
+	/* 与旁边 id 的第一行对齐，和原来单个圆点时一致。 */
+	margin-top: 4px;
+}
+
+.ev-markers > .ev-marker {
+	width: 8px;
+	height: 8px;
+	margin-top: 0;
+}
+
+.ev-marker-mtth {
+	background: var(--ev-mtth);
+}
+
+.ev-marker-triggered {
+	border-radius: 1px;
+	background: var(--ev-triggered);
+}
+
+.ev-marker-news {
+	border-radius: 0;
+	clip-path: polygon(50% 0, 100% 100%, 0 100%);
+	background: var(--ev-news);
+}
+
+.ev-marker-major {
+	border-radius: 0;
+	clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+	background: var(--ev-major);
+}
+
+/* 空心——隐藏事件该有的样子。 */
+.ev-marker-hidden {
+	background: transparent;
+	border: 1.5px solid var(--ev-hidden);
+	box-sizing: border-box;
+}
+
+/* 同一批字形也出现在过滤器名字前面，那里不套用卡片行的间距。 */
+.ev-marker.checkbox-glyph {
+	margin-top: 0;
+}
+
+.ev-card-option .ev-id {
+	color: var(--ev-fg-muted);
+}
+
+/* 六边形带的色相，使徽章与同一张卡片上的字形一致。 */
+.ev-badge-major {
+	color: var(--ev-major);
+	border-color: var(--ev-major);
+}
+
+.ev-badge-hidden {
+	border-style: dashed;
+}
+
+.ev-badge-loop {
+	color: var(--ev-immediate);
+	border-color: var(--ev-immediate);
+}
+
+/* 事件图片弹窗是 <body> 的子元素：精灵类带背景与尺寸，这里带每个悬停弹窗都要的两件事。
+   没有 pointer-events 它盖住工具栏时会吃掉点击。 */
+.event-hover-picture {
+	z-index: var(--ev-layer-popup);
+	pointer-events: none;
+}
+
+/* 事件自己发起的调用（来自 immediate 或 after 块），而不是玩家选择的调用。 */
+.ev-edge-immediate {
+	stroke: var(--ev-immediate);
+	stroke-dasharray: 1 3;
+	stroke-width: 2;
+	stroke-linecap: round;
+}

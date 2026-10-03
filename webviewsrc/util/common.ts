@@ -34,18 +34,38 @@ export function copyArray<T>(src: T[], dst: T[], offsetSrc: number, offsetDst: n
     }
 }
 
+// 已被接线的导航元素。就地更新会复用卡片元素，重复接线会让一次点击发出多次导航消息。
+const wiredNavigators = new WeakSet<Element>();
+
 export function subscribeNavigators() {
     const navigators = document.getElementsByClassName("navigator");
     for (let i = 0; i < navigators.length; i++) {
         const navigator = navigators[i] as HTMLDivElement;
-        navigator.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const startStr = this.attributes.getNamedItem('start')?.value;
-            const endStr = this.attributes.getNamedItem('end')?.value;
-            const file = this.attributes.getNamedItem('file')?.value;
+        if (wiredNavigators.has(navigator)) {
+            continue;
+        }
+        wiredNavigators.add(navigator);
+
+        const navigate = () => {
+            const startStr = navigator.attributes.getNamedItem('start')?.value;
+            const endStr = navigator.attributes.getNamedItem('end')?.value;
+            const file = navigator.attributes.getNamedItem('file')?.value;
             const start = !startStr || startStr === 'undefined' ? undefined : parseInt(startStr);
             const end = !endStr ? undefined : parseInt(endStr);
             navigateText(start, end, file);
+        };
+        navigator.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigate();
+        });
+        // 声明了 tabIndex 的卡片（事件图）要能用键盘激活。
+        navigator.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ' && e.code !== 'Enter' && e.code !== 'Space') {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            navigate();
         });
     }
 }

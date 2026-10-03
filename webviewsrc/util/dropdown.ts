@@ -56,6 +56,7 @@ class Dropdown extends Subscriber {
                 optionForDropdownMenu.push({
                     text: option.textContent ?? '',
                     html: undefined,
+                    glyph: undefined,
                     value: option.value,
                     selected: option.value === this.select.value,
                 });
@@ -215,6 +216,9 @@ export class DivDropdown extends Subscriber {
                 optionForDropdownMenu.push({
                     text: option.textContent ?? '',
                     html: option.innerHTML,
+                    // null 与 "" 是两种答案：没有属性表示这个列表根本没有字形列，空属性表示该条目
+                    // 留空格子。
+                    glyph: option.getAttribute('data-glyph') ?? undefined,
                     value: value ?? '',
                     selected: value !== null ? selectedValues!.includes(value) : false,
                 });
@@ -234,7 +238,9 @@ export class DivDropdown extends Subscriber {
     }
 }
 
-type Option = { text: string, html: string | undefined, value: string, selected: boolean };
+// glyph 是标签前小形状的类名列表，取自条目的 data-glyph 属性。undefined 保持条目原样；
+// "" 保留格子不画东西。
+type Option = { text: string, html: string | undefined, glyph: string | undefined, value: string, selected: boolean };
 class DropdownMenu extends Subscriber {
     private writableOptions$: Subject<Option[]>;
     public options$: Observable<Option[]>;
@@ -308,7 +314,7 @@ class DropdownMenu extends Subscriber {
             checkbox.checked = option.selected;
 
             item.appendChild(checkbox);
-            const checkboxItem = new Checkbox(checkbox, option.text, option.html);
+            const checkboxItem = new Checkbox(checkbox, option.text, option.html, option.glyph);
             this.addSubscription(checkboxItem);
 
             fromEvent(checkbox, 'change').subscribe(() => {

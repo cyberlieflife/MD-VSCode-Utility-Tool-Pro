@@ -315,6 +315,11 @@
 					"command": "mdhoi4utilities.preview",
 					"when": "shouldShowMdHoi4Preview && resourceScheme != webview-panel",
 					"group": "navigation"
+				},
+				{
+					"command": "mdhoi4utilities.scanreferences",
+					"when": "mdHoi4PreviewType == event && resourceScheme != webview-panel",
+					"group": "navigation"
 				}
 			],
 			"commandPalette": [

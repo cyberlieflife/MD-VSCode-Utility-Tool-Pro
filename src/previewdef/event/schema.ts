@@ -1,11 +1,16 @@
 import { Node, Token } from "../../hoiformat/hoiparser";
 import { Raw, SchemaDef, convertNodeToJson, HOIPartial, isSymbolNode } from "../../hoiformat/schema";
-import { extractEffectValue, EffectItem, EffectComplexExpr } from "../../hoiformat/effect";
+import { extractEffectValue, GuardedEffectItem, findGuardedEffectItems, projectEffects } from "../../hoiformat/effect";
+import { ConditionComplexExpr, ConditionItem, conditionToString, extractConditionValue, extractConditionalExprs } from "../../hoiformat/condition";
 import { Scope, ScopeType } from "../../hoiformat/scope";
+import { EffectTreeNode } from "../sharedpayload";
 import { uniqBy } from "lodash";
 
 export interface HOIEvents {
     eventItemsByNamespace: Record<string, HOIEvent[]>;
+    // 解析本文件时遇到的所有条件叶子（与焦点树、MIO 的收集方式一致），预览把它们作为可开关的
+    // 表达式提供。
+    conditionExprs: ConditionItem[];
 }
 
 export type HOIEventType = 'country' | 'state' | 'unit_leader' | 'news' | 'operative_leader';
@@ -17,6 +22,9 @@ export interface HOIEvent {
     namespace: string;
     picture?: string;
     immediate: HOIEventOption;
+    // `after = { ... }` 块：事件被关闭后（无论选了哪个选项，无选项的隐藏事件也一样）执行的内容。
+    // 与 immediate 一样读取，因为它发起的调用同样延续事件链。
+    after: HOIEventOption;
     options: HOIEventOption[];
     token: Token | undefined;
     major: boolean;
@@ -25,12 +33,18 @@ export interface HOIEvent {
     meanTimeToHappenBase: number;
     fire_only_once: boolean;
     file: string;
+    // 事件自身的 `trigger = { ... }` 门槛；未声明时为 true。
+    trigger: ConditionComplexExpr;
 }
 
 export interface HOIEventOption {
     name?: string;
     childEvents: ChildEvent[];
     token: Token | undefined;
+    // 选项的 `trigger = { ... }` 门槛：选项出现的条件；未声明时为 true。
+    trigger: ConditionComplexExpr;
+    // 选项所做的全部内容，供预览悬停展示（与子事件取自同一棵效果树，见 projectEffects）。
+    effects: EffectTreeNode[];
 }
 
 export interface ChildEvent {
@@ -40,6 +54,10 @@ export interface ChildEvent {
     hours: number;
     randomDays: number;
     randomHours: number;
+    // 这次调用的守卫条件（由外层每个 if / else_if / else 折叠而来）；无条件调用为 true。
+    condition: ConditionComplexExpr;
+    // 调用位于 random_list 分支时该分支的权重。
+    possibility?: number;
 }
 
 interface EventFile {
@@ -62,6 +80,8 @@ interface EventDef {
     fire_only_once: boolean;
     option: Raw[];
     immediate: Raw;
+    after: Raw;
+    trigger: Raw;
     _token: Token;
 }
 
@@ -117,6 +137,8 @@ const eventDefSchema: SchemaDef<EventDef> = {
         _type: "array",
     },
     immediate: "raw",
+    after: "raw",
+    trigger: "raw",
 };
 
 const eventFileSchema: SchemaDef<EventFile> = {
@@ -164,20 +186,22 @@ export function getEvents(node: Node, filePath: string): HOIEvents {
         }
     }
 
-    fillEvents(eventFile.country_event, 'country', filePath, eventItemsByNamespace);
-    fillEvents(eventFile.news_event, 'news', filePath, eventItemsByNamespace);
-    fillEvents(eventFile.state_event, 'state', filePath, eventItemsByNamespace);
-    fillEvents(eventFile.unit_leader_event, 'unit_leader', filePath, eventItemsByNamespace);
-    fillEvents(eventFile.operative_leader_event, 'operative_leader', filePath, eventItemsByNamespace);
+    const conditionExprs: ConditionItem[] = [];
+    fillEvents(eventFile.country_event, 'country', filePath, eventItemsByNamespace, conditionExprs);
+    fillEvents(eventFile.news_event, 'news', filePath, eventItemsByNamespace, conditionExprs);
+    fillEvents(eventFile.state_event, 'state', filePath, eventItemsByNamespace, conditionExprs);
+    fillEvents(eventFile.unit_leader_event, 'unit_leader', filePath, eventItemsByNamespace, conditionExprs);
+    fillEvents(eventFile.operative_leader_event, 'operative_leader', filePath, eventItemsByNamespace, conditionExprs);
 
     return {
         eventItemsByNamespace,
+        conditionExprs: uniqBy(conditionExprs, e => e.scopeName + '@' + e.nodeContent),
     };
 }
 
-function fillEvents(eventDefs: HOIPartial<EventDef>[], type: HOIEventType, filePath: string, eventItemsByNamespace: Record<string, HOIEvent[]>) {
+function fillEvents(eventDefs: HOIPartial<EventDef>[], type: HOIEventType, filePath: string, eventItemsByNamespace: Record<string, HOIEvent[]>, conditionExprs: ConditionItem[]) {
     for (const eventDef of eventDefs) {
-        const converted = convertEvent(eventDef, filePath, type);
+        const converted = convertEvent(eventDef, filePath, type, conditionExprs);
         if (converted) {
             const listOfNamespace = eventItemsByNamespace[converted.namespace];
             if (listOfNamespace) {
@@ -203,7 +227,7 @@ function eventTypeToScopeType(eventType: HOIEventType): ScopeType {
     }
 }
 
-function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, file: string, type: T): HOIEvent & { type: T } | undefined {
+function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, file: string, type: T, conditionExprs: ConditionItem[]): HOIEvent & { type: T } | undefined {
     if (!eventDef.id) {
         return undefined;
     }
@@ -216,8 +240,13 @@ function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, fi
     const scopeType = eventTypeToScopeType(type);
     const scope: Scope = { scopeName: `{event_target}`, scopeType };
 
-    const immediate = convertOption(eventDef.immediate, scope);
-    const options = eventDef.option.map(o => convertOption(o, scope));
+    const trigger = eventDef.trigger ?
+        extractConditionValue(eventDef.trigger._raw.value, scope, conditionExprs).condition :
+        true;
+
+    const immediate = convertOption(eventDef.immediate, scope, conditionExprs);
+    const after = convertOption(eventDef.after, scope, conditionExprs);
+    const options = eventDef.option.map(o => convertOption(o, scope, conditionExprs));
 
     const meanTimeToHappenBase = eventDef.mean_time_to_happen ?
         Math.floor(eventDef.mean_time_to_happen.factor ??
@@ -236,6 +265,7 @@ function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, fi
         picture,
         file,
         immediate,
+        after,
         options,
         token: eventDef._token,
         major: !!eventDef.major,
@@ -243,52 +273,65 @@ function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, fi
         isTriggeredOnly: !!eventDef.is_triggered_only,
         meanTimeToHappenBase,
         fire_only_once: !!eventDef.fire_only_once,
+        trigger,
     };
 }
 
-function convertOption(optionRaw: Raw | undefined, scope: Scope): HOIEventOption {
+function convertOption(optionRaw: Raw | undefined, scope: Scope, conditionExprs: ConditionItem[]): HOIEventOption {
     if (optionRaw === undefined) {
-        return { childEvents: [], token: undefined };
+        return { childEvents: [], token: undefined, trigger: true, effects: [] };
     }
 
     const optionDef = convertNodeToJson<EventOptionDef>(optionRaw._raw, eventOptionDefSchema);
     const name = optionDef.name;
-    
-    const effect = extractEffectValue(optionRaw._raw.value, scope);
-    const childEventItems = findChildEventItems(effect.effect);
+
+    const trigger = optionDef.trigger ?
+        extractConditionValue(optionDef.trigger._raw.value, scope, conditionExprs).condition :
+        true;
+
+    // 选项自己的键是元数据而不是效果：不排除它们，树里会把 name/trigger/ai_chance 和选项真正做的
+    // 事并列。只在块顶层排除，那才是它们能出现的位置——效果里嵌套的 `trigger` 是另一个键，保留。
+    const effect = extractEffectValue(optionRaw._raw.value, scope, optionOwnKeys);
+    const childEventItems = findGuardedEffectItems(effect.effect, eventTypes);
     const childEvents = childEventItems
         .map(effectItemToChildEvent)
         .filter((e): e is ChildEvent => e !== undefined);
-    const uniqueChildEvents = uniqBy(childEvents, e => e.eventName + '@' + e.scopeName);
+    // 两次调用同一事件只有在连线展示的全部内容都相同时才是同一条边：作用域、守卫条件、延迟与
+    // random_list 权重。按全部键去重才能把 if/else_if 分支分开——这正是链条像工作流的原因——
+    // 也不会让不同延迟的调用继承第一次调用的时间。
+    const uniqueChildEvents = uniqBy(
+        childEvents,
+        e => [
+            e.eventName,
+            e.scopeName,
+            conditionToString(e.condition),
+            e.days,
+            e.hours,
+            e.randomDays,
+            e.randomHours,
+            e.possibility ?? '',
+        ].join('@'),
+    );
+
+    for (const childEvent of uniqueChildEvents) {
+        extractConditionalExprs(childEvent.condition, conditionExprs);
+    }
 
     return {
         name,
         childEvents: uniqueChildEvents,
         token: optionDef._token,
+        trigger,
+        effects: projectEffects(effect.effect),
     };
 }
 
+const optionOwnKeys = ['name', 'trigger', 'ai_chance', 'original_recipient_only'];
+
 const eventTypes = ['country_event', 'news_event', 'state_event', 'unit_leader_event', 'operative_leader_event'];
 
-function findChildEventItems(effect: EffectComplexExpr, result: EffectItem[] = []): EffectItem[] {
-    if (effect === null) {
-        return result;
-    }
-
-    if ('nodeContent' in effect) {
-        if (effect.node.name && eventTypes.includes(effect.node.name?.toLowerCase())) {
-            result.push(effect);
-        }
-    } else if ('condition' in effect) {
-        effect.items.forEach(item => findChildEventItems(item, result));
-    } else {
-        effect.items.forEach(item => findChildEventItems(item.effect, result));
-    }
-
-    return result;
-}
-
-function effectItemToChildEvent(item: EffectItem): ChildEvent | undefined {
+function effectItemToChildEvent(guarded: GuardedEffectItem): ChildEvent | undefined {
+    const { item, condition, possibility } = guarded;
     const eventEffectDef = getEventEffectDef(item.node);
     if (!eventEffectDef) {
         return undefined;
@@ -301,6 +344,8 @@ function effectItemToChildEvent(item: EffectItem): ChildEvent | undefined {
         hours: eventEffectDef.hours,
         randomDays: eventEffectDef.random_days,
         randomHours: eventEffectDef.random_hours === 0 ? eventEffectDef.random : eventEffectDef.random_hours,
+        condition,
+        possibility,
     };
 }
 
