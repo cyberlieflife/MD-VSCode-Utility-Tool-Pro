@@ -17,9 +17,12 @@ describe('webview/focustree interactions', function () {
         // must be in place before the dynamic import (static import would run first).
         // Other webview tests cache util/vscode with a no-op postMessage; drop it so the freshly
         // imported focustree.js posts into OUR message array. util/common caches the old vscode
-        // reference too (its getState would read another test's state, e.g. a stray scale).
+        // reference too (its getState would read another test's state, e.g. a stray scale). The
+        // entry module itself is dropped as well: a spec that loaded it earlier leaves an instance
+        // whose load-time `ready` already fired, and this suite waits for its own.
         delete require.cache[require.resolve('../../../webviewsrc/util/vscode')];
         delete require.cache[require.resolve('../../../webviewsrc/util/common')];
+        delete require.cache[require.resolve('../../../webviewsrc/focustree')];
         let ready = false;
         // tsconfig.webview.test.json targets es2022, so Promise.withResolvers (es2024) is
         // unavailable here.

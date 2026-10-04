@@ -20,6 +20,7 @@ import { substituteInlaySlots } from "./inlayslots";
 import { propagateAllowBranches, AllowBranchFocus } from "./focusbranch";
 import { patchFocusTreeContent } from "./focustreepatch";
 import { warningBadgeClass, warningBoxClass, warningEntryClass, warningFlashClass } from "../src/previewdef/focustree/warningstyles";
+import { traceLineClass, traceDimClass } from "../src/previewdef/focustree/tracestyles";
 
 initCommon();
 
@@ -1254,6 +1255,8 @@ async function buildContent() {
     applyWarningMarkers(focusTree, focusGrixBoxItems);
     applyCustomTitlebarVisibility();
     applyFocusOverlayVisibility();
+    // The connection divs are new after every rebuild, so an active trace has to be put back on.
+    reapplyPrerequisiteTrace();
     // The rebuild replaced every focus label, so cached originals are stale. Re-apply the name
     // mode (no-op in ID mode) and the selection highlight after the fresh render.
     focusSpanOriginalHtml.clear();
@@ -1365,6 +1368,112 @@ function warningTextsByFocusId(focusTree: FocusTree): Record<string, string[]> {
         }
     }
     return texts;
+}
+
+// Prerequisite line tracing. A dense tree draws hundreds of overlapping connector lines underneath
+// the nodes, so following one by eye is guesswork. Shift+clicking a focus dims every connection in
+// the tree except the ones that focus's own prerequisite blocks produce. Focus nodes are left
+// untouched -- only lines are filtered.
+let tracedFocusId: string | undefined;
+
+// 导出使测试能断言类真的落在渲染出的连线上（整套行为就是这两个类）。
+export function applyPrerequisiteTrace(root: HTMLElement, focusId: string | undefined): void {
+    const connections = root.querySelectorAll("[data-conn-from]");
+    for (let i = 0; i < connections.length; i++) {
+        const connection = connections[i] as HTMLElement;
+        connection.classList.remove(traceLineClass, traceDimClass);
+        if (focusId === undefined) {
+            continue;
+        }
+
+        // data-conn-from is the focus that owns the connection, and data-conn-type is written
+        // before renderGridBoxConnection flips a diagonal "parent" to "child", so this pair means
+        // exactly "a line one of this focus's prerequisite blocks produced". A mutually exclusive
+        // link is "related" and dims with everything else.
+        const isPrerequisiteOfTraced =
+            connection.dataset.connFrom === focusId &&
+            connection.dataset.connType === "parent";
+        connection.classList.add(isPrerequisiteOfTraced ? traceLineClass : traceDimClass);
+    }
+}
+
+function reapplyPrerequisiteTrace(): void {
+    const placeholder = document.getElementById("focustreeplaceholder");
+    if (placeholder) {
+        applyPrerequisiteTrace(placeholder, tracedFocusId);
+    }
+}
+
+function setTracedFocus(focusId: string | undefined): void {
+    tracedFocusId = focusId;
+    reapplyPrerequisiteTrace();
+
+    const status = document.getElementById("trace-status");
+    if (status) {
+        // Focus ids come from the mod file, so they go in as text and never as markup.
+        status.textContent = focusId ? feLocalize("focustree.tracing", "Tracing: {0}", focusId) : "";
+    }
+
+    const container = document.getElementById("trace-status-container");
+    if (container) {
+        container.style.display = focusId ? "flex" : "none";
+    }
+}
+
+// Wired to the shell elements, which outlive every rebuild of the tree, so this runs once.
+function subscribeTracing(): void {
+    const content = document.getElementById("focustreecontent");
+    if (content) {
+        content.addEventListener(
+            "click",
+            (e) => {
+                if (!e.shiftKey) {
+                    return;
+                }
+
+                // Capture phase: stopping the event here is what keeps the bubble-phase .navigator
+                // handler from also jumping to the focus in the editor, and keeps a shift+click that
+                // lands on the completion checkbox from ticking it.
+                e.preventDefault();
+                e.stopPropagation();
+
+                const item = (e.target as Element | null)?.closest("[data-gridbox-item]") as HTMLElement | null;
+                const id = item?.dataset.gridboxItem;
+                if (!id) {
+                    return;
+                }
+
+                setTracedFocus(id === tracedFocusId ? undefined : id);
+            },
+            true,
+        );
+    }
+
+    const clearButton = document.getElementById("clear-trace");
+    clearButton?.addEventListener("click", () => setTracedFocus(undefined));
+
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && tracedFocusId !== undefined) {
+            setTracedFocus(undefined);
+        }
+    });
+
+    // Clicking empty canvas clears the trace. The end of a pan is a click on that same canvas, so
+    // only a press that stayed where it started counts as one.
+    const dragger = document.getElementById("dragger");
+    if (dragger) {
+        let downX = 0;
+        let downY = 0;
+        dragger.addEventListener("mousedown", (e) => {
+            downX = e.pageX;
+            downY = e.pageY;
+        });
+        dragger.addEventListener("mouseup", (e) => {
+            if (tracedFocusId !== undefined && Math.abs(e.pageX - downX) < 4 && Math.abs(e.pageY - downY) < 4) {
+                setTracedFocus(undefined);
+            }
+        });
+    }
 }
 
 // 导出使测试能断言标记真的落在渲染出的节点上。
@@ -1504,12 +1613,16 @@ function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Re
     }
 }
 
-function updateSelectedFocusTree(clearCondition: boolean) {
-    const focusTree = focusTrees[selectedFocusTreeIndex];
-    const continuousFocuses = document.getElementById('continuousFocuses') as HTMLDivElement;
+// The size is the layout's: continuous_focus_window's in gui mode. The shell is not rebuilt on an
+// in-place update, so it is set here rather than in the shell's stylesheet.
+export function placeContinuousFocuses(focusTree: FocusTree) {
+    const continuousFocuses = document.getElementById('continuousFocuses');
+    if (!continuousFocuses) {
+        return;
+    }
+    const size = (window as any).continuousFocusSize as { width: number; height: number } | undefined;
 
     if (focusTree.continuousFocusPositionX !== undefined && focusTree.continuousFocusPositionY !== undefined) {
-        const size = (window as any).continuousFocusSize as { width: number; height: number } | undefined;
         continuousFocuses.style.left = (focusTree.continuousFocusPositionX - 59) + 'px';
         continuousFocuses.style.top = (focusTree.continuousFocusPositionY + 7) + 'px';
         continuousFocuses.style.width = (size?.width ?? 770) + 'px';
@@ -1518,6 +1631,102 @@ function updateSelectedFocusTree(clearCondition: boolean) {
     } else {
         continuousFocuses.style.display = 'none';
     }
+    applyContinuousFocusEditing(focusTree);
+}
+
+function continuousFocusEditing(): boolean {
+    return getState().editContinuousFocus === true;
+}
+
+// The box can be dragged only on a tree the file defines itself, and only while the toggle is on.
+function applyContinuousFocusEditing(focusTree: FocusTree | undefined) {
+    const editable =
+        focusTree?.continuousFocusSource !== undefined &&
+        focusTree.continuousFocusPositionX !== undefined &&
+        focusTree.continuousFocusPositionY !== undefined;
+    const button = document.getElementById("edit-continuous-focus");
+    if (button) {
+        button.style.display = editable ? "" : "none";
+        button.style.opacity = continuousFocusEditing() ? "" : "0.4";
+    }
+    document
+        .getElementById("continuousFocuses")
+        ?.classList.toggle("continuous-editable", editable && continuousFocusEditing());
+}
+
+// Dragging the continuous focus box: the drop is written back to the file as
+// continuous_focus_position, converted with the inverse of the placement offsets above.
+export function wireContinuousFocusEditing(getFocusTree: () => FocusTree | undefined) {
+    const button = document.getElementById("edit-continuous-focus");
+    button?.addEventListener("click", () => {
+        setState({ editContinuousFocus: !continuousFocusEditing() });
+        applyContinuousFocusEditing(getFocusTree());
+    });
+
+    const box = document.getElementById("continuousFocuses");
+    if (!box) {
+        return;
+    }
+
+    let drag: { clientX: number; clientY: number; left: number; top: number; moved: boolean } | undefined;
+    box.addEventListener("mousedown", (e) => {
+        if (e.button !== 0 || !box.classList.contains("continuous-editable")) {
+            return;
+        }
+        // The box is drawn over the pan layer; a press on it moves the box, never the view.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        drag = {
+            clientX: e.clientX,
+            clientY: e.clientY,
+            left: parseFloat(box.style.left) || 0,
+            top: parseFloat(box.style.top) || 0,
+            moved: false,
+        };
+    });
+
+    document.addEventListener("mousemove", (e) => {
+        if (!drag) {
+            return;
+        }
+        const dx = e.clientX - drag.clientX;
+        const dy = e.clientY - drag.clientY;
+        // A press that stays within a few pixels is a click, not a move.
+        if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) {
+            return;
+        }
+        drag.moved = true;
+        // The canvas is zoomed with a CSS scale, so a screen pixel is 1/scale of a tree pixel.
+        const scale = currentScale();
+        box.style.left = drag.left + dx / scale + "px";
+        box.style.top = drag.top + dy / scale + "px";
+    });
+
+    document.addEventListener("mouseup", () => {
+        const finished = drag;
+        drag = undefined;
+        if (!finished?.moved) {
+            return;
+        }
+        const tree = getFocusTree();
+        if (!tree?.continuousFocusSource) {
+            return;
+        }
+        const source = tree.continuousFocusSource;
+        vscode.postMessage({
+            command: "setContinuousFocusPosition",
+            file: source.file,
+            start: source.start,
+            treeId: tree.id,
+            x: Math.round(parseFloat(box.style.left) + 59),
+            y: Math.round(parseFloat(box.style.top) - 7),
+        });
+    });
+}
+
+function updateSelectedFocusTree(clearCondition: boolean) {
+    const focusTree = focusTrees[selectedFocusTreeIndex];
+    placeContinuousFocuses(focusTree);
 
     if (useConditionInFocus) {
         const conditionExprs = dedupeConditionExprs(focusTree.conditionExprs).filter(e => e.scopeName !== '' ||
@@ -2294,6 +2503,11 @@ window.addEventListener('load', tryRun(async function() {
     // Zoom
     const contentElement = document.getElementById('focustreecontent') as HTMLDivElement;
     enableZoom(contentElement, 0, 80);
+
+    wireContinuousFocusEditing(() => focusTrees[selectedFocusTreeIndex]);
+
+    // Shift+click a focus to isolate its prerequisite lines
+    subscribeTracing();
 
     // Search filters: dims focuses that don't carry any selected filter.
     const searchFiltersElement = document.getElementById('search-filters') as HTMLDivElement | null;

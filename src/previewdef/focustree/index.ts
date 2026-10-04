@@ -9,6 +9,7 @@ import { contextContainer } from '../../context';
 import { FocusTreeLoader } from './loader';
 import { FocusTree, Focus } from './schema';
 import { buildFocusMoveEdits, buildDeleteFocusEdits, findFocusTreeInsertPosition, buildFocusInsertBlock } from './move';
+import { computeContinuousFocusEdit } from './continuousedit';
 import { collectFocusIconNames, getFocusIconPickerImage, resolveFocusIconImages } from './iconpicker';
 import { Logger } from '../../util/logger';
 import { getRelativePathInWorkspace, getDocumentByUri } from '../../util/vsccommon';
@@ -117,6 +118,10 @@ class FocusTreePreview extends PreviewBase {
             }
             if (msg?.command === 'copyWarnings') {
                 void copyTreeWarnings(msg, getRelativePathInWorkspace(this.uri));
+                return;
+            }
+            if (msg?.command === 'setContinuousFocusPosition') {
+                void this.setContinuousFocusPosition(msg);
                 return;
             }
             if (msg?.command === 'requestFocusIcons') {
@@ -249,6 +254,32 @@ class FocusTreePreview extends PreviewBase {
      * Inserts a new focus block just before the closing brace of the last focus_tree block.
      * The name/description go in as comments (no localisation entries); the id is required.
      */
+    // Writes a continuous focus box dropped in the webview back to the previewed document. The
+    // document is left unsaved; the edit re-renders the preview like any other change.
+    private async setContinuousFocusPosition(msg: { file?: unknown; start?: unknown; treeId?: unknown; x?: unknown; y?: unknown }): Promise<void> {
+        const { file, start, treeId, x, y } = msg;
+        if (typeof file !== 'string' || typeof start !== 'number' || typeof treeId !== 'string' || typeof x !== 'number' || typeof y !== 'number'
+            || !Number.isFinite(x) || !Number.isFinite(y) || file !== getRelativePathInWorkspace(this.uri)) {
+            return;
+        }
+
+        try {
+            const document = getDocumentByUri(this.uri) ?? await vscode.workspace.openTextDocument(this.uri);
+            const edit = computeContinuousFocusEdit(document.getText(), start, treeId, x, y);
+            if (!edit) {
+                void vscode.window.showWarningMessage(localize('focustree.continuousstale',
+                    'The focus tree changed since the preview was drawn. Drag the continuous focus box again.'));
+                return;
+            }
+
+            const workspaceEdit = new vscode.WorkspaceEdit();
+            workspaceEdit.replace(document.uri, new vscode.Range(document.positionAt(edit.start), document.positionAt(edit.end)), edit.newText);
+            await vscode.workspace.applyEdit(workspaceEdit);
+        } catch (e) {
+            error(e);
+        }
+    }
+
     private async createFocus(focus: { id: string; name?: string; desc?: string; icon?: string; cost?: number; x?: number; y?: number }): Promise<void> {
         try {
             const document = getDocumentByUri(this.uri);

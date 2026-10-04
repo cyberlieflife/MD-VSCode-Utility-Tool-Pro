@@ -4,7 +4,7 @@ import { getSpriteByGfxName, Image, getImageByPath, iconResolveStats, resetIconR
 import { localize, i18nTableAsScript } from '../../util/i18n';
 import { forceError, randomString, mapLimit } from '../../util/common';
 import { HOIPartial, toNumberLike, toStringAsSymbolIgnoreCase } from '../../hoiformat/schema';
-import { html, htmlEscape, previewedFileUriScript } from '../../util/html';
+import { html, htmlEscape, escapeAttr, previewedFileUriScript } from '../../util/html';
 import { GridBoxType, IconType, ButtonType } from '../../hoiformat/gui';
 import { FocusTreeLoader, ProgressCallback } from './loader';
 import { LoaderSession } from '../../util/loader/loader';
@@ -19,6 +19,8 @@ import { loadExclusiveLinkImages, nationalFocusViewGfxFile } from "../../util/ho
 import { registerFocusLinkStyles } from "../../util/hoi4gui/focuslink";
 import { loadFocusLinkImages } from "../../util/hoi4gui/focuslinkimages";
 import { registerWarningStyles, warningListClass } from "./warningstyles";
+import { registerTraceStyles } from "./tracestyles";
+import { iconButtonHtml } from "../toolbaricons";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
 import { renderInstantTextBox } from "../../util/hoi4gui/instanttextbox";
@@ -265,6 +267,17 @@ export function buildFocusTreeErrorHtml(webview: vscode.Webview, uri: vscode.Uri
  * injected by the webview, so this is a cheap synchronous step.
  */
 async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string, gfxFiles: string[], layout: FocusTreeLayout): Promise<string> {
+    // Same reason as registerWarningStyles below: the shell stylesheet is the only one the webview
+    // can still attach classes against after a render. See tracestyles.ts.
+    registerTraceStyles(styleTable);
+
+    // Set by the webview while the continuous focus box can be dragged.
+    styleTable.raw(`#continuousFocuses.continuous-editable`, `
+        pointer-events: auto;
+        cursor: move;
+        outline: 1px dashed var(--vscode-focusBorder, #007fd4);
+    `);
+
     // CSP-nonced <style> element the webview later fills with the resolved focus-icon background CSS.
     const progressiveIconStyles = `<style id="ft-progressive-icons" nonce="${styleNonce}"></style>`;
     const continuousFocusContent =
@@ -448,6 +461,20 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
             <i class="codicon codicon-clear-all"></i>
         </button>`;
 
+    // The continuous focus box is dragged in the webview, so the toggle lives here and the position
+    // is written back through a message; the button is hidden again by the webview on a tree the
+    // file does not define itself.
+    const editContinuousButton = iconButtonHtml('editContinuous', localize, { domId: 'edit-continuous-focus' });
+
+    // Shown by the webview only while a prerequisite trace is active, so there is always a visible
+    // way out of the dimmed view. Hidden through an inline display rather than the `hidden`
+    // attribute: the class below sets a display of its own, which would win over `[hidden]`.
+    const traceStatus = `
+        <div id="trace-status-container" style="display:none" class="${styleTable.style('traceStatusContainer', () => `margin-left:10px; align-items:center;`)}">
+            <span id="trace-status" class="${styleTable.style('traceStatus', () => `margin-right:5px; opacity:0.8;`)}"></span>
+            ${iconButtonHtml('clearTrace', localize, { domId: 'clear-trace' })}
+        </div>`;
+
     // Search filters: one dropdown entry per distinct search_filters value across all focus trees,
     // each carrying the GFX_<filter> sprite as its icon. Selecting entries dims all focuses that do
     // not carry any of the selected filters.
@@ -488,7 +515,9 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
                 ${useConditionInFocus ? conditions + inlayConditions : allowbranch}
                 ${inlayWindows}
                 ${warningsButton}
+                ${editContinuousButton}
                 ${resetCheckboxesButton}
+                ${traceStatus}
             </div>
             <div class="toolbar-row">
                 ${nameToggle}
@@ -831,7 +860,7 @@ export function assembleFocusHtml(focus: Focus, file: string, classes: FocusHtml
     start="${focus.token?.start}"
     end="${focus.token?.end}"
     ${file === focus.file ? '' : `file="${focus.file}"`}
-    title="${focus.id}\n({{position}})">
+    title="${focus.id}\n({{position}})\n${escapeAttr(localize('focustree.tracehint', "Shift+click: show only this focus's prerequisite lines"))}">
         <div
         class="{{iconClass}} ${classes.focusIconLayerClass}"></div>
         <div

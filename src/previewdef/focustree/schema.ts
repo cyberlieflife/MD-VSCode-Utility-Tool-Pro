@@ -22,6 +22,9 @@ export interface FocusTree {
     isSharedFocues: boolean;
     continuousFocusPositionX?: number;
     continuousFocusPositionY?: number;
+    // 文件里这棵树的连续焦点框写回目标：拖动它之后改的是树自己的 continuous_focus_position。
+    // 树在文件里没有 token 时缺失（例如纯内存构造的树），此时框不可拖动。
+    continuousFocusSource?: { file: string; start: number };
     // 文件声明的初始视图位置（命中了 focus 时用该焦点所在格，否则用给定的 x/y 格）；未声明时
     // undefined，预览仍在左上角打开。
     initialShowPosition?: { focus?: string; x: number; y: number };
@@ -129,6 +132,7 @@ interface FocusTreeDef {
     continuous_focus_position: Position;
     initial_show_position: InitialShowPositionDef;
     inlay_window: Raw[];
+    _token: Token;
 }
 
 interface FocusDef {
@@ -343,6 +347,14 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
             allowBranchOptions: getAllowBranchOptions(focuses),
             continuousFocusPositionX: normalizeNumberLike(focusTree.continuous_focus_position?.x, 0) ?? 50,
             continuousFocusPositionY: normalizeNumberLike(focusTree.continuous_focus_position?.y, 0) ?? 1000,
+            ...(focusTree._token
+                ? {
+                    continuousFocusSource: {
+                        file: filePath,
+                        start: focusTree._token.start,
+                    },
+                }
+                : {}),
             ...(focusTree.initial_show_position
                 ? {
                     initialShowPosition: {
