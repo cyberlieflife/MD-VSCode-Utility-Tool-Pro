@@ -13,6 +13,7 @@ import { registerGfxIndex } from './util/gfxindex';
 import { Logger } from "./util/logger";
 import { registerLocalisationIndex } from "./util/localisationIndex";
 import { registerSharedFocusIndex } from "./util/sharedFocusIndex";
+import { registerEventIndex } from "./util/eventIndex";
 import { registerFeatureFlags } from "./util/featureflags";
 import { registerIdeaPictureHover } from "./hover/ideaPictureHover";
 import { registerIdeaSwapIndex } from "./util/ideaSwapIndex";
@@ -51,6 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.window.registerCustomEditorProvider(ViewType.DDS, new DDSViewProvider()));
     context.subscriptions.push(vscode.window.registerCustomEditorProvider(ViewType.TGA, new TGAViewProvider()));
     context.subscriptions.push(registerSharedFocusIndex());
+    context.subscriptions.push(registerEventIndex());
     context.subscriptions.push(registerGfxIndex());
     context.subscriptions.push(registerLocalisationIndex());
     context.subscriptions.push(registerIndexStatusCommand());

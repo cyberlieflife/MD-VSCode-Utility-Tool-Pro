@@ -122,6 +122,8 @@ const table: Partial<typeof __table> = {
     "decisiontree.visible": "Visible",
     "decisiontree.visiblewhenempty": "비어 있어도 탭 표시",
     "error": "오류",
+    "eventIndex.building": "Building Event index...",
+    "eventIndex.workspace.building": "Building workspace Event index...",
     "eventtree.delay": "지연: ",
     "eventtree.eventid": "이벤트 ID: ",
     "eventtree.fireonlyonce": "1회만 발생",

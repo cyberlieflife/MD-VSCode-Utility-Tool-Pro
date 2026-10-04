@@ -122,6 +122,8 @@ const table: Partial<typeof __table> = {
     "decisiontree.visible": "Visible",
     "decisiontree.visiblewhenempty": "为空时仍显示标签页",
     "error": "错误",
+    "eventIndex.building": "正在构建事件索引……",
+    "eventIndex.workspace.building": "正在构建工作区事件索引……",
     "eventtree.delay": "延迟：",
     "eventtree.eventid": "事件编号：",
     "eventtree.fireonlyonce": "单次",

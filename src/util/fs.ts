@@ -4,7 +4,9 @@ import { hoi4FsProvider } from './hoifs';
 
 let nodeFs: vscode.FileSystem | undefined = undefined;
 
-if (!IS_WEB_EXT) {
+// The unit tests drive file access through a stubbed vscode.workspace.fs, which the node fast path
+// would bypass; MD_UTILITIES_TEST (the switch util/debug.ts also reads) keeps it off there.
+if (!IS_WEB_EXT && !process.env.MD_UTILITIES_TEST) {
     const fs: typeof import('fs/promises') = require('fs/promises');
     const emfileRetryCount = 20;
     const emfileRetryDelay = 100;

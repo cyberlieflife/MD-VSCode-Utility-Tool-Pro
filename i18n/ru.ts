@@ -122,6 +122,8 @@ const table: Partial<typeof __table> = {
     "decisiontree.visible": "Visible",
     "decisiontree.visiblewhenempty": "Вкладка видна, когда пуста",
     "error": "Ошибка",
+    "eventIndex.building": "Building Event index...",
+    "eventIndex.workspace.building": "Building workspace Event index...",
     "eventtree.delay": "Задержка: ",
     "eventtree.eventid": "ID События: ",
     "eventtree.fireonlyonce": "Срабатывает единожды",

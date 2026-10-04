@@ -2,10 +2,12 @@ import { HOIEvents, HOIEvent, getEvents } from "./schema";
 import { ContentLoader, Dependency, LoadResultOD, LoaderSession, mergeInLoadResult } from "../../util/loader/loader";
 import { parseHoi4File } from "../../hoiformat/hoiparser";
 import { localize } from "../../util/i18n";
-import { uniq, flatten, uniqBy } from "lodash";
+import { chain, uniq, flatten, uniqBy } from "lodash";
 import { YamlLoader } from "../../util/loader/yaml";
 import { getGfxContainerFiles } from "../../util/gfxindex";
 import { getLanguageIdInYml } from "../../util/vsccommon";
+import { ensureEventIndex, findFileByEventId } from "../../util/eventIndex";
+import { eventTreePreview } from "../../util/featureflags";
 
 export interface EventsLoaderResult {
     events: HOIEvents;
@@ -31,9 +33,18 @@ export class EventsLoader extends ContentLoader<EventsLoaderResult> {
         this.languageKey = getLanguageIdInYml();
 
         const eventsDependencies = dependencies.filter(d => d.type === 'event').map(d => d.path);
-        const eventsDepFiles = await this.loaderDependencies.loadMultiple(eventsDependencies, session, EventsLoader);
 
         const events = getEvents(parseHoi4File(content, localize('infile', 'In file {0}:\n', this.file)), this.file);
+        // 选项里引用的子事件可能定义在别的文件，没有 `#!event:` 注释时靠索引补上依赖，
+        // 否则它们只会画成 unresolved 占位。
+        const childEventFiles = await this.findChildEventFiles(events, eventsDependencies);
+        for (const childEventFile of childEventFiles) {
+            if (!eventsDependencies.includes(childEventFile) && childEventFile !== this.file) {
+                eventsDependencies.push(childEventFile);
+            }
+        }
+
+        const eventsDepFiles = await this.loaderDependencies.loadMultiple(eventsDependencies, session, EventsLoader);
         const mergedEvents = mergeEvents(events, ...eventsDepFiles.map(f => f.result.events));
         
         const localizationDependencies = dependencies.filter(d => d.type.match(/^locali[sz]ation$/) && d.path.endsWith('.yml')).map(d => d.path);
@@ -67,6 +78,27 @@ export class EventsLoader extends ContentLoader<EventsLoaderResult> {
 
     public toString() {
         return `[EventsLoader ${this.file}]`;
+    }
+
+    /**
+     * Resolves the files that define this file's child events through the event index. Skipped when
+     * the index switch is off or the index isn't built yet: the preview then shows the ids it has,
+     * instead of waiting for a build that may never run.
+     */
+    private async findChildEventFiles(events: HOIEvents, eventsDependencies: string[]): Promise<string[]> {
+        if (!eventTreePreview) {
+            return [];
+        }
+
+        await ensureEventIndex();
+
+        return chain(Object.values(events.eventItemsByNamespace))
+            .flatMap(e => e)
+            .flatMap(e => [...e.immediate.childEvents, ...flatten(e.options.map(o => o.childEvents))])
+            .map(ce => findFileByEventId(ce.eventName))
+            .uniq()
+            .filter((e): e is string => e !== undefined)
+            .value();
     }
 }
 

@@ -122,6 +122,8 @@ const internalTable = /* SOT Do not remove this comment */{
     "decisiontree.visible": "Visible",
     "decisiontree.visiblewhenempty": "Tab shown when empty",
     "error": "Error",
+    "eventIndex.building": "Building Event index...",
+    "eventIndex.workspace.building": "Building workspace Event index...",
     "eventtree.delay": "Delay: ",
     "eventtree.eventid": "Event ID: ",
     "eventtree.fireonlyonce": "Fire only once",
