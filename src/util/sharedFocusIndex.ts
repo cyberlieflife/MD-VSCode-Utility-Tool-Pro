@@ -9,6 +9,8 @@ import { extractFocusIds } from "../previewdef/focustree/schema";
 import { parseHoi4File } from "../hoiformat/hoiparser";
 import { sharedFocusIndex } from "./featureflags";
 import { loadCacheManifest, loadCacheData, saveCacheManifest, saveCacheData, getFileMtimes, computeStaleFiles, IndexTimer } from './indexCache';
+import { getParentModUris, onDidChangeParentMods } from './parentmods';
+import { whenModDependenciesSettled } from './moddependencies';
 
 interface FocusIndex {
     [file: string]: string[]; // Filename -> array of focus keys
@@ -16,10 +18,13 @@ interface FocusIndex {
 
 const globalFocusIndex: FocusIndex = {};
 let workspaceFocusIndex: FocusIndex = {};
+// 每个父模组一份，按设置/依赖里的顺序；查找时工作区覆盖它、它覆盖本体。
+let parentFocusIndexes: FocusIndex[] = [];
 
 // Reverse maps for O(1) lookup: focusKey -> filename
 const globalFocusKeyToFile = new Map<string, string>();
 const workspaceFocusKeyToFile = new Map<string, string>();
+const parentFocusKeysToFile: Map<string, string>[] = [];
 
 export function registerSharedFocusIndex(): vscode.Disposable {
     const disposables: vscode.Disposable[] = [];
@@ -38,6 +43,17 @@ export function registerSharedFocusIndex(): vscode.Disposable {
         disposables.push(vscode.workspace.onDidCreateFiles(onCreateFiles));
         disposables.push(vscode.workspace.onDidDeleteFiles(onDeleteFiles));
         disposables.push(vscode.workspace.onDidRenameFiles(onRenameFiles));
+        // 父模组名单变化：只重建这半个索引，让父模组里的共享焦点立刻可解析。
+        disposables.push(onDidChangeParentMods(e => {
+            if (!e.folders) {
+                return;
+            }
+            const estimatedSize: [number] = [0];
+            void buildParentFocusIndex(estimatedSize).then(
+                () => undefined,
+                (e2) => Logger.error(`[SharedFocus] rebuilding the parent half failed: ${String(e2)}`),
+            );
+        }));
     }
 
     return vscode.Disposable.from(...disposables);
@@ -55,6 +71,7 @@ export function ensureFocusIndex(): Promise<void> {
         const estimatedSize: [number] = [0];
         focusIndexBuildPromise = Promise.all([
             buildGlobalFocusIndex(estimatedSize),
+            buildParentFocusIndex(estimatedSize),
             buildWorkspaceFocusIndex(estimatedSize),
         ]).then(() => {
             focusIndexSize[0] = estimatedSize[0];
@@ -65,16 +82,35 @@ export function ensureFocusIndex(): Promise<void> {
 
 const FOCUS_CACHE_VERSION = 1;
 
+// 半区隔离：global 与 workspace 两半用 parent: false 明确只列自己那一份，父模组各自成半区，
+// 这样删掉工作区里的覆盖文件时，父模组那份仍在索引里（否则两边一起消失）。
 async function buildGlobalFocusIndex(estimatedSize: [number]): Promise<void> {
-    const options = { mod: false, hoi4: true, recursively: true };
+    const options = { mod: false, hoi4: true, parent: false, recursively: true };
     const focusFiles = (await listFilesFromModOrHOI4('common/national_focus', options)).map(f => 'common/national_focus/' + f);
     await buildFocusIndexWithCache('focusIndex.global', focusFiles, globalFocusIndex, globalFocusKeyToFile, options, estimatedSize);
 }
 
 async function buildWorkspaceFocusIndex(estimatedSize: [number]): Promise<void> {
-    const options = { mod: true, hoi4: false, recursively: true };
+    const options = { mod: true, hoi4: false, parent: false, recursively: true };
     const focusFiles = (await listFilesFromModOrHOI4('common/national_focus', options)).map(f => 'common/national_focus/' + f);
     await buildFocusIndexWithCache('focusIndex.workspace', focusFiles, workspaceFocusIndex, workspaceFocusKeyToFile, options, estimatedSize);
+}
+
+async function buildParentFocusIndex(estimatedSize: [number]): Promise<void> {
+    await whenModDependenciesSettled();
+    const parents = getParentModUris();
+    parentFocusIndexes = parents.map(() => ({}));
+    parentFocusKeysToFile.length = parents.length;
+    if (parents.length === 0) {
+        // 没有父模组就没有这半个索引：不列举、不写缓存。
+        return;
+    }
+    await Promise.all(parents.map(async (parent, index) => {
+        const options = { mod: false, hoi4: false, recursively: true, parentModUris: [parent] as vscode.Uri[] };
+        const focusFiles = (await listFilesFromModOrHOI4('common/national_focus', options)).map(f => 'common/national_focus/' + f);
+        parentFocusKeysToFile[index] = new Map<string, string>();
+        await buildFocusIndexWithCache(`focusIndex.parent.${index}`, focusFiles, parentFocusIndexes[index]!, parentFocusKeysToFile[index]!, options, estimatedSize);
+    }));
 }
 
 async function buildFocusIndexWithCache(
@@ -164,7 +200,12 @@ async function fillFocusItems(focusFile: string, focusIndex: FocusIndex, reverse
 }
 
 export function findFileByFocusKey(key: string): string | undefined {
-    return workspaceFocusKeyToFile.get(key) ?? globalFocusKeyToFile.get(key);
+    // 与文件查找同序：工作区覆盖父模组、父模组覆盖本体。
+    return (
+        workspaceFocusKeyToFile.get(key) ??
+        parentFocusKeysToFile.map(map => map.get(key)).find(value => value !== undefined) ??
+        globalFocusKeyToFile.get(key)
+    );
 }
 
 function onChangeWorkspaceFolders(_: vscode.WorkspaceFoldersChangeEvent) {

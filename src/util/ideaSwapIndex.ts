@@ -5,6 +5,8 @@ import { createTimeSlicer, debounceByInput, mapLimit } from "./common";
 import { debug } from "./debug";
 import { ideaSwapIndex } from "./featureflags";
 import { listFilesFromModOrHOI4, readFileFromModOrHOI4 } from "./fileloader";
+import { getParentModUris, onDidChangeParentMods } from "./parentmods";
+import { whenModDependenciesSettled } from "./moddependencies";
 import { localize } from "./i18n";
 import { Logger } from "./logger";
 
@@ -47,6 +49,8 @@ const swapMarker = "swap_ideas";
 
 // file (relative to the workspace root, e.g. "common/ideas/my_ideas.txt") -> its swaps.
 let swapsByFile: Map<string, SwapRecord[]> | undefined;
+// 每个父模组一份，按设置/依赖里的顺序；查找时工作区覆盖父模组、父模组覆盖本体。
+let parentSwapsByFile: Map<string, SwapRecord[]>[] = [];
 let buildPromise: Promise<void> | undefined;
 // Bumped by every invalidation and by every build; a build writes its result only when it is still
 // the newest one, so a slow build cannot land on top of the index a newer one built.
@@ -77,7 +81,8 @@ async function buildSwapIndex(myRevision: number): Promise<void> {
 	for (const root of swapRoots) {
 		let files: string[];
 		try {
-			files = await listFilesFromModOrHOI4(root, { recursively: true });
+			// 半区隔离：这一份只含工作区与本体，父模组各自成半区（见下）。
+			files = await listFilesFromModOrHOI4(root, { recursively: true, parent: false });
 		} catch (e) {
 			// A mod with no events/ folder at all is ordinary; a failing root costs only that root.
 			Logger.warn(`[ideaSwap] cannot list ${root}: ${e}`);
@@ -102,11 +107,44 @@ async function buildSwapIndex(myRevision: number): Promise<void> {
 		});
 	}
 
+	// 父模组各自一份：同一次构建里完成，revision 校验对两边一起生效；读取走单父查找，两边不会
+	// 互相遮住。依赖解析可能还在进行，等它定下来再列举。
+	await whenModDependenciesSettled();
+	const parents = getParentModUris();
+	const parentIndexes = parents.map(() => new Map<string, SwapRecord[]>());
+	await Promise.all(parents.map(async (parent, parentIndex) => {
+		const parentOptions = { mod: false, hoi4: false, parentModUris: [parent] as vscode.Uri[], recursively: true };
+		for (const root of swapRoots) {
+			let files: string[];
+			try {
+				files = await listFilesFromModOrHOI4(root, parentOptions);
+			} catch (e) {
+				Logger.warn(`[ideaSwap] cannot list ${root} in parent mods: ${e}`);
+				incompleteRoots++;
+				continue;
+			}
+			const txtFiles = files.filter((file) => file.toLowerCase().endsWith(".txt"));
+			await mapLimit(txtFiles, 8, async (file) => {
+				const relativePath = `${root}/${file}`.replace(/\/+/g, "/");
+				try {
+					const swaps = await loadSwaps(relativePath, undefined);
+					if (swaps.length > 0) {
+						parentIndexes[parentIndex]!.set(relativePath, swaps);
+					}
+				} catch (e) {
+					debug(`[ideaSwap] cannot parse ${relativePath}:`, e);
+				}
+				await slicer();
+			});
+		}
+	}));
+
 	if (myRevision !== revision) {
 		// The index was invalidated (or rebuilt) while this build ran; its result is stale.
 		return;
 	}
 	swapsByFile = index;
+	parentSwapsByFile = parentIndexes;
 
 	// A root that failed to list may be a transient IO failure; drop the memo so the next lookup
 	// scans again instead of serving the half index for the rest of the session.
@@ -240,6 +278,12 @@ export function registerIdeaSwapIndex(): vscode.Disposable {
 			invalidateIndex();
 		}
 	}));
+	// 父模组名单变化：整份索引重建一次即可（它本来就是全量扫描，没有可单独重建的半区缓存）。
+	disposables.push(onDidChangeParentMods(e => {
+		if (e.folders) {
+			invalidateIndex();
+		}
+	}));
 	return vscode.Disposable.from(...disposables);
 }
 
@@ -284,6 +328,19 @@ export async function getIdeaSwaps(ideaIds: string[]): Promise<IdeaSwap[]> {
 			const swap: IdeaSwap = { from: record.from, to: record.to, file, start: record.start, end: record.end };
 			addTo(record.from, swap);
 			addTo(record.to, swap);
+		}
+	}
+	// 父模组的副本：工作区半区已覆盖的同名文件不再取，保持「工作区 > 父模组 > 本体」的次序。
+	for (const parentIndex of parentSwapsByFile) {
+		for (const [file, records] of parentIndex) {
+			if (index.has(file)) {
+				continue;
+			}
+			for (const record of records) {
+				const swap: IdeaSwap = { from: record.from, to: record.to, file, start: record.start, end: record.end };
+				addTo(record.from, swap);
+				addTo(record.to, swap);
+			}
 		}
 	}
 
