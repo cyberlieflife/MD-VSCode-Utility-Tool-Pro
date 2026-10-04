@@ -131,6 +131,29 @@ export class TimeoutError extends Error {
     }
 }
 
+/**
+ * Thrown by work that noticed its CancellationToken was cancelled and stopped part-way. Deliberately
+ * not `vscode.CancellationError`: this never leaves the extension, and the unit-test vscode stub has
+ * no such class to construct.
+ */
+export class CancelledError extends Error {
+    constructor(message: string = 'Operation cancelled') {
+        super(message);
+        this.name = 'CancelledError';
+    }
+}
+
+/** The one member of `vscode.CancellationToken` that synchronous, pollable work needs. */
+export interface CancellationLike {
+    readonly isCancellationRequested: boolean;
+}
+
+export function throwIfCancelled(token: CancellationLike | undefined): void {
+    if (token?.isCancellationRequested) {
+        throw new CancelledError();
+    }
+}
+
 export function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () => Error | void): Promise<T> {
     return new Promise<T>((resolve, reject) => {
         let settled = false;
@@ -214,6 +237,132 @@ export function createTimeSlicer(budgetMs = 8): () => Promise<void> {
             sliceStart = Date.now();
         }
     };
+}
+
+export interface WorkQueueOptions {
+    /** Checked before each item; a cancelled queue rejects and drops whatever it had left. */
+    token?: CancellationLike;
+}
+
+export interface WorkQueue {
+    /**
+     * Like {@link mapLimit}, but the concurrency budget belongs to the queue rather than to this
+     * one call. Results preserve input order; the first rejection is what the call rejects with.
+     */
+    map<T, R>(
+        items: T[],
+        fn: (item: T, index: number) => Promise<R>,
+        options?: WorkQueueOptions,
+    ): Promise<R[]>;
+}
+
+/**
+ * A worker pool shared by everything that runs through it, where `mapLimit` gives every call a
+ * pool of its own. Four index builds each calling `mapLimit(files, 8, parse)` over two halves put
+ * up to 64 synchronous parses on the extension host at once, all competing with the RPC that the
+ * other half of the same build is blocked on. Sharing one small budget is what stops that.
+ *
+ * A worker also yields the event loop after every item, so a run of back-to-back synchronous
+ * parses cannot hold the host for the length of the whole run.
+ *
+ * One rule for callbacks: never await another `map` on the same queue from inside one. Holding a
+ * slot while waiting for a slot is a deadlock as soon as `limit` callbacks do it at once.
+ */
+export function createWorkQueue(limit: number): WorkQueue {
+    const effectiveLimit = Math.max(1, limit);
+    // Drained through a moving head rather than `shift`, which moves every remaining element on
+    // each call. All eight index build halves queue into this one array, so a cold build puts tens
+    // of thousands of jobs in it and draining them cost the square of that in element moves. The
+    // consumed prefix is dropped once it is more than half the array, so the array does not grow
+    // without bound over a long session either.
+    const pending: (() => Promise<void>)[] = [];
+    let head = 0;
+    let active = 0;
+
+    function takeNextJob(): (() => Promise<void>) | undefined {
+        if (head >= pending.length) {
+            return undefined;
+        }
+
+        const job = pending[head];
+        pending[head] = undefined as unknown as () => Promise<void>;
+        head++;
+
+        if (head > 32 && head * 2 >= pending.length) {
+            pending.splice(0, head);
+            head = 0;
+        }
+
+        return job;
+    }
+
+    function pump(): void {
+        while (active < effectiveLimit) {
+            const job = takeNextJob();
+            if (job === undefined) {
+                return;
+            }
+            active++;
+            void job().then(onJobSettled, onJobSettled);
+        }
+    }
+
+    function onJobSettled(): void {
+        active--;
+        pump();
+    }
+
+    async function map<T, R>(
+        items: T[],
+        fn: (item: T, index: number) => Promise<R>,
+        options?: WorkQueueOptions,
+    ): Promise<R[]> {
+        const results = new Array<R>(items.length);
+        if (items.length === 0) {
+            return results;
+        }
+
+        const token = options?.token;
+        let failure: unknown;
+        let failed = false;
+        let settledCount = 0;
+
+        await new Promise<void>((resolve) => {
+            for (let i = 0; i < items.length; i++) {
+                const index = i;
+                pending.push(async () => {
+                    try {
+                        // Whatever is left of a call that already failed or was cancelled still has
+                        // to drain out of the queue, but it must not do any of its work.
+                        if (!failed) {
+                            throwIfCancelled(token);
+                            results[index] = await fn(items[index]!, index);
+                            await yieldToEventLoop();
+                        }
+                    } catch (cause) {
+                        if (!failed) {
+                            failed = true;
+                            failure = cause;
+                        }
+                    } finally {
+                        if (++settledCount === items.length) {
+                            resolve();
+                        }
+                    }
+                });
+            }
+
+            // Synchronously, so the first item's `fn` is entered in this same microtask chain.
+            pump();
+        });
+
+        if (failed) {
+            throw failure;
+        }
+        return results;
+    }
+
+    return { map };
 }
 
 /**

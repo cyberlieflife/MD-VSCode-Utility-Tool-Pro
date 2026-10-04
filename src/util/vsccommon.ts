@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { localize } from './i18n';
+import { ymlSuffixBySettingName } from './locales';
 import { UserError } from './common';
 import { isSamePath } from './nodecommon';
 import { ConfigurationKey } from '../constants';
@@ -146,20 +147,9 @@ export function uriToFilePathWhenPossible(uri: vscode.Uri): string {
     return uri.toString();
 }
 
-const languageYmlDict = {
-    ['Brazilian Portuguese']: 'l_braz_por',
-    English: 'l_english',
-    French: 'l_french',
-    German: 'l_german',
-    Japanese: 'l_japanese',
-    Polish: 'l_polish',
-    Russian: 'l_russian',
-    ['Simplified Chinese']: 'l_simp_chinese',
-    Spanish: 'l_spanish',
-};
-
 export function getLanguageIdInYml(): string {
-    return languageYmlDict[vscode.workspace.getConfiguration(ConfigurationKey).previewLocalisation ?? 'English'] ?? languageYmlDict['English'];
+    const settingName = vscode.workspace.getConfiguration(ConfigurationKey).previewLocalisation ?? 'English';
+    return ymlSuffixBySettingName[settingName] ?? ymlSuffixBySettingName['English']!;
 }
 
 export function getPreferedIndent(): string {

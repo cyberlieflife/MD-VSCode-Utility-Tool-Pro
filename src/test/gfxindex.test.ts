@@ -20,7 +20,10 @@ describe('util/gfxindex', () => {
     // swap the commonjs exports object the same way the TS import reads it (dynamic property
     // access), letting the test gate the build mid-flight. Flag changes go through
     // refreshFeatureFlags because the flag is read at call time from the featureflags module.
+    // The index lists through listFileEntriesFromModOrHOI4 (the URI+mtime listing), so the gated
+    // build patches that one; listFilesFromModOrHOI4 stays patched for the paths that still use it.
     const originalListFiles = (fileloader as any).listFilesFromModOrHOI4;
+    const originalListEntries = (fileloader as any).listFileEntriesFromModOrHOI4;
     const originalReadFile = (fileloader as any).readFileFromModOrHOI4;
     const originalGetConfiguration = (vscode.workspace as any).getConfiguration;
     let config: Record<string, unknown> = {};
@@ -35,6 +38,7 @@ describe('util/gfxindex', () => {
 
     afterEach(() => {
         (fileloader as any).listFilesFromModOrHOI4 = originalListFiles;
+        (fileloader as any).listFileEntriesFromModOrHOI4 = originalListEntries;
         (fileloader as any).readFileFromModOrHOI4 = originalReadFile;
         (vscode.workspace as any).getConfiguration = originalGetConfiguration;
     });
@@ -82,9 +86,15 @@ describe('util/gfxindex', () => {
             gfxindex.onGfxIndexBuilt(() => { builtFiredCount++; });
 
             const buildGate = new Promise<void>(resolve => { releaseBuild = resolve; });
-            (fileloader as any).listFilesFromModOrHOI4 = async () => {
+            // The index lists through the URI+mtime listing; the gate makes the build slow enough
+            // for the lookup below to run while it is still in flight.
+            (fileloader as any).listFileEntriesFromModOrHOI4 = async () => {
                 await buildGate;
-                return ['goals_test.gfx'];
+                return [{
+                    relativePath: 'goals_test.gfx',
+                    uri: vscode.Uri.file('/mod/interface/goals_test.gfx'),
+                    mtime: 1,
+                }];
             };
             (fileloader as any).readFileFromModOrHOI4 = async () =>
                 [Buffer.from(testGfxContent), vscode.Uri.file('/mod/interface/goals_test.gfx')];

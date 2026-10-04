@@ -9,6 +9,7 @@ import { arrayToMap, UserError } from "../../../util/common";
 import { DefaultMapLoader } from "./provincemap";
 import { localize } from "../../../util/i18n";
 import { ensureLocalisationIndex, getLocalisedTextUnchecked } from "../../../util/localisationIndex";
+import { isoBySettingName } from "../../../util/locales";
 import { LoaderSession } from "../../../util/loader/loader";
 import { flatMap } from "lodash";
 import { ResourceDefinitionLoader } from "./resource";
@@ -450,16 +451,5 @@ async function loadStateCategory(file: string, _warning: WorldMapWarning[]): Pro
 // language, mirroring getLocalisedTextQuick in util/localisationIndex.
 function targetLocalisationLanguage(): string {
     const previewLocalisation = vscode.workspace.getConfiguration('mdHoi4Utilities').get<string>('previewLocalisation');
-    const localeISOMapping: Record<string, string> = {
-        ['Brazilian Portuguese']: 'pt-br',
-        English: 'en',
-        French: 'fr',
-        German: 'de',
-        Japanese: 'ja',
-        Polish: 'pl',
-        Russian: 'ru',
-        ['Simplified Chinese']: 'zh-cn',
-        Spanish: 'es',
-    };
-    return (previewLocalisation && localeISOMapping[previewLocalisation]) || vscode.env.language;
+    return (previewLocalisation && isoBySettingName[previewLocalisation]) || vscode.env.language;
 }

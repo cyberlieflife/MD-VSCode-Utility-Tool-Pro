@@ -1,16 +1,20 @@
 import { trimStart } from 'lodash';
 import * as vscode from 'vscode';
 import { Commands, ConfigurationKey, Hoi4FsSchema } from '../constants';
-import { forceError, UserError } from './common';
+import { forceError } from './common';
+import { error } from './debug';
 import { clearDlcZipCache } from './fileloader';
+import { localize } from './i18n';
+import {
+    checkInstallPath,
+    clearInstallPathCache,
+    getInstallPathUri,
+    setInstallPathUri,
+} from './installpath';
 import { sendEvent } from './telemetry';
 import { getConfiguration, isFileScheme } from './vsccommon';
 import { checkParentModPaths, clearParentModCache } from './parentmods';
 import { refreshModDependencies } from './moddependencies';
-
-const installPathContainer: { current: vscode.Uri | null } = {
-    current: null,
-};
 
 export function registerHoiFs(): vscode.Disposable {
     const disposables: vscode.Disposable[] = [];
@@ -25,6 +29,7 @@ export function registerHoiFs(): vscode.Disposable {
 
     if (!IS_WEB_EXT) {
         disposables.push(vscode.workspace.onDidChangeConfiguration(onChangeWorkspaceConfiguration));
+        void checkInstallPath();
     }
 
     // Every input to the parent list ends in one resolution of the `.mod` dependencies, which tells
@@ -50,19 +55,34 @@ async function selectHoiFolder(): Promise<void> {
     }
 
     const uri = result[0];
-    installPathContainer.current = uri;
-    void clearDlcZipCache();
-
+    if (uri === undefined) {
+        return;
+    }
     if (!IS_WEB_EXT && isFileScheme(uri)) {
         const conf = getConfiguration();
-        conf.update('installPath', uri.fsPath, vscode.ConfigurationTarget.Global);
+        try {
+            await conf.update('installPath', uri.fsPath, vscode.ConfigurationTarget.Global);
+        } catch (e) {
+            error(e);
+            void vscode.window.showErrorMessage(
+                localize('installpath.savefailed', "Couldn't save the Hearts of Iron IV install path: {0}", `${e}`),
+            );
+            return;
+        }
     }
+
+    // After the write, not before it: a rejected write used to leave the in-memory path pointing
+    // at a folder the settings did not name. It also settles a race -- the configuration change
+    // this write raises clears the cache, and doing so after an earlier set would have undone it.
+    setInstallPathUri(uri);
+    void clearDlcZipCache();
 }
 
 function onChangeWorkspaceConfiguration(e: vscode.ConfigurationChangeEvent): void {
     if (e.affectsConfiguration(`${ConfigurationKey}.installPath`)) {
-        installPathContainer.current = null;
+        clearInstallPathCache();
         void clearDlcZipCache();
+        void checkInstallPath();
     }
 }
 
@@ -146,15 +166,6 @@ class Hoi4UtilsFsProvider implements vscode.FileSystemProvider {
     }
 
     private getInstallPath(): vscode.Uri {
-        if (installPathContainer.current !== null) {
-            return installPathContainer.current;
-        }
-
-        const installPath = getConfiguration().installPath;
-        if (installPath === '') {
-            throw new UserError("Install path of Heart of Iron IV is not set.");
-        }
-
-        return installPathContainer.current = vscode.Uri.file(installPath);
+        return getInstallPathUri();
     }
 }

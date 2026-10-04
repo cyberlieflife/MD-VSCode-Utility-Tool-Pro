@@ -89,6 +89,14 @@ function buildStub() {
         showQuickPick: async () => undefined,
         showOpenDialog: async () => undefined,
         setStatusBarMessage: () => disposable(),
+        // The shared index-progress session opens a notification with this. The stub runs the task
+        // to completion with a reporting handle, which is all the index builds need from it.
+        withProgress: async (_options: any, task: (report: any, token: any) => Promise<unknown>) => {
+            return await task(
+                { report: () => undefined },
+                { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: noop }) },
+            );
+        },
         createOutputChannel: () => ({
             appendLine: noop, append: noop, show: noop, hide: noop, dispose: noop, name: '',
         }),

@@ -1,19 +1,32 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { debounceByInput, mapLimit } from './common';
 import { localisationIndex } from './featureflags';
-import { getFilePathFromModOrHOI4, listFilesFromModOrHOI4, readFileFromModOrHOI4 } from './fileloader';
+import { IndexFile, listIndexFiles } from './indexListing';
 import { localize } from './i18n';
 import { sendEvent } from './telemetry';
-import { Logger } from "./logger";
+import { createIndexBuilder, indexParseQueue, IndexProgress } from './indexBuild';
+import { FileSourceOptions, ListFilesOptions } from './fileloader';
+import {
+    buildIndexHalf,
+    captureIndexBuildContext,
+    IndexBuildContext,
+    readIndexFileContent,
+    reportIndexParseFailure,
+} from './indexHalf';
+import { createIndexWatchers, toWorkspaceRelativePath } from './indexWatchers';
 import { ConfigurationKey } from '../constants';
-import { loadCacheManifest, loadCacheData, saveCacheManifest, saveCacheData, getFileMtimes, computeStaleFiles, IndexTimer } from './indexCache';
-import { getParentModUris, onDidChangeParentMods } from './parentmods';
-import { whenModDependenciesSettled } from './moddependencies';
+import { Logger } from './logger';
+import { yieldToEventLoop } from './common';
+import {
+    defaultYmlSuffix,
+    isoBySettingName,
+    ymlSuffixByIso,
+    ymlSuffixes,
+} from './locales';
 
 type LocalisationData = Record<string, Record<string, string>>;
 
 const globalLocalisationIndex: LocalisationData = {};
+const globalLocalisationFileMap: Record<string, Record<string, Set<string>>> = {};
 let workspaceLocalisationIndex: LocalisationData = {};
 // 每个父模组一份，按设置/依赖里的顺序；查找时工作区覆盖它、它覆盖本体。
 let parentLocalisationIndexes: LocalisationData[] = [];
@@ -24,68 +37,28 @@ const workspaceLocalisationFileMap: Record<string, Record<string, Set<string>>> 
 // 父模组半区的平行表，只在重建时按文件回退用。
 const parentLocalisationFileMaps: Record<string, Record<string, Set<string>>>[] = [];
 
-// Mapping of language ISO codes to yml file language suffixes
-const localeMapping: Record<string, string> = {
-    'en': 'l_english',
-    'pt-br': 'l_braz_por',
-    'de': 'l_german',
-    'fr': 'l_french',
-    'es': 'l_spanish',
-    'pl': 'l_polish',
-    'ru': 'l_russian',
-    'ja': 'l_japanese',
-    'zh-cn': 'l_simp_chinese',
-};
+// Both halves report into this so the telemetry event carries the whole build's size. Reset per
+// build, since a build that failed and is retried would otherwise keep counting from where it left off.
+let estimatedSize: [number] = [0];
 
-// Mapping of language profiles to language ISO codes
-const localeISOMapping: Record<string, string> = {
-    ['Brazilian Portuguese']: 'pt-br',
-    English: 'en',
-    French: 'fr',
-    German: 'de',
-    Japanese: 'ja',
-    Polish: 'pl',
-    Russian: 'ru',
-    ['Simplified Chinese']: 'zh-cn',
-    Spanish: 'es',
-};
+const builder = createIndexBuilder<void>({
+    name: 'localisationIndex',
+    message: localize('localisationIndex.building', 'Building Localisation index...'),
+    build: async (progress) => {
+        estimatedSize = [0];
+        const context = await captureIndexBuildContext();
+        await Promise.all([
+            buildGlobalLocalisationIndex(estimatedSize, progress, context),
+            buildParentLocalisationIndex(estimatedSize, progress, context),
+            buildWorkspaceLocalisationIndex(estimatedSize, progress, context),
+        ]);
+    },
+    onSuccess: () => {
+        sendEvent('localisationIndex', { size: estimatedSize[0].toString() });
+    },
+});
 
-export function registerLocalisationIndex(): vscode.Disposable {
-    const disposables: vscode.Disposable[] = [];
-    if (localisationIndex) {
-        // Build the index up-front. If a focus-tree preview is already open in this window (e.g.
-        // restored by the workspace) build it immediately at full speed; otherwise build it lazily
-        // in the background (delayed, low-priority) so a big first build never stalls VSCode startup.
-        // Opening a focus-tree preview later upgrades the background build to the fast path via
-        // notifyFocusTreePreviewOpened (see the FocusTreePreview constructor).
-        buildPriority = hasActiveFocusTreePreview() ? 'fast' : 'slow';
-        void ensureLocalisationIndex();
-        disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(onChangeWorkspaceFolders));
-        disposables.push(vscode.workspace.onDidChangeTextDocument(onChangeTextDocument));
-        disposables.push(vscode.workspace.onDidCloseTextDocument(onCloseTextDocument));
-        disposables.push(vscode.workspace.onDidCreateFiles(onCreateFiles));
-        disposables.push(vscode.workspace.onDidDeleteFiles(onDeleteFiles));
-        disposables.push(vscode.workspace.onDidRenameFiles(onRenameFiles));
-        // 父模组名单变化：只重建这半个索引（缓存键按父模组序号分开，重建不牵动工作区与本体）。
-        disposables.push(onDidChangeParentMods(e => {
-            if (!e.folders) {
-                return;
-            }
-            const estimatedSize: [number] = [0];
-            void buildParentLocalisationIndexes(estimatedSize, buildPriority).then(
-                () => undefined,
-                (e2) => Logger.error(`[Localisation] rebuilding the parent half failed: ${String(e2)}`),
-            );
-        }));
-    }
-
-    return vscode.Disposable.from(...disposables);
-}
-
-// Shared size counter for the telemetry of the fast build. The background slow build stays silent
-// on purpose (it must not interrupt the user during VSCode startup).
-const localisationIndexSize: [number] = [0];
-let localisationIndexBuildPromise: Promise<void> | undefined;
+const buildGate = builder.gate;
 
 // --- Lazy build scheduling -----------------------------------------------
 // The index is built once. With no focus-tree preview open it is built as a slow background task
@@ -96,7 +69,6 @@ let localisationIndexBuildPromise: Promise<void> | undefined;
 // toggle (sendFocusNames) also drives this build on demand, so switching a tree to localised names
 // works even without the localisationIndex setting being enabled.
 const SLOW_BUILD_START_DELAY_MS = 3000;
-const LOCALISATION_PARSE_CONCURRENCY_FAST = 8;
 
 type BuildPriority = 'fast' | 'slow';
 
@@ -105,6 +77,7 @@ let activeFocusTreePreviewCount = 0;
 let slowStartTimer: NodeJS.Timeout | undefined;
 let slowBuildResolve: (() => void) | undefined;
 let slowBuildReject: ((e: unknown) => void) | undefined;
+let scheduledBuild: Promise<void> | undefined;
 
 // Called when a focus-tree preview panel opens: it is the consumer of the prewarmed index (the
 // webview ID/name toggle), so a still-building index must be fast from now on.
@@ -122,7 +95,7 @@ export function notifyFocusTreePreviewOpened(): void {
             slowBuildResolve = undefined;
             slowBuildReject = undefined;
             if (resolve) {
-                void buildLocalisationIndexes('fast').then(resolve, reject);
+                void builder.ensureBuilt().then(resolve, reject);
             }
         }
     }
@@ -149,17 +122,24 @@ function isFastBuild(): boolean {
 
 // Builds (once) the global + workspace localisation indexes. Schedules a fast build right away when
 // a focus-tree preview is open, otherwise a delayed slow build (see notifyFocusTreePreviewOpened for
-// the upgrade path).
+// the upgrade path). A failed build drops the memo so a later lookup retries instead of reading a
+// half-built index for the rest of the session.
 export function ensureLocalisationIndex(): Promise<void> {
-    if (localisationIndexBuildPromise === undefined) {
-        localisationIndexBuildPromise = scheduleBuild();
+    if (scheduledBuild === undefined) {
+        const task = scheduleBuild();
+        scheduledBuild = task;
+        void task.catch(() => {
+            if (scheduledBuild === task) {
+                scheduledBuild = undefined;
+            }
+        });
     }
-    return localisationIndexBuildPromise;
+    return scheduledBuild;
 }
 
 function scheduleBuild(): Promise<void> {
     if (buildPriority === 'fast') {
-        return buildLocalisationIndexes('fast');
+        return builder.ensureBuilt();
     }
     // Slow background build: delay the start so VSCode finishes activating first, then run at low
     // priority (see parseLocalisationFiles). Opening a focus-tree preview cancels the delay and
@@ -171,44 +151,66 @@ function scheduleBuild(): Promise<void> {
             slowStartTimer = undefined;
             slowBuildResolve = undefined;
             slowBuildReject = undefined;
-            void buildLocalisationIndexes('slow').then(resolve, reject);
+            void builder.ensureBuilt().then(resolve, reject);
         }, SLOW_BUILD_START_DELAY_MS);
     });
 }
 
-function buildLocalisationIndexes(priority: BuildPriority): Promise<void> {
-    const estimatedSize: [number] = [0];
-    const task = Promise.all([
-        buildGlobalLocalisationIndex(estimatedSize, priority),
-        buildParentLocalisationIndexes(estimatedSize, priority),
-        buildWorkspaceLocalisationIndex(estimatedSize, priority),
-    ]).then(() => {
-        localisationIndexSize[0] = estimatedSize[0];
-    });
-    if (priority === 'fast') {
-        vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('localisationIndex.building', 'Building Localisation index...'), task);
-        void task.then(() => {
-            vscode.window.showInformationMessage(localize('localisationIndex.builddone', 'Building Localisation index done.'));
-            sendEvent('localisationIndex', {size: localisationIndexSize[0].toString()});
-        });
+export function registerLocalisationIndex(): vscode.Disposable {
+    if (!localisationIndex) {
+        return vscode.Disposable.from();
     }
-    return task;
+
+    // Build the index up-front. If a focus-tree preview is already open in this window (e.g.
+    // restored by the workspace) build it immediately at full speed; otherwise build it lazily
+    // in the background (delayed, low-priority) so a big first build never stalls VSCode startup.
+    buildPriority = hasActiveFocusTreePreview() ? 'fast' : 'slow';
+    void ensureLocalisationIndex().catch(
+        (e) => Logger.error(`[Localisation] build failed: ${String(e)}`),
+    );
+    return watchers.register();
 }
 
-function yieldToEventLoop(): Promise<void> {
-    return new Promise(resolve => {
-        if (typeof setImmediate === 'function') {
-            setImmediate(resolve);
-        } else {
-            setTimeout(resolve, 0);
+const watchers = createIndexWatchers({
+    enabled: true,
+    extension: '.yml',
+    hasStarted: () => builder.hasStarted(),
+    gate: buildGate,
+    reindexFile: (file) => {
+        void reindexWorkspaceLocalisationFile(file);
+    },
+    removeFile: (file) => {
+        const relative = toWorkspaceRelativePath(file, 'localisation/');
+        if (relative) {
+            removeWorkspaceLocalisationFile(relative);
         }
-    });
-}
+    },
+    rebuildWorkspace: {
+        reset: () => {
+            workspaceLocalisationIndex = {};
+            for (const langKey in workspaceLocalisationFileMap) {
+                delete workspaceLocalisationFileMap[langKey];
+            }
+        },
+        // The watcher-driven rebuilds run at full priority: something is already looking at the result.
+        build: buildWorkspaceLocalisationIndex,
+        message: localize('localisationIndex.workspace.building', 'Building workspace Localisation index...'),
+        telemetryEvent: 'localisationIndex.workspace',
+        failureMessage: 'Building workspace Localisation index failed.',
+    },
+    rebuildParent: {
+        reset: () => {
+            parentLocalisationIndexes = [];
+            parentLocalisationFileMaps.length = 0;
+        },
+        build: buildParentLocalisationIndex,
+    },
+});
 
 export function getLocalisedTextQuick(localisationKey: string | undefined): string | undefined {
     const previewLocalisation = vscode.workspace.getConfiguration(ConfigurationKey).previewLocalisation;
     if (previewLocalisation){
-        return getLocalisedText(localisationKey, localeISOMapping[previewLocalisation]?? vscode.env.language);
+        return getLocalisedText(localisationKey, isoBySettingName[previewLocalisation] ?? vscode.env.language);
     }
     return getLocalisedText(localisationKey, vscode.env.language);
 }
@@ -217,8 +219,8 @@ export function getLocalisedTextQuick(localisationKey: string | undefined): stri
 // the localisationIndex feature flag (its index is not built without it); the unchecked variant
 // is for callers that have built the index on demand (e.g. the focus-tree name toggle).
 function lookupLocalisedText(localisationKey: string, language: string): string | undefined {
-    const langKey = localeMapping[language.toLowerCase()] || 'l_english'; // use mapping to get language suffix
-    const defaultLangKey = 'l_english';
+    const langKey = ymlSuffixByIso[language.toLowerCase()] || defaultYmlSuffix;
+    const defaultLangKey = defaultYmlSuffix;
 
     return globalLocalisationIndex[langKey]?.[localisationKey] ||
         workspaceLocalisationIndex[langKey]?.[localisationKey] ||
@@ -249,176 +251,192 @@ export function getLocalisedTextUnchecked(localisationKey: string | undefined, l
     return lookupLocalisedText(localisationKey, language) ?? localisationKey;
 }
 
-const LOC_CACHE_VERSION = 1;
-const langSuffixes = Object.values(localeMapping);
-const langSuffixPattern = langSuffixes.join('|');
+// 2: the cache is a line per file/language rather than one document per half, so a cache written
+// before it is a different shape entirely.
+const LOC_CACHE_VERSION = 2;
+const langSuffixPattern = ymlSuffixes.join('|');
 const localisationFileFilter = new RegExp(`.*_(${langSuffixPattern})\\.yml$`, 'i');
 
-interface LocCacheData {
-    index: LocalisationData;
-    fileMap: Record<string, Record<string, string[]>>; // langKey -> filePath -> keys[]
+/**
+ * One language of one .yml file, as one line of the cache. The file's keys are the entries' keys,
+ * so the cache no longer carries a second copy of every key alongside the index.
+ */
+type LocCacheRecord = [
+    langKey: string,
+    filePath: string,
+    entries: Record<string, string>,
+];
+
+const localisationRoot = 'localisation';
+const isLocalisationFile = (relativePath: string) => localisationFileFilter.test(relativePath);
+
+async function buildGlobalLocalisationIndex(estimatedSize: [number], progress: IndexProgress, context: IndexBuildContext): Promise<void> {
+    await buildLocalisationIndexHalf(
+        'localisationIndex.global',
+        { mod: false, hoi4: true, recursively: true },
+        globalLocalisationIndex,
+        globalLocalisationFileMap,
+        estimatedSize,
+        progress,
+        context,
+    );
 }
 
-async function buildGlobalLocalisationIndex(estimatedSize: [number], priority: BuildPriority): Promise<void> {
-    const options = {mod: false, hoi4: true, recursively: true};
-    const localisationFiles = (await listFilesFromModOrHOI4('localisation', options)).filter(f => localisationFileFilter.test(f)).map(f => 'localisation/' + f);
-    await buildLocalisationIndexWithCache('localisationIndex.global', localisationFiles, globalLocalisationIndex, null, options, estimatedSize, priority);
-}
-
-async function buildWorkspaceLocalisationIndex(estimatedSize: [number], priority: BuildPriority): Promise<void> {
-    const options = {mod: true, hoi4: false, recursively: true};
-    const localisationFiles = (await listFilesFromModOrHOI4('localisation', options)).filter(f => localisationFileFilter.test(f)).map(f => 'localisation/' + f);
-    await buildLocalisationIndexWithCache('localisationIndex.workspace', localisationFiles, workspaceLocalisationIndex, workspaceLocalisationFileMap, options, estimatedSize, priority);
+async function buildWorkspaceLocalisationIndex(estimatedSize: [number], progress: IndexProgress, context?: IndexBuildContext): Promise<void> {
+    const buildContext = context ?? (await captureIndexBuildContext());
+    await buildLocalisationIndexHalf(
+        'localisationIndex.workspace',
+        { mod: true, parent: false, hoi4: false, recursively: true },
+        workspaceLocalisationIndex,
+        workspaceLocalisationFileMap,
+        estimatedSize,
+        progress,
+        buildContext,
+    );
 }
 
 // 父模组各占一份索引，理由与 GFX 索引相同：工作区覆盖父模组、父模组覆盖本体，各自一份才能让缓存键
 // 互不干扰。名单变化时只重建这半个索引。
-async function buildParentLocalisationIndexes(estimatedSize: [number], priority: BuildPriority): Promise<void> {
-    await whenModDependenciesSettled();
-    const parents = getParentModUris();
+async function buildParentLocalisationIndex(estimatedSize: [number], progress: IndexProgress, context?: IndexBuildContext): Promise<void> {
+    const buildContext = context ?? (await captureIndexBuildContext());
+    const parents = buildContext.parentModUris;
     parentLocalisationIndexes = parents.map(() => ({}));
     parentLocalisationFileMaps.length = parents.length;
+    // 没有父模组就没有这半个索引：不列举、不写缓存。
     if (parents.length === 0) {
-        // 没有父模组就没有这半个索引：不列举、不写缓存。
         return;
     }
     await Promise.all(parents.map(async (parent, index) => {
-        const options = { mod: false, hoi4: false, recursively: true, parentModUris: [parent] as vscode.Uri[] };
-        const localisationFiles = (await listFilesFromModOrHOI4('localisation', options)).filter(f => localisationFileFilter.test(f)).map(f => 'localisation/' + f);
-        parentLocalisationFileMaps[index] = {};
-        await buildLocalisationIndexWithCache(`localisationIndex.parent.${index}`, localisationFiles, parentLocalisationIndexes[index]!, parentLocalisationFileMaps[index]!, options, estimatedSize, priority);
+        const fileMap: Record<string, Record<string, Set<string>>> = {};
+        parentLocalisationFileMaps[index] = fileMap;
+        const options = { workspace: false, hoi4: false, recursively: true, parentModUris: [parent] as vscode.Uri[] };
+        await buildLocalisationIndexHalf(
+            `localisationIndex.parent.${index}`,
+            options,
+            parentLocalisationIndexes[index]!,
+            fileMap,
+            estimatedSize,
+            progress,
+            buildContext,
+        );
     }));
 }
 
-// Runs the file-parse phase. Fast: all files in parallel (8-way, like the original eager build).
-// Slow: one file at a time, yielding to the event loop between files so the build never blocks the
-// UI thread; if a focus-tree preview opens mid-build (buildPriority flips to 'fast') the remainder
-// is finished at full concurrency.
-async function parseLocalisationFiles(
-    files: string[],
+async function buildLocalisationIndexHalf(
+    cacheName: string,
+    options: ListFilesOptions,
     targetIndex: LocalisationData,
     fileMap: Record<string, Record<string, Set<string>>> | null,
-    options: { mod?: boolean; hoi4?: boolean },
     estimatedSize: [number],
-    priority: BuildPriority,
+    progress: IndexProgress,
+    context: IndexBuildContext,
 ): Promise<void> {
-    if (priority === 'fast' || isFastBuild()) {
-        await mapLimit(files, LOCALISATION_PARSE_CONCURRENCY_FAST, f => fillLocalisationItems(f, targetIndex, fileMap, options, estimatedSize));
+    await buildIndexHalf<LocCacheRecord>(
+        {
+            cacheName,
+            version: LOC_CACHE_VERSION,
+            cacheScope: context.cacheScope,
+            dependencyGeneration: context.dependencyGeneration,
+            // A partial rebuild cannot preserve duplicate-key precedence: when two files define the
+            // same key, the one parsed last wins, and hydrating the untouched file's cached value
+            // first would let it win instead. Any change therefore re-parses the whole half.
+            fullRebuildOnAnyChange: true,
+            listFiles: (token) =>
+                listIndexFiles({
+                    roots: [localisationRoot],
+                    filter: isLocalisationFile,
+                    options: { ...options, token },
+                    // A mod with no localisation/ folder at all is ordinary, not a build failure.
+                    tolerateRootErrors: true,
+                }),
+            hydrate: ([langKey, filePath, entries], skipFiles) => {
+                if (skipFiles.has(filePath)) {
+                    return;
+                }
+                Object.assign(
+                    targetIndex[langKey] ?? (targetIndex[langKey] = {}),
+                    entries,
+                );
+                if (fileMap) {
+                    const fileMapForLang = fileMap[langKey] ?? (fileMap[langKey] = {});
+                    fileMapForLang[filePath] = new Set(Object.keys(entries));
+                }
+            },
+            parseFile: async (file) => {
+                await fillLocalisationItems(
+                    file,
+                    targetIndex,
+                    fileMap,
+                    options,
+                    estimatedSize,
+                );
+            },
+            // Each value is copied from the index rather than from the file, so a key two files define
+            // is cached with the text that won, as it always was.
+            serialize: () => {
+                const records: LocCacheRecord[] = [];
+                for (const langKey in fileMap ?? {}) {
+                    const languageIndex = targetIndex[langKey] ?? {};
+                    const filesForLang = fileMap?.[langKey] ?? {};
+                    for (const filePath in filesForLang) {
+                        const entries: Record<string, string> = {};
+                        for (const key of filesForLang[filePath] ?? []) {
+                            const value = languageIndex[key];
+                            if (value !== undefined) {
+                                entries[key] = value;
+                            }
+                        }
+                        records.push([langKey, filePath, entries]);
+                    }
+                }
+                return records;
+            },
+            parseFiles: parseLocalisationFiles,
+        },
+        progress,
+    );
+}
+
+/**
+ * Runs the parse phase. Fast: the shared queue at its own width. Slow: one file at a time, yielding
+ * to the event loop between files so the build never blocks the UI thread; if a focus-tree preview
+ * opens mid-build (buildPriority flips to 'fast') the remainder is finished at full concurrency.
+ */
+async function parseLocalisationFiles(
+    files: IndexFile[],
+    parseOne: (file: IndexFile) => Promise<void>,
+    progress: IndexProgress,
+): Promise<void> {
+    if (isFastBuild()) {
+        await indexParseQueue.map(files, parseOne, { token: progress.token });
         return;
     }
+
     for (let i = 0; i < files.length; i++) {
         if (isFastBuild()) {
-            await mapLimit(files.slice(i), LOCALISATION_PARSE_CONCURRENCY_FAST, f => fillLocalisationItems(f, targetIndex, fileMap, options, estimatedSize));
+            await indexParseQueue.map(files.slice(i), parseOne, { token: progress.token });
             return;
         }
         await yieldToEventLoop();
-        await fillLocalisationItems(files[i], targetIndex, fileMap, options, estimatedSize);
+        await indexParseQueue.map([files[i]!], parseOne, { token: progress.token });
     }
 }
 
-async function buildLocalisationIndexWithCache(
-    cacheName: string,
-    locFiles: string[],
-    targetIndex: LocalisationData,
+/** Returns whether the file was read and parsed, so a re-index knows not to discard what it has. */
+async function fillLocalisationItems(
+    localisationFile: IndexFile,
+    localisationIndex: LocalisationData,
     fileMap: Record<string, Record<string, Set<string>>> | null,
-    options: { mod?: boolean; hoi4?: boolean },
-    estimatedSize: [number],
-    priority: BuildPriority
-): Promise<void> {
-    const timer = new IndexTimer(cacheName);
-    const resolveUri = (relativePath: string) => getFilePathFromModOrHOI4(relativePath, options);
-    const currentMtimes = await getFileMtimes(locFiles, resolveUri);
-    timer.mark('mtime');
-
-    const manifest = await loadCacheManifest(cacheName, LOC_CACHE_VERSION);
-    let filesToParse = locFiles;
-
-    if (manifest) {
-        const staleness = computeStaleFiles(manifest, currentMtimes);
-        const cachedData = await loadCacheData(cacheName);
-
-        if (cachedData && staleness.stale.length + staleness.removed.length + staleness.added.length < locFiles.length) {
-            try {
-                const cached: LocCacheData = JSON.parse(cachedData);
-                const skipFiles = new Set([...staleness.stale, ...staleness.removed]);
-
-                for (const langKey in cached.index) {
-                    if (!targetIndex[langKey]) {
-                        targetIndex[langKey] = {};
-                    }
-                    const fileKeysForLang = cached.fileMap?.[langKey] ?? {};
-                    for (const filePath in fileKeysForLang) {
-                        if (!skipFiles.has(filePath)) {
-                            const keys = fileKeysForLang[filePath];
-                            for (const key of keys) {
-                                if (cached.index[langKey][key] !== undefined) {
-                                    targetIndex[langKey][key] = cached.index[langKey][key];
-                                }
-                            }
-                            if (fileMap) {
-                                if (!fileMap[langKey]) {
-                                    fileMap[langKey] = {};
-                                }
-                                fileMap[langKey][filePath] = new Set(keys);
-                            }
-                        }
-                    }
-                }
-
-                filesToParse = [...staleness.stale, ...staleness.added];
-            } catch {
-                Logger.warn(`${cacheName}: cache data corrupted, full rebuild`);
-                filesToParse = locFiles;
-            }
-        }
+    options: FileSourceOptions,
+    estimatedSize?: [number],
+): Promise<boolean> {
+    const filePath = localisationFile.path;
+    const fileBuffer = await readIndexFileContent('Localisation index', localisationFile, options);
+    if (fileBuffer === undefined) {
+        return false;
     }
-
-    // Self-heal against a corrupted cache pair (a data file written empty next to a full
-    // manifest, e.g. by an interrupted write): the cache hit above then yields an empty index
-    // with nothing left to parse, and every later build would stay empty forever. Detect that
-    // state and force a full reparse instead.
-    const cachedIndexKeyCount = Object.values(targetIndex).reduce((sum, lang) => sum + Object.keys(lang).length, 0);
-    if (manifest && filesToParse.length === 0 && cachedIndexKeyCount === 0 && locFiles.length > 0) {
-        Logger.warn(`${cacheName}: cache data is empty while the manifest lists ${locFiles.length} files; rebuilding from scratch`);
-        filesToParse = locFiles;
-    }
-    timer.mark('cache');
-
-    await parseLocalisationFiles(filesToParse, targetIndex, fileMap, options, estimatedSize, priority);
-    timer.mark('parse');
-    timer.log(locFiles.length, filesToParse.length);
-
-    // Serialize Sets to arrays for JSON cache
-    const serializedFileMap: Record<string, Record<string, string[]>> = {};
-    if (fileMap) {
-        for (const langKey in fileMap) {
-            serializedFileMap[langKey] = {};
-            for (const filePath in fileMap[langKey]) {
-                serializedFileMap[langKey][filePath] = [...fileMap[langKey][filePath]];
-            }
-        }
-    }
-    // Never persist an empty index next to a full manifest: that pair makes every later build
-    // trust the empty cache and skip parsing entirely (see the self-heal above).
-    const indexKeyCount = Object.values(targetIndex).reduce((sum, lang) => sum + Object.keys(lang).length, 0);
-    if (locFiles.length > 0 && indexKeyCount === 0) {
-        Logger.warn(`${cacheName}: parsed ${locFiles.length} files but produced no entries; cache not saved`);
-        return;
-    }
-    const cacheData: LocCacheData = { index: targetIndex, fileMap: serializedFileMap };
-    // fire-and-forget: write data before manifest for atomicity
-    void Promise.all([
-        saveCacheData(cacheName, JSON.stringify(cacheData)),
-        saveCacheManifest(cacheName, locFiles, currentMtimes, LOC_CACHE_VERSION),
-    ]).catch(e => Logger.error(`Cache save failed for ${cacheName}: ${e}`));
-}
-
-async function fillLocalisationItems(localisationFile: string, localisationIndex: LocalisationData, fileMap: Record<string, Record<string, Set<string>>> | null, options: {
-    mod?: boolean,
-    hoi4?: boolean
-}, estimatedSize?: [number]): Promise<void> {
-    const [fileBuffer] = await readFileFromModOrHOI4(localisationFile, options);
     const content = fileBuffer.toString();
+
     try {
         const localisations = parseLocalisation(content);
         for (const langKey in localisations) {
@@ -426,35 +444,29 @@ async function fillLocalisationItems(localisationFile: string, localisationIndex
                 localisationIndex[langKey] = {};
             }
 
-            Object.assign(localisationIndex[langKey], localisations[langKey]);
+            const languageLocalisations = localisations[langKey] ?? {};
+            Object.assign(localisationIndex[langKey], languageLocalisations);
 
             if (fileMap) {
                 if (!fileMap[langKey]) {
                     fileMap[langKey] = {};
                 }
-                fileMap[langKey][localisationFile] = new Set(Object.keys(localisations[langKey]));
+                fileMap[langKey][filePath] = new Set(Object.keys(languageLocalisations));
             }
 
             if (estimatedSize) {
-                estimatedSize[0] += Object.keys(localisations[langKey]).reduce((sum, key) => sum + key.length + localisations[langKey][key].length, 0);
+                estimatedSize[0] += Object.keys(languageLocalisations).reduce(
+                    (sum, key) => sum + key.length + (languageLocalisations[key] ?? '').length,
+                    0,
+                );
             }
         }
+        return true;
     } catch (e) {
-        console.log(localisationFile);
-        console.log(content);
-        console.error(e);
-
-        const baseMessage = options.hoi4
-            ? localize('localisationIndex.vanilla','[Vanilla]')
-            : localize('localisationIndex.mod','[mod]');
-
-        const failureMessage = localize('localisationIndex.parseFailure','parsing failed! Please check if the file has issues!');
-
-        if ((e as { name?: string } | null)?.name === 'YAMLException') {
-            Logger.error(`${baseMessage} ${localisationFile} ${failureMessage}\n${(e as Error).message}`);
-        } else {
-            Logger.error(`${baseMessage} ${localisationFile} ${failureMessage}`);
-        }
+        // This logged only the message, where the focus index logged the stack. Both go through the
+        // same reporter now, which prefers the stack.
+        reportIndexParseFailure(filePath, options, e);
+        return false;
     }
 }
 
@@ -491,101 +503,85 @@ export function parseLocalisation(fileContent: string): LocalisationData {
 
         const entryMatch = localisationEntryRegex.exec(line);
         if (entryMatch) {
-            result[currentLang][entryMatch[1].trim()] = entryMatch[2];
+            const key = entryMatch[1];
+            const value = entryMatch[2];
+            if (key !== undefined && value !== undefined) {
+                const currentLanguage = result[currentLang] ?? (result[currentLang] = {});
+                currentLanguage[key.trim()] = value;
+            }
         }
     }
 
     return result;
 }
 
-function onChangeWorkspaceFolders(_: vscode.WorkspaceFoldersChangeEvent) {
+function removeWorkspaceLocalisationFile(relative: string): void {
+    for (const langKey of Object.keys(workspaceLocalisationFileMap)) {
+        const fileKeys = workspaceLocalisationFileMap[langKey]?.[relative];
+        if (fileKeys && workspaceLocalisationIndex[langKey]) {
+            for (const key of fileKeys) {
+                delete workspaceLocalisationIndex[langKey][key];
+            }
+            delete workspaceLocalisationFileMap[langKey][relative];
+        }
+    }
+}
+
+/**
+ * Re-indexes an edited .yml file: parse first, swap the entry in afterwards. Clearing the entry up
+ * front -- what an edit used to do -- left every key the file defines unresolvable for as long as
+ * the re-parse took, and a preview refreshing in that window showed raw keys.
+ */
+async function reindexWorkspaceLocalisationFile(file: vscode.Uri): Promise<void> {
+    const relative = toWorkspaceRelativePath(file, 'localisation/');
+    if (!relative) {
+        return;
+    }
+
+    // No URI: a re-index reaches one file, so resolving it the usual way costs nothing. Workspace
+    // only: a re-index that fires after the file was deleted must not read the parent's copy into
+    // this half, which is the one half the parent's files are never in.
+    const parsedIndex: LocalisationData = {};
+    const parsedFileMap: Record<string, Record<string, Set<string>>> = {};
+    await fillLocalisationItems(
+        { path: relative },
+        parsedIndex,
+        parsedFileMap,
+        { workspace: true, parent: false, hoi4: false },
+    );
+
+    removeWorkspaceLocalisationFile(relative);
+    for (const langKey in parsedIndex) {
+        const languageIndex = workspaceLocalisationIndex[langKey] ?? (workspaceLocalisationIndex[langKey] = {});
+        Object.assign(languageIndex, parsedIndex[langKey]);
+        const fileMapForLang = workspaceLocalisationFileMap[langKey] ?? (workspaceLocalisationFileMap[langKey] = {});
+        fileMapForLang[relative] = new Set(Object.keys(parsedIndex[langKey]));
+    }
+}
+
+// Test-only: clears memoized build state so isolated tests can exercise the lazy-build path.
+export function __resetLocalisationIndexForTests(): void {
+    builder.reset();
+    scheduledBuild = undefined;
+    if (slowStartTimer !== undefined) {
+        clearTimeout(slowStartTimer);
+        slowStartTimer = undefined;
+    }
+    slowBuildResolve = undefined;
+    slowBuildReject = undefined;
+    for (const key of Object.keys(globalLocalisationIndex)) {
+        delete globalLocalisationIndex[key];
+    }
+    for (const key of Object.keys(globalLocalisationFileMap)) {
+        delete globalLocalisationFileMap[key];
+    }
     workspaceLocalisationIndex = {};
     for (const langKey in workspaceLocalisationFileMap) {
         delete workspaceLocalisationFileMap[langKey];
     }
-    const estimatedSize: [number] = [0];
-    const task = buildWorkspaceLocalisationIndex(estimatedSize, 'fast');
-    vscode.window.setStatusBarMessage('$(loading~spin) ' + localize('localisationIndex.workspace.building', 'Building workspace Localisation index...'), task);
-    void task.then(() => {
-        vscode.window.showInformationMessage(localize('localisationIndex.workspace.builddone', 'Building workspace Localisation index done.'));
-        sendEvent('localisationIndex.workspace', {size: estimatedSize[0].toString()});
-    });
+    parentLocalisationIndexes = [];
+    parentLocalisationFileMaps.length = 0;
 }
 
-function onChangeTextDocument(e: vscode.TextDocumentChangeEvent) {
-    const file = e.document.uri;
-    if (file.path.endsWith('.yml')) {
-        onChangeTextDocumentImpl(file);
-    }
-}
-
-const onChangeTextDocumentImpl = debounceByInput(
-    (file: vscode.Uri) => {
-        removeWorkspaceLocalisationIndex(file);
-        addWorkspaceLocalisationIndex(file);
-    },
-    file => file.toString(),
-    1000,
-    {trailing: true}
-);
-
-function onCloseTextDocument(document: vscode.TextDocument) {
-    const file = document.uri;
-    if (file.path.endsWith('.yml') && document.isDirty) {
-        removeWorkspaceLocalisationIndex(file);
-        addWorkspaceLocalisationIndex(file);
-    }
-}
-
-function onCreateFiles(e: vscode.FileCreateEvent) {
-    for (const file of e.files) {
-        if (file.path.endsWith('.yml')) {
-            addWorkspaceLocalisationIndex(file);
-        }
-    }
-}
-
-function onDeleteFiles(e: vscode.FileDeleteEvent) {
-    for (const file of e.files) {
-        if (file.path.endsWith('.yml')) {
-            removeWorkspaceLocalisationIndex(file);
-        }
-    }
-}
-
-function onRenameFiles(e: vscode.FileRenameEvent) {
-    onDeleteFiles({files: e.files.map(f => f.oldUri)});
-    onCreateFiles({files: e.files.map(f => f.newUri)});
-}
-
-function removeWorkspaceLocalisationIndex(file: vscode.Uri) {
-    const wsFolder = vscode.workspace.getWorkspaceFolder(file);
-    if (wsFolder) {
-        const relative = path.relative(wsFolder.uri.path, file.path).replace(/\\+/g, '/');
-        if (relative && relative.startsWith('localisation/')) {
-            const langKey = getLangKeyFromPath(relative);
-            const fileKeys = workspaceLocalisationFileMap[langKey]?.[relative];
-            if (fileKeys && workspaceLocalisationIndex[langKey]) {
-                for (const key of fileKeys) {
-                    delete workspaceLocalisationIndex[langKey][key];
-                }
-                delete workspaceLocalisationFileMap[langKey][relative];
-            }
-        }
-    }
-}
-
-function addWorkspaceLocalisationIndex(file: vscode.Uri) {
-    const wsFolder = vscode.workspace.getWorkspaceFolder(file);
-    if (wsFolder) {
-        const relative = path.relative(wsFolder.uri.path, file.path).replace(/\\+/g, '/');
-        if (relative && relative.startsWith('localisation/')) {
-            void fillLocalisationItems(relative, workspaceLocalisationIndex, workspaceLocalisationFileMap, {hoi4: false});
-        }
-    }
-}
-
-function getLangKeyFromPath(filePath: string): string {
-    const match = filePath.match(localisationFileFilter);
-    return match ? match[1] : 'l_english';
-}
+// Test-only: exposes the incremental event handlers so tests can drive the build/event race directly.
+export const __testHandlers = watchers.handlers;

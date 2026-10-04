@@ -18,7 +18,7 @@ import { registerIdeaPictureHover } from "./hover/ideaPictureHover";
 import { registerIdeaSwapIndex } from "./util/ideaSwapIndex";
 import { registerModifierInlayHint } from "./inlayhint/modifierInlayHint";
 import { registerAuditFocusTreesCommand } from "./previewdef/focustree/warningreport";
-import { registerIndexStatusCommand } from "./util/indexStatus";
+import { registerIndexStatusCommand } from "./util/indexBuild";
 import { disposeImageDecodeWorkers } from "./util/image/imagedecoder";
 
 export function activate(context: vscode.ExtensionContext) {

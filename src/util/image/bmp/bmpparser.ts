@@ -1,4 +1,5 @@
 import { UserError } from '../../common';
+import { assertImageDimensions } from '../imagelimits';
 
 export interface BMP {
     width: number;
@@ -23,6 +24,9 @@ export function parseBmp(buffer: ArrayBuffer, byteOffset: number): BMP {
     const width = dibHeader.getUint32(1 << 2, true);
     const height = dibHeader.getUint32(2 << 2, true);
     const bitsPerPixel = dibHeader.getUint16(7 << 1, true);
+    // The row size and the data view below are derived from these, so a corrupt pair has to be
+    // refused before either is computed.
+    assertImageDimensions(width, height, "BMP");
 
     const bytesPerRow = ((width * bitsPerPixel + 7 >> 3) + 3) & 0xFFFFFFFC;
 

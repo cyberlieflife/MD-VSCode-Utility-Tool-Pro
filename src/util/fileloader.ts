@@ -2,17 +2,22 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { PromiseCache } from './cache';
 import { isSamePath } from './nodecommon';
-import { getLastModifiedAsync, readDirFiles, isFile, isDirectory, readFile, readDir, isSameUri, fileOrUriStringToUri, ensureFileScheme, readDirFilesRecursively, getConfiguration, getDocumentByUri } from './vsccommon';
+import { getLastModifiedAsync, readDirFiles, isFile, isDirectory, isFileScheme, readFile, readDir, isSameUri, fileOrUriStringToUri, ensureFileScheme, readDirFilesRecursively, getConfiguration, getDocumentByUri } from './vsccommon';
 import { parseHoi4File, resolveScriptVariables, Node, ParseOptions } from '../hoiformat/hoiparser';
 import { localize } from './i18n';
 import { convertNodeToJson, Enum, SchemaDef, HOIPartial } from '../hoiformat/schema';
 import { error } from './debug';
 import { updateSelectedModFileStatus, workspaceModFilesCache } from './modfile';
-import { UserError, memoizeWithTtl } from './common';
-import type * as AdmZip from 'adm-zip';
+import { CancelledError, UserError, forceError, mapLimit, memoizeWithTtl, throwIfCancelled } from './common';
+import { getInstallPathUri } from './installpath';
+import type { ZipIndex } from './nativezip';
+import { appendEntriesWithErrorLogging } from './promiseUtils';
 import { Hoi4FsSchema } from '../constants';
+import { Logger } from './logger';
 import { trimStart } from 'lodash';
 import { getParentModUris } from './parentmods';
+
+const dlcRootFolders = ['dlc', 'integrated_dlc'];
 
 const dlcZipPathsCache = new PromiseCache({
     factory: getDlcZipPaths,
@@ -25,79 +30,87 @@ const dlcPathsCache = new PromiseCache({
 });
 
 // Cached DLC zip that retains only a lightweight index (entryName -> isDirectory and directory ->
-// file basenames), never the zip buffer; reads reopen the archive transiently via readEntryData.
+// file basenames), never the zip buffer or an open handle. Reads go straight to the entry's bytes
+// through the ZipIndex, which seeks to them rather than re-reading the archive.
 export class DlcZip {
-    private nameIndex?: Map<string, { isDirectory: boolean }>;
-    private dirIndex?: Map<string, string[]>;
+    private readonly nameIndex = new Map<string, { isDirectory: boolean }>();
+    private readonly dirIndex = new Map<string, string[]>();
 
-    constructor(private readonly openZip: () => AdmZip) {}
+    constructor(private readonly zipIndex: ZipIndex) {
+        for (const entry of zipIndex.entries) {
+            this.nameIndex.set(entry.name, { isDirectory: entry.isDirectory });
+            if (!entry.isDirectory) {
+                const name = entry.name.replace(/^[\\/]/, '');
+                const dir = path.resolve(path.dirname(name)).toLowerCase();
+                const basenames = this.dirIndex.get(dir);
+                if (basenames) {
+                    basenames.push(path.basename(name));
+                } else {
+                    this.dirIndex.set(dir, [path.basename(name)]);
+                }
+            }
+        }
+    }
 
     getEntry(name: string): { isDirectory: boolean } | null {
-        this.ensureIndex();
-        return this.nameIndex!.get(name) ?? null;
+        return this.nameIndex.get(name) ?? null;
     }
 
     // Basenames of the non-directory entries directly under relativePath, matched the same way the
     // old getEntries loop did: leading slash/backslash stripped, path.resolve + lowercase compare.
     listDir(relativePath: string): string[] {
-        this.ensureIndex();
-        return this.dirIndex!.get(path.resolve(relativePath).toLowerCase()) ?? [];
+        return this.dirIndex.get(path.resolve(relativePath).toLowerCase()) ?? [];
     }
 
-    // Reopens the archive to read one entry's data. The index holds no buffers, so this pays a
-    // transient re-open; repeated reads are served upstream by fileContentCache.
-    async readEntryData(name: string): Promise<Buffer | null> {
-        const entry = this.openZip().getEntry(name);
-        if (!entry) {
-            return null;
-        }
-        return await new Promise<Buffer>(resolve => entry.getDataAsync(resolve));
+    // One entry's data, read out of the archive without touching the rest of it. Null when the
+    // archive holds no such entry; anything else that goes wrong throws rather than resolving with a
+    // buffer the caller would mistake for the file.
+    readEntryData(name: string): Promise<Buffer | null> {
+        return this.zipIndex.readEntry(name);
     }
+}
 
-    private ensureIndex(): void {
-        if (this.nameIndex !== undefined) {
-            return;
-        }
-        const nameIndex = new Map<string, { isDirectory: boolean }>();
-        const dirIndex = new Map<string, string[]>();
-        for (const entry of this.openZip().getEntries()) {
-            nameIndex.set(entry.entryName, { isDirectory: entry.isDirectory });
-            if (!entry.isDirectory) {
-                const dir = path.resolve(path.dirname(entry.entryName.replace(/^[\\/]/, ''))).toLowerCase();
-                const basenames = dirIndex.get(dir);
-                if (basenames) {
-                    basenames.push(path.basename(entry.name));
-                } else {
-                    dirIndex.set(dir, [path.basename(entry.name)]);
-                }
-            }
-        }
-        this.nameIndex = nameIndex;
-        this.dirIndex = dirIndex;
-    }
+/**
+ * The node-only directory walk, or null on the web build, where callers take the
+ * `vscode.workspace.fs` path instead. The require sits inside the `!IS_WEB_EXT` branch so webpack's
+ * DefinePlugin drops it and never tries to resolve `node:fs/promises` for a bundle that has no `fs`.
+ */
+let nativeWalk: typeof import("./nativewalk") | null = null;
+
+if (!IS_WEB_EXT) {
+    nativeWalk = require('./nativewalk') as typeof import('./nativewalk');
 }
 
 let dlcZipCache: PromiseCache<DlcZip> | null = null;
 
 if (!IS_WEB_EXT) {
-    // adm-zip requires fs, which doesn't work on web.
-    function getDlcZip(dlcZipPath: string): Promise<DlcZip> {
-        const uri = vscode.Uri.parse(dlcZipPath);
+    // The zip reader requires fs, which doesn't work on web.
+    async function getDlcZip(dlcZipUri: string): Promise<DlcZip> {
+        const uri = vscode.Uri.parse(dlcZipUri);
+        let fsPath: string;
         if (uri.scheme === Hoi4FsSchema) {
-            dlcZipPath = path.join(getConfiguration().installPath, trimStart(uri.path, '/'));
+            // Resolve through the shared install path so this gets the same normalization (and
+            // cache) as every hoi4installpath: lookup; the zip reader needs a real fs path.
+            const installPath = getInstallPathUri();
+            ensureFileScheme(installPath);
+            fsPath = path.join(installPath.fsPath, trimStart(uri.path, '/'));
         } else {
             ensureFileScheme(uri);
-            dlcZipPath = uri.fsPath;
+            fsPath = uri.fsPath;
         }
 
-        const AdmZip = require('adm-zip');
-        return Promise.resolve(new DlcZip(() => new AdmZip(dlcZipPath)));
+        const nativeZip = require('./nativezip') as typeof import('./nativezip');
+        return new DlcZip(await nativeZip.openZipIndex(fsPath));
     }
 
     dlcZipCache = new PromiseCache({
         factory: getDlcZip,
         expireWhenChange: key => getLastModifiedAsync(vscode.Uri.parse(key)),
         life: 10 * 60 * 1000,
+        // The default of 200ms re-stats every archive on nearly every lookup, and a stat through
+        // hoi4installpath: is two round trips. A DLC archive changes when the game updates, not
+        // between two lookups in the same listing.
+        nonExpireLife: 30 * 1000,
         maxSize: 64,
     });
 }
@@ -145,6 +158,12 @@ export function invalidateFileDiscoveryCache(): void {
 export interface FileSourceOptions {
     mod?: boolean;
     hoi4?: boolean;
+    /**
+     * 是否查已打开的工作区文件夹，默认查。属于 mod 半边（`mod: false` 同样跳过）。
+     * `{ workspace: false, hoi4: false }` 是索引单独读取父模组的方式：两边都定义的名字由构造
+     * 保证解析到工作区那份，而不是碰运气看哪个文件后解析。
+     */
+    workspace?: boolean;
     /** false 时跳过父模组层（例如只查本体文件的调用）。 */
     parent?: boolean;
     /** 覆盖默认的父模组列表；省略时取 getParentModUris()（设置 + 解析出的依赖）。 */
@@ -162,10 +181,11 @@ export function getFilePathFromMod(relativePath: string): Promise<vscode.Uri | u
 // order don't split the cache. Cleared by clearDlcZipCache on folder/config change.
 const getFilePathMemo = memoizeWithTtl(
     (key: string): Promise<vscode.Uri | undefined> => {
-        const [relativePath, mod, hoi4, parent, parentModUris] = JSON.parse(key) as [string, boolean | null, boolean | null, boolean | null, string[] | null];
+        const [relativePath, mod, hoi4, workspace, parent, parentModUris] = JSON.parse(key) as [string, boolean | null, boolean | null, boolean | null, boolean | null, string[] | null];
         return getFilePathFromModOrHOI4Impl(relativePath, {
             mod: mod ?? undefined,
             hoi4: hoi4 ?? undefined,
+            workspace: workspace ?? undefined,
             parent: parent ?? undefined,
             parentModUris: parentModUris === null ? undefined : parentModUris.map(uri => vscode.Uri.parse(uri)),
         });
@@ -173,20 +193,35 @@ const getFilePathMemo = memoizeWithTtl(
     { ttl: 500, maxSize: 1000 },
 );
 
+function escapesRelativeRoot(normalizedPath: string): boolean {
+    return (
+        normalizedPath.startsWith('/') ||
+        /^[a-zA-Z]:/.test(normalizedPath) ||
+        normalizedPath.split('/').includes('..')
+    );
+}
+
 export function getFilePathFromModOrHOI4(relativePath: string, options?: FileSourceOptions): Promise<vscode.Uri | undefined> {
     const normalizedPath = relativePath.replace(/\/\/+|\\+/g, '/');
+    // Rejected before the memo so an escaping path never occupies one of its slots.
+    if (escapesRelativeRoot(normalizedPath)) {
+        return Promise.resolve(undefined);
+    }
     // 父模组列表也是解析结果的一部分：同一路径在不同父模组集合下可能落在不同文件上。
     const parentModUris = options?.parentModUris?.map(uri => uri.toString()) ?? null;
-    return getFilePathMemo(JSON.stringify([normalizedPath, options?.mod ?? null, options?.hoi4 ?? null, options?.parent ?? null, parentModUris]));
+    return getFilePathMemo(JSON.stringify([normalizedPath, options?.mod ?? null, options?.hoi4 ?? null, options?.workspace ?? null, options?.parent ?? null, parentModUris]));
 }
 
 async function getFilePathFromModOrHOI4Impl(relativePath: string, options?: FileSourceOptions): Promise<vscode.Uri | undefined> {
     relativePath = relativePath.replace(/\/\/+|\\+/g, '/');
+    if (escapesRelativeRoot(relativePath)) {
+        return undefined;
+    }
     let absolutePath: vscode.Uri | undefined = undefined;
 
     if (options?.mod !== false) {
         // Find in opened workspace folders
-        if (vscode.workspace.workspaceFolders) {
+        if (options?.workspace !== false && vscode.workspace.workspaceFolders) {
             for (const folder of vscode.workspace.workspaceFolders) {
                 const findPath = vscode.Uri.joinPath(folder.uri, relativePath);
                 if (await isFile(findPath)) {
@@ -248,27 +283,53 @@ async function getFilePathFromModOrHOI4Impl(relativePath: string, options?: File
     if (!absolutePath && conf.loadDlcContents) {
         const dlcs = await dlcZipPathsCache.get(installPath.toString());
         if (dlcs !== null && dlcZipCache !== null) {
-            for (const dlc of dlcs) {
-                const dlcZip = await dlcZipCache.get(dlc.toString());
-                const entry = dlcZip.getEntry(relativePath);
-                if (entry !== null) {
-                    return dlc.with({ fragment: relativePath });
+            const dlcZips = await openDlcZips(dlcs);
+            for (let i = 0; i < dlcs.length; i++) {
+                if (dlcZips[i]!.getEntry(relativePath) !== null) {
+                    return dlcs[i]!.with({ fragment: relativePath });
                 }
             }
         }
 
         const dlcFolders = await dlcPathsCache.get(installPath.toString());
         if (dlcFolders !== null) {
-            for (const dlc of dlcFolders) {
-                const findPath = vscode.Uri.joinPath(dlc, relativePath);
-                if (await isFile(findPath)) {
-                    return findPath;
-                }
+            const found = await probeDlcFolders(dlcFolders, relativePath, isFile);
+            const first = found.find((uri): uri is vscode.Uri => uri !== null);
+            if (first) {
+                return first;
             }
         }
     }
 
     return absolutePath;
+}
+
+/**
+ * Opens (or fetches from the cache) every DLC archive at once rather than one after another.
+ * The DLC precedence is decided by whoever scans the result, in `dlcs` order; this only makes the
+ * waiting happen together. Each archive is opened at most once per session either way, so a scan
+ * that used to stop at the first hit opens nothing it would not have opened on the next lookup.
+ */
+function openDlcZips(dlcs: vscode.Uri[]): Promise<DlcZip[]> {
+    const cache = dlcZipCache!;
+    return Promise.all(dlcs.map(dlc => cache.get(dlc.toString())));
+}
+
+/**
+ * Whether `relativePath` exists under each DLC folder, probed several at a time and returned in
+ * `dlcFolders` order so the caller still takes the first match.
+ */
+const DLC_PROBE_CONCURRENCY = 8;
+
+function probeDlcFolders(
+    dlcFolders: vscode.Uri[],
+    relativePath: string,
+    exists: (uri: vscode.Uri) => Promise<boolean>,
+): Promise<(vscode.Uri | null)[]> {
+    return mapLimit(dlcFolders, DLC_PROBE_CONCURRENCY, async (dlc) => {
+        const findPath = vscode.Uri.joinPath(dlc, relativePath);
+        return (await exists(findPath)) ? findPath : null;
+    });
 }
 
 export function isHoiFileOpened(path: vscode.Uri): boolean {
@@ -485,20 +546,245 @@ export function listFilesFromModOrHOI4(relativePath: string, options?: ListFiles
 
 async function listFilesFromModOrHOI4Impl(relativePath: string, options?: ListFilesOptions | null): Promise<string[]> {
     const readFunction = options?.recursively ? readDirFilesRecursively : readDirFiles;
-    relativePath = relativePath.replace(/\/\/+|\\+/g, '/');
     const result: string[] = [];
-    // 访问过父模组目录后，两个半边可能给出同一个文件名（工作区覆盖了父模组的那份），早退路径也要去重。
-    let visitedParent = false;
 
+    const shouldDedupe = await visitFileSources(relativePath, options, {
+        directory: (dir, listFailureMessage) =>
+            appendEntriesWithErrorLogging(
+                result,
+                () => readFunction(dir),
+                listFailureMessage,
+                (message: string) => error(message),
+            ),
+        dlcZip: async (zip, _zipUri, normalizedPath) => {
+            result.push(...zip.listDir(normalizedPath));
+        },
+    });
+
+    return shouldDedupe ? [...new Set(result)] : result;
+}
+
+export interface ListFileEntriesOptions extends ListFilesOptions {
+    /**
+     * Only `isCancellationRequested` is read, so a test can hand in a plain object literal -- the
+     * unit-test vscode stub has no CancellationTokenSource to build a real one from.
+     */
+    token?: vscode.CancellationToken;
+}
+
+/** One file a listing found, with everything an index build needs about it, from a single pass. */
+export interface ModOrHoi4FileEntry {
+    /** Path relative to the folder listed -- the same string listFilesFromModOrHOI4 returns. */
+    relativePath: string;
+    /** Where it was found. A real `file:` path wherever one exists, so reads skip re-resolving it. */
+    uri: vscode.Uri;
+    /** Absent when this source cannot date the file in the same pass: the web build, or a remote install. */
+    mtime: number | undefined;
+}
+
+/**
+ * Like listFilesFromModOrHOI4, but hands back each file's URI and mtime alongside its name, gathered
+ * in the same pass as the listing. The index builds use this so they never make a second pass that
+ * resolves every listed name back to a path and stats it again -- which, for the vanilla half, was a
+ * stat of the install path plus one of every DLC folder, per file, through a filesystem provider that
+ * answers by calling `vscode.workspace.fs` a second time.
+ *
+ * Deliberately not served from `fileListCache`. A three-second-stale mtime is exactly the wrong thing
+ * to decide cache staleness on, a CancellationToken has no business in a JSON cache key, and an index
+ * asks for this once per build. The expensive shared caches behind it -- DLC discovery, replace_path,
+ * the zip index -- still apply.
+ */
+export async function listFileEntriesFromModOrHOI4(
+    relativePath: string,
+    options?: ListFileEntriesOptions,
+): Promise<ModOrHoi4FileEntry[]> {
+    const recursively = options?.recursively ?? false;
+    const token = options?.token;
+    const result: ModOrHoi4FileEntry[] = [];
+
+    throwIfCancelled(token);
+
+    const shouldDedupe = await visitFileSources(relativePath, options, {
+        directory: async (dir, listFailureMessage) => {
+            try {
+                result.push(...(await listDirectoryEntries(dir, recursively, token)));
+            } catch (cause) {
+                if (cause instanceof CancelledError) {
+                    throw cause;
+                }
+                // One unreadable folder costs that folder and nothing else, as it always has.
+                error(`${listFailureMessage}: ${forceError(cause).toString()}`);
+            }
+        },
+        dlcZip: async (zip, zipUri, normalizedPath) => {
+            // One stat for the whole archive. Every entry in it is dated by the archive today anyway:
+            // getFilePathFromModOrHOI4 hands back `<zipUri>#<entry>` and a stat ignores the fragment.
+            // Leaving them undated would have the vanilla half call every DLC file deleted on every
+            // build and re-read it forever.
+            const mtime = await lastModifiedOrUndefined(zipUri);
+            for (const name of zip.listDir(normalizedPath)) {
+                result.push({
+                    relativePath: name,
+                    uri: zipUri.with({ fragment: `${normalizedPath}/${name}` }),
+                    mtime,
+                });
+            }
+        },
+    });
+
+    return shouldDedupe ? dedupeEntriesByRelativePath(result) : result;
+}
+
+/**
+ * First occurrence wins, which is what `[...new Set(...)]` does for the name-only listing and what
+ * getFilePathFromModOrHOI4 does when it resolves that same name. Entries carry a resolved URI, so
+ * unlike a duplicated name a duplicated entry would be an outright wrong answer about where a file is.
+ */
+function dedupeEntriesByRelativePath(
+    entries: ModOrHoi4FileEntry[],
+): ModOrHoi4FileEntry[] {
+    const seen = new Set<string>();
+    return entries.filter((entry) => {
+        if (seen.has(entry.relativePath)) {
+            return false;
+        }
+        seen.add(entry.relativePath);
+        return true;
+    });
+}
+
+async function listDirectoryEntries(
+    dir: vscode.Uri,
+    recursively: boolean,
+    token: vscode.CancellationToken | undefined,
+): Promise<ModOrHoi4FileEntry[]> {
+    const nativePath = nativeWalk === null ? undefined : toNativeWalkPath(dir);
+    if (nativePath !== undefined) {
+        try {
+            const walked = await nativeWalk!.walkFilesWithMtime(nativePath, {
+                recursively,
+                token,
+                onWarning: (message) => Logger.warn(message),
+            });
+            return walked.map((entry) => ({
+                relativePath: entry.relativePath,
+                // The real path, not a hoi4installpath: one: whoever reads this file next should reach
+                // the disk directly rather than back through the provider.
+                uri: vscode.Uri.file(entry.fsPath),
+                mtime: entry.mtime,
+            }));
+        } catch (cause) {
+            if (cause instanceof CancelledError || !isMissingPathError(cause)) {
+                throw cause;
+            }
+            // The folder went away between the probe that found it and the walk, or -- in the unit
+            // tests -- its fsPath was never a real path to begin with. vscode.workspace.fs is the thing
+            // that can still answer, and answering is what this did before there was a native walk.
+        }
+    }
+
+    const names = recursively
+        ? await readDirFilesRecursively(dir)
+        : await readDirFiles(dir);
+    // No mtimes: readDirectory reports names and types only, so dating these costs a stat each and is
+    // left to the caller, which knows whether it needs them at all. Symlinked entries are dropped here
+    // and kept by the native walk -- vscode.FileType reports them as File|SymbolicLink, which matches
+    // neither value readDirFilesRecursively tests for.
+    return names.map((relativePath) => ({
+        relativePath,
+        uri: vscode.Uri.joinPath(dir, relativePath),
+        mtime: undefined,
+    }));
+}
+
+/** The path on this disk a listing directory maps to, or undefined when there is not one to walk. */
+function toNativeWalkPath(dir: vscode.Uri): string | undefined {
+    if (dir.scheme === Hoi4FsSchema) {
+        // Resolve the install path to a real path once per listing, so the walk never re-enters the
+        // hoi4installpath: FileSystemProvider -- which only calls vscode.workspace.fs again, making
+        // every vanilla stat two extension-host hops instead of one syscall.
+        let installPath: vscode.Uri;
+        try {
+            installPath = getInstallPathUri();
+        } catch {
+            return undefined; // not configured at all: UserError
+        }
+        if (!isFileScheme(installPath) || !installPath.fsPath) {
+            return undefined;
+        }
+        return path.join(installPath.fsPath, trimStart(dir.path, '/'));
+    }
+
+    // Anything else -- a remote workspace, vsls:, untitled: -- has no path on this disk.
+    return isFileScheme(dir) && dir.fsPath ? dir.fsPath : undefined;
+}
+
+function isMissingPathError(cause: unknown): boolean {
+    const code = (cause as { code?: unknown } | null)?.code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+async function lastModifiedOrUndefined(
+    uri: vscode.Uri,
+): Promise<number | undefined> {
+    try {
+        return await getLastModifiedAsync(uri);
+    } catch {
+        return undefined;
+    }
+}
+
+interface FileSourceVisitor {
+    /** A directory of this source that exists and could hold the requested folder. */
+    directory(dir: vscode.Uri, listFailureMessage: string): Promise<void>;
+    /**
+     * A DLC archive whose `normalizedPath` entry exists and is a directory. Always a flat listing:
+     * `DlcZip.listDir` returns the basenames directly under that entry and nothing below them, even
+     * when the caller asked for a recursive listing.
+     */
+    dlcZip(
+        zip: DlcZip,
+        zipUri: vscode.Uri,
+        normalizedPath: string,
+    ): Promise<void>;
+}
+
+/**
+ * Walks the mod, HOI4 and DLC sources that could hold `relativePath`, in the same order
+ * getFilePathFromModOrHOI4 resolves them, handing each one that exists to `visitor` -- awaited and in
+ * order, because for a listing the first occurrence of a name is the one that wins.
+ *
+ * Both listings share this rather than each spelling the precedence out for itself. If they ever
+ * disagreed about which source a name came from, an index would record one file's mtime and read
+ * another file's contents, and stay quietly stale for as long as neither changed.
+ *
+ * Returns whether the caller should deduplicate what it collected. Every exit says yes except the one
+ * `options.hoi4 === false` takes, which has always handed back its raw result -- so two workspace
+ * folders holding the same relative path still list it twice there, exactly as before. Once a
+ * parent mod folder was visited that exit says yes too: a file the workspace overrides is in both,
+ * and the listing has to name it once, at the workspace's URI.
+ */
+async function visitFileSources(
+    relativePath: string,
+    options: ListFilesOptions | null | undefined,
+    visitor: FileSourceVisitor,
+): Promise<boolean> {
+    relativePath = relativePath.replace(/\/\/+|\\+/g, '/');
+    if (escapesRelativeRoot(relativePath)) {
+        return false;
+    }
+
+    let visitedParent = false;
     if (options?.mod !== false) {
         // Find in opened workspace folders
-        if (vscode.workspace.workspaceFolders) {
+        if (options?.workspace !== false && vscode.workspace.workspaceFolders) {
             for (const folder of vscode.workspace.workspaceFolders) {
                 const findPath = vscode.Uri.joinPath(folder.uri, relativePath);
                 if (await isDirectory(findPath)) {
-                    try {
-                        result.push(...await readFunction(findPath));
-                    } catch(e) {}
+                    await visitor.directory(
+                        findPath,
+                        `Failed to list workspace files in ${findPath}`,
+                    );
                 }
             }
         }
@@ -509,9 +795,10 @@ async function listFilesFromModOrHOI4Impl(relativePath: string, options?: ListFi
                 const findPath = vscode.Uri.joinPath(parent, relativePath);
                 if (await isDirectory(findPath)) {
                     visitedParent = true;
-                    try {
-                        result.push(...await readFunction(findPath));
-                    } catch(e) {}
+                    await visitor.directory(
+                        findPath,
+                        `Failed to list parent mod files in ${findPath}`,
+                    );
                 }
             }
         }
@@ -520,16 +807,14 @@ async function listFilesFromModOrHOI4Impl(relativePath: string, options?: ListFi
         if (replacePaths) {
             for (const replacePath of replacePaths) {
                 if (isSamePath(relativePath, replacePath)) {
-                    return [...new Set(result)];
+                    return true;
                 }
             }
         }
     }
 
     if (options?.hoi4 === false) {
-        // Once a parent folder was visited the two halves can name the same file, so the early exit
-        // deduplicates too -- otherwise a name the workspace overrides would be listed twice.
-        return visitedParent ? [...new Set(result)] : result;
+        return visitedParent;
     }
 
     // Find in HOI4 install path
@@ -538,52 +823,81 @@ async function listFilesFromModOrHOI4Impl(relativePath: string, options?: ListFi
     {
         const findPath = vscode.Uri.joinPath(installPath, relativePath);
         if (await isDirectory(findPath)) {
-            try {
-                result.push(...await readFunction(findPath));
-            } catch(e) {}
+            await visitor.directory(
+                findPath,
+                `Failed to list HOI4 files in ${findPath}`,
+            );
         }
     }
 
-    // Find in HOI4 DLCs
+    // Find in HOI4 DLCs. Whether each one holds the folder is probed for all of them at once; the
+    // visits still happen one at a time in DLC order, which is what the precedence rests on.
     if (conf.loadDlcContents) {
         const dlcs = await dlcZipPathsCache.get(installPath.toString());
         if (dlcs !== null && dlcZipCache !== null) {
-            for (const dlc of dlcs) {
-                const dlcZip = await dlcZipCache.get(dlc.toString());
+            const dlcZips = await openDlcZips(dlcs);
+            for (let i = 0; i < dlcs.length; i++) {
+                const dlcZip = dlcZips[i]!;
                 const folderEntry = dlcZip.getEntry(relativePath);
                 if (folderEntry && folderEntry.isDirectory) {
-                    result.push(...dlcZip.listDir(relativePath));
+                    await visitor.dlcZip(dlcZip, dlcs[i]!, relativePath);
                 }
             }
         }
 
         const dlcFolders = await dlcPathsCache.get(installPath.toString());
         if (dlcFolders !== null) {
-            for (const dlc of dlcFolders) {
-                const findPath = vscode.Uri.joinPath(dlc, relativePath);
-                if (await isDirectory(findPath)) {
-                    try {
-                        result.push(...await readFunction(findPath));
-                    } catch(e) {}
+            const found = await probeDlcFolders(dlcFolders, relativePath, isDirectory);
+            for (const findPath of found) {
+                if (findPath !== null) {
+                    await visitor.directory(
+                        findPath,
+                        `Failed to list DLC files in ${findPath}`,
+                    );
                 }
             }
         }
     }
 
-    return [...new Set(result)];
+    return true;
 }
 
-async function getDlcZipPaths(installPath: string): Promise<vscode.Uri[] | null> {
-    const dlcPath = vscode.Uri.joinPath(vscode.Uri.parse(installPath), 'dlc');
-    if (!await isDirectory(dlcPath)) {
+async function mapDlcFolders<T>(
+    installPath: string,
+    map: (dlcFolder: vscode.Uri, dlcFolderName: string) => Promise<T | null>,
+): Promise<T[] | null> {
+    const root = vscode.Uri.parse(installPath);
+    const dlcRoots = (
+        await Promise.all(
+            dlcRootFolders.map(async (dlcRootFolder) => {
+                const dlcPath = vscode.Uri.joinPath(root, dlcRootFolder);
+                return (await isDirectory(dlcPath)) ? dlcPath : null;
+            }),
+        )
+    ).filter((dlcPath): dlcPath is vscode.Uri => dlcPath !== null);
+
+    if (dlcRoots.length === 0) {
         return null;
     }
 
-    const dlcFolders = await readDir(dlcPath);
-    const paths = await Promise.all(dlcFolders.map(async (dlcFolder) => {
-        const dlcZipFolder = vscode.Uri.joinPath(dlcPath, dlcFolder);
+    const results: (T | null)[][] = await Promise.all(
+        dlcRoots.map(async (dlcPath) => {
+            const dlcFolders = await readDir(dlcPath);
+            return await Promise.all(
+                dlcFolders.map((dlcFolder) =>
+                    map(vscode.Uri.joinPath(dlcPath, dlcFolder), dlcFolder),
+                ),
+            );
+        }),
+    );
+
+    return results.flat().filter((result): result is T => result !== null);
+}
+
+function getDlcZipPaths(installPath: string): Promise<vscode.Uri[] | null> {
+    return mapDlcFolders(installPath, async (dlcZipFolder) => {
         if (await isDirectory(dlcZipFolder)) {
-            const files =  await readDir(dlcZipFolder);
+            const files = await readDir(dlcZipFolder);
             const zipFile = files.find(file => file.endsWith('.zip'));
             if (zipFile) {
                 return vscode.Uri.joinPath(dlcZipFolder, zipFile);
@@ -591,28 +905,17 @@ async function getDlcZipPaths(installPath: string): Promise<vscode.Uri[] | null>
         }
 
         return null;
-    }));
-
-    return paths.filter((path): path is vscode.Uri => path !== null);
+    });
 }
 
-async function getDlcPaths(installPath: string): Promise<vscode.Uri[] | null> {
-    const dlcPath = vscode.Uri.joinPath(vscode.Uri.parse(installPath), 'dlc');
-    if (!await isDirectory(dlcPath)) {
-        return null;
-    }
-
-    const dlcFolders = await readDir(dlcPath);
-    const paths = await Promise.all(dlcFolders.map(async (dlcFolder) => {
-        const dlcZipFolder = vscode.Uri.joinPath(dlcPath, dlcFolder);
-        if (await isDirectory(dlcZipFolder) && dlcFolder.startsWith("dlc")) {
+function getDlcPaths(installPath: string): Promise<vscode.Uri[] | null> {
+    return mapDlcFolders(installPath, async (dlcZipFolder, dlcFolder) => {
+        if ((await isDirectory(dlcZipFolder)) && dlcFolder.startsWith("dlc")) {
             return dlcZipFolder;
         }
 
         return null;
-    }));
-
-    return paths.filter((path): path is vscode.Uri => path !== null);
+    });
 }
 
 const replacePathsCache = new PromiseCache({

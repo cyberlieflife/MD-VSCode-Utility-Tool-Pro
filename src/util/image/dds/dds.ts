@@ -2,6 +2,7 @@ import { DDSHeader, HEADER_LENGTH_INT, DDS_MAGIC, DDPF_FOURCC, DDSCAPS2_CUBEMAP,
 import { Surface } from './surface';
 import { convertPixelFormat, PixelFormat, getImageSizeInBytes } from './pixelformat';
 import { UserError } from '../../common';
+import { assertImageDimensions } from '../imagelimits';
 
 export class DDS {
     private constructor(
@@ -21,6 +22,9 @@ export class DDS {
         }
 
         const header = extractHeader(headerArray);
+        // The size in the header drives every allocation below, so a corrupt header has to be
+        // refused before any of them: a 65535x65535 pair is a 16 GB surface.
+        assertImageDimensions(header.dwWidth, header.dwHeight, "DDS");
         if (header.ddspf.dwFlags === DDPF_FOURCC && header.ddspf.dwFourCC === FOURCC_DX10) {
             const dxt10HeaderArray = new Int32Array(buffer, byteOffset + HEADER_LENGTH_INT * 4, HEADER_DXT10_LENGTH_INT);
             const dxt10Header = extractDxt10Header(dxt10HeaderArray);

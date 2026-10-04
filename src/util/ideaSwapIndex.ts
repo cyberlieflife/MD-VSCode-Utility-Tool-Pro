@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
-import { Node } from "../hoiformat/hoiparser";
-import { parseHoi4File } from "../hoiformat/hoiparser";
-import { createTimeSlicer, debounceByInput, mapLimit } from "./common";
+import { Node, parseHoi4File } from "../hoiformat/hoiparser";
+import { debounceByInput } from "./common";
 import { debug } from "./debug";
 import { ideaSwapIndex } from "./featureflags";
-import { listFilesFromModOrHOI4, readFileFromModOrHOI4 } from "./fileloader";
+import { readFileFromModOrHOI4, FileSourceOptions } from "./fileloader";
+import { listIndexFiles } from "./indexListing";
+import { createIndexBuilder, indexParseQueue } from "./indexBuild";
 import { getParentModUris, onDidChangeParentMods } from "./parentmods";
 import { whenModDependenciesSettled } from "./moddependencies";
 import { localize } from "./i18n";
@@ -51,17 +52,21 @@ const swapMarker = "swap_ideas";
 let swapsByFile: Map<string, SwapRecord[]> | undefined;
 // 每个父模组一份，按设置/依赖里的顺序；查找时工作区覆盖父模组、父模组覆盖本体。
 let parentSwapsByFile: Map<string, SwapRecord[]>[] = [];
-let buildPromise: Promise<void> | undefined;
 // Bumped by every invalidation and by every build; a build writes its result only when it is still
 // the newest one, so a slow build cannot land on top of the index a newer one built.
 let revision = 0;
-// How many times a build that could not list every root has been retried. Bounded, so a root that
-// is genuinely unreadable does not trigger a fresh scan on every lookup.
-let incompleteRetries = 0;
 
 // Edits that arrive while the index is still building. Replayed once it is ready, because the
 // build's own read may have raced the edit.
 const pendingReindex = new Map<string, string | undefined>();
+
+const builder = createIndexBuilder<void>({
+	name: "ideaSwapIndex",
+	message: localize("ideaSwapIndex.building", "Building idea swap index..."),
+	build: async () => {
+		await buildSwapIndex(++revision);
+	},
+});
 
 async function loadSwaps(relativePath: string, text: string | undefined): Promise<SwapRecord[]> {
 	const content = text ?? (await readFileFromModOrHOI4(relativePath))[0].toString();
@@ -74,38 +79,34 @@ async function loadSwaps(relativePath: string, text: string | undefined): Promis
 	return extractIdeaSwaps(parseHoi4File(content, localize("infile", "In file {0}:\n", relativePath)));
 }
 
+function isTxtFile(relativePath: string): boolean {
+	return relativePath.toLowerCase().endsWith(".txt");
+}
+
+/**
+ * Lists one source's swap files through the shared listing, so the walk is the native one and a
+ * root a mod simply does not have costs that root and nothing else.
+ */
+async function listSwapFiles(options: FileSourceOptions): Promise<string[]> {
+	const listing = await listIndexFiles({
+		roots: swapRoots,
+		filter: isTxtFile,
+		options: { ...options, recursively: true },
+		tolerateRootErrors: true,
+	});
+	return listing.filePaths;
+}
+
 async function buildSwapIndex(myRevision: number): Promise<void> {
 	const index = new Map<string, SwapRecord[]>();
-	const slicer = createTimeSlicer();
-	let incompleteRoots = 0;
-	for (const root of swapRoots) {
-		let files: string[];
-		try {
-			// 半区隔离：这一份只含工作区与本体，父模组各自成半区（见下）。
-			files = await listFilesFromModOrHOI4(root, { recursively: true, parent: false });
-		} catch (e) {
-			// A mod with no events/ folder at all is ordinary; a failing root costs only that root.
-			Logger.warn(`[ideaSwap] cannot list ${root}: ${e}`);
-			incompleteRoots++;
-			continue;
-		}
 
-		const txtFiles = files.filter((file) => file.toLowerCase().endsWith(".txt"));
-		await mapLimit(txtFiles, 8, async (file) => {
-			const relativePath = `${root}/${file}`.replace(/\/+/g, "/");
-			try {
-				const swaps = await loadSwaps(relativePath, undefined);
-				if (swaps.length > 0) {
-					index.set(relativePath, swaps);
-				}
-			} catch (e) {
-				debug(`[ideaSwap] cannot parse ${relativePath}:`, e);
-			}
-			// Let the event loop run between files so a large mod does not freeze the window for
-			// the whole scan.
-			await slicer();
-		});
-	}
+	const workspaceFiles = await listSwapFiles({ parent: false });
+	await indexParseQueue.map(workspaceFiles, async (file) => {
+		const swaps = await loadSwapsForBuild(file);
+		if (swaps.length > 0) {
+			index.set(file, swaps);
+		}
+	});
 
 	// 父模组各自一份：同一次构建里完成，revision 校验对两边一起生效；读取走单父查找，两边不会
 	// 互相遮住。依赖解析可能还在进行，等它定下来再列举。
@@ -113,30 +114,14 @@ async function buildSwapIndex(myRevision: number): Promise<void> {
 	const parents = getParentModUris();
 	const parentIndexes = parents.map(() => new Map<string, SwapRecord[]>());
 	await Promise.all(parents.map(async (parent, parentIndex) => {
-		const parentOptions = { mod: false, hoi4: false, parentModUris: [parent] as vscode.Uri[], recursively: true };
-		for (const root of swapRoots) {
-			let files: string[];
-			try {
-				files = await listFilesFromModOrHOI4(root, parentOptions);
-			} catch (e) {
-				Logger.warn(`[ideaSwap] cannot list ${root} in parent mods: ${e}`);
-				incompleteRoots++;
-				continue;
+		const options = { workspace: false, hoi4: false, parentModUris: [parent] as vscode.Uri[] };
+		const parentFiles = await listSwapFiles(options);
+		await indexParseQueue.map(parentFiles, async (file) => {
+			const swaps = await loadSwapsForBuild(file);
+			if (swaps.length > 0) {
+				parentIndexes[parentIndex]!.set(file, swaps);
 			}
-			const txtFiles = files.filter((file) => file.toLowerCase().endsWith(".txt"));
-			await mapLimit(txtFiles, 8, async (file) => {
-				const relativePath = `${root}/${file}`.replace(/\/+/g, "/");
-				try {
-					const swaps = await loadSwaps(relativePath, undefined);
-					if (swaps.length > 0) {
-						parentIndexes[parentIndex]!.set(relativePath, swaps);
-					}
-				} catch (e) {
-					debug(`[ideaSwap] cannot parse ${relativePath}:`, e);
-				}
-				await slicer();
-			});
-		}
+		});
 	}));
 
 	if (myRevision !== revision) {
@@ -146,15 +131,6 @@ async function buildSwapIndex(myRevision: number): Promise<void> {
 	swapsByFile = index;
 	parentSwapsByFile = parentIndexes;
 
-	// A root that failed to list may be a transient IO failure; drop the memo so the next lookup
-	// scans again instead of serving the half index for the rest of the session.
-	if (incompleteRoots > 0 && incompleteRetries < 3) {
-		incompleteRetries++;
-		buildPromise = undefined;
-	} else if (incompleteRoots === 0) {
-		incompleteRetries = 0;
-	}
-
 	const pending = [...pendingReindex.entries()];
 	pendingReindex.clear();
 	for (const [relativePath, text] of pending) {
@@ -162,16 +138,14 @@ async function buildSwapIndex(myRevision: number): Promise<void> {
 	}
 }
 
-function ensureIndexBuilt(): Promise<void> {
-	if (buildPromise === undefined) {
-		const myRevision = ++revision;
-		buildPromise = buildSwapIndex(myRevision).catch((e: unknown) => {
-			// A failed build must not be cached, or every later lookup serves an empty index.
-			buildPromise = undefined;
-			throw e;
-		});
+/** One file's swaps for the build; empty when it could not be read or parsed. */
+async function loadSwapsForBuild(relativePath: string): Promise<SwapRecord[]> {
+	try {
+		return await loadSwaps(relativePath, undefined);
+	} catch (e) {
+		debug(`[ideaSwap] cannot parse ${relativePath}:`, e);
+		return [];
 	}
-	return buildPromise;
 }
 
 async function reindexFile(relativePath: string, text: string | undefined): Promise<void> {
@@ -204,8 +178,9 @@ const scheduleReindex = debounceByInput(
 );
 
 function invalidateIndex(): void {
-	revision++;
-	buildPromise = undefined;
+	// Reset, not adopt: a rebuild must start from scratch even while the previous one is still
+	// parsing; that build discards its own result through the revision check.
+	builder.reset();
 	swapsByFile = undefined;
 	pendingReindex.clear();
 }
@@ -297,13 +272,7 @@ export async function getIdeaSwaps(ideaIds: string[]): Promise<IdeaSwap[]> {
 		return [];
 	}
 
-	if (swapsByFile === undefined && buildPromise === undefined) {
-		vscode.window.setStatusBarMessage(
-			"$(loading~spin) " + localize("ideaSwapIndex.building", "Building idea swap index..."),
-			ensureIndexBuilt(),
-		);
-	}
-	await ensureIndexBuilt().catch((e: unknown) => {
+	await builder.ensureBuilt().catch((e: unknown) => {
 		Logger.warn(`[ideaSwap] lookup for ${ideaIds.length} idea(s) served without the index: ${e}`);
 	});
 
