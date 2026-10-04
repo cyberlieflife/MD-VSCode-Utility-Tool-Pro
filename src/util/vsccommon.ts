@@ -5,6 +5,7 @@ import { ymlSuffixBySettingName } from './locales';
 import { UserError } from './common';
 import { isSamePath } from './nodecommon';
 import { ConfigurationKey } from '../constants';
+import { getFs } from './fs';
 
 export function getConfiguration() {
     return vscode.workspace.getConfiguration(ConfigurationKey);
@@ -39,15 +40,15 @@ export function isSameUri(uriA: vscode.Uri, uriB: vscode.Uri) {
 }
 
 export async function getLastModifiedAsync(path: vscode.Uri): Promise<number> {
-    return (await vscode.workspace.fs.stat(path)).mtime;
+    return (await getFs(path).stat(path)).mtime;
 }
 
 export async function readDir(dir: vscode.Uri): Promise<string[]> {
-    return (await vscode.workspace.fs.readDirectory(dir)).map(f => f[0]);
+    return (await getFs(dir).readDirectory(dir)).map(f => f[0]);
 }
 
 export async function readDirFiles(dir: vscode.Uri): Promise<string[]> {
-    return (await vscode.workspace.fs.readDirectory(dir)).filter(f => f[1] === vscode.FileType.File).map(f => f[0]);
+    return (await getFs(dir).readDirectory(dir)).filter(f => f[1] === vscode.FileType.File).map(f => f[0]);
 }
 
 export async function readDirFilesRecursively(dir: vscode.Uri): Promise<string[]> {
@@ -57,7 +58,7 @@ export async function readDirFilesRecursively(dir: vscode.Uri): Promise<string[]
 }
 
 async function readDirFilesRecursivelyImpl(dir: vscode.Uri, prefix: string, result: string[]): Promise<void> {
-    const items = await vscode.workspace.fs.readDirectory(dir);
+    const items = await getFs(dir).readDirectory(dir);
     for (const [name, type] of items) {
         if (type === vscode.FileType.File) {
             result.push(prefix + name);
@@ -68,20 +69,20 @@ async function readDirFilesRecursivelyImpl(dir: vscode.Uri, prefix: string, resu
 }
 
 export async function readFile(path: vscode.Uri): Promise<Buffer> {
-    return Buffer.from(await vscode.workspace.fs.readFile(path));
+    return Buffer.from(await getFs(path).readFile(path));
 }
 
 export async function writeFile(path: vscode.Uri, buffer: Buffer): Promise<void> {
-    return await vscode.workspace.fs.writeFile(path, buffer);
+    return await getFs(path).writeFile(path, buffer);
 }
 
 export async function mkdirs(path: vscode.Uri): Promise<void> {
-    await vscode.workspace.fs.createDirectory(path);
+    await getFs(path).createDirectory(path);
 }
 
 export async function isFile(path: vscode.Uri): Promise<boolean> {
     try {
-        return (await vscode.workspace.fs.stat(path)).type === vscode.FileType.File;
+        return (await getFs(path).stat(path)).type === vscode.FileType.File;
     } catch (e) {
         return false;
     }
@@ -89,7 +90,7 @@ export async function isFile(path: vscode.Uri): Promise<boolean> {
 
 export async function isDirectory(path: vscode.Uri): Promise<boolean> {
     try {
-        return (await vscode.workspace.fs.stat(path)).type === vscode.FileType.Directory;
+        return (await getFs(path).stat(path)).type === vscode.FileType.Directory;
     } catch (e) {
         return false;
     }

@@ -546,6 +546,7 @@ const table: Partial<typeof __table> = {
     "worldmap.warnings.provincenotexistonmap": "Провинция {0} не найдена на карте мира.",
     "worldmap.warnings.provincenothere": "Провинция {0} не включена в эту территорию, но здесть есть очки победы.",
     "worldmap.warnings.provincetoolarge": "Провинция слишком большая: {0}x{1}.",
+    "worldmap.warnings.provincetoosmall": "Провинция имеет всего {0} пикселей около (x={1},y={2}). Должно быть не менее {3}.",
     "worldmap.warnings.railwaylinecountnotenough": "Недостаточно провинций на ж/д: {0}",
     "worldmap.warnings.resourcedefinedtwice": "Resource {0} is defined in two files: {1}, {2}.",
     "worldmap.warnings.resourcenotexist": "Resource {0} used in state {1} is not defined.",

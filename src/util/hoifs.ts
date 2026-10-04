@@ -20,7 +20,7 @@ export function registerHoiFs(): vscode.Disposable {
     const disposables: vscode.Disposable[] = [];
     disposables.push(vscode.commands.registerCommand(Commands.SelectHoiFolder, selectHoiFolder));
     try {
-        disposables.push(vscode.workspace.registerFileSystemProvider(Hoi4FsSchema, new Hoi4UtilsFsProvider(), { isReadonly: true }));
+        disposables.push(vscode.workspace.registerFileSystemProvider(Hoi4FsSchema, hoi4FsProvider, { isReadonly: true }));
     } catch (e) {
         if (!forceError(e).message.includes(`scheme '${Hoi4FsSchema}' is already registered`)) {
             throw e;
@@ -169,3 +169,7 @@ class Hoi4UtilsFsProvider implements vscode.FileSystemProvider {
         return getInstallPathUri();
     }
 }
+
+// One instance is shared by the registration and by the fs router, so both see the same
+// provider state.
+export const hoi4FsProvider = new Hoi4UtilsFsProvider();
