@@ -1,5 +1,5 @@
 import { ContentLoader, LoadResultOD, Dependency, LoaderSession, mergeInLoadResult } from "../../util/loader/loader";
-import { convertFocusFileNodeToJson, FocusTree, getFocusTreeWithFocusFile, getGfxNameForSearchFilter, extractOrListIds } from "./schema";
+import { convertFocusFileNodeToJson, FocusTree, getFocusTreeWithFocusFile, getGfxNameForSearchFilter, extractOrListIds, importedPseudoTreesToShow } from "./schema";
 import { parseHoi4File } from "../../hoiformat/hoiparser";
 import { localize } from "../../util/i18n";
 import { Logger } from "../../util/logger";
@@ -9,7 +9,7 @@ import { sharedFocusIndex, focusTreeLayout } from "../../util/featureflags";
 import { findFileByFocusKey, ensureFocusIndex } from "../../util/sharedFocusIndex";
 import { focusTitlebarStylesFile, nationalFocusViewGfxFile, getFocusOverlayGfxFiles } from "./titlebar";
 import { GuiFileLoader } from "../gui/loader";
-import { buildFocusTreeLayout, FocusTreeLayout, FocusTreeLayoutMode, nationalFocusViewGuiFile } from "./layout";
+import { buildFocusTreeLayout, findFocusShortcutGui, FocusShortcutGui, FocusTreeLayout, FocusTreeLayoutMode, nationalFocusViewGuiFile } from "./layout";
 import { addInlayGfxWarnings, listGuiGfxFiles, loadFocusInlayWindows, resolveInlayGfxFiles, resolveInlayGuiWindows, resolveInlaysForTree } from "./inlay";
 
 export interface FocusTreeLoaderResult {
@@ -19,6 +19,8 @@ export interface FocusTreeLoaderResult {
     overlayGfxFiles: string[];
     // 仅在 focusTreeLayout 设置为 gui 时存在；否则预览使用标准布局。
     layout?: FocusTreeLayout;
+    // 仅在某棵树带 shortcut 块时存在。
+    shortcutGui?: FocusShortcutGui;
 }
 
 export type ProgressCallback = (message: string, current?: number, total?: number) => void;
@@ -87,8 +89,8 @@ export class FocusTreeLoader extends ContentLoader<FocusTreeLoaderResult> {
 
         const focusTrees = getFocusTreeWithFocusFile(file, importedFocusTrees, this.file, constants);
 
-        // Include synthetic trees from dependent files (e.g., joint focus trees)
-        focusTrees.push(...importedFocusTrees.filter(tree => tree.isSharedFocues));
+        // Include synthetic trees from dependent files (e.g., joint focus trees), unless already merged in
+        focusTrees.push(...importedPseudoTreesToShow(focusTrees, importedFocusTrees));
 
         // guiResolution.gfxFiles is exactly listGuiGfxFiles() and inlayGfxResolution.resolvedFiles is
         // [] when no tree has inlays, so the short-circuit still lists the interface gfx to keep the
@@ -143,14 +145,22 @@ export class FocusTreeLoader extends ContentLoader<FocusTreeLoaderResult> {
 
         this.loadedLayoutMode = focusTreeLayout;
         let layout: FocusTreeLayout | undefined = undefined;
+        let shortcutGui: FocusShortcutGui | undefined = undefined;
         let layoutDependencies: string[] = [];
-        if (focusTreeLayout === 'gui') {
-            // 通过依赖加载器加载，nationalfocusview.gui 被编辑时会重载这棵树。gui 文件缺失或
-            // 读不动时按标准布局继续，而不是让整个预览报错消失。
+        const hasShortcuts = focusTrees.some(ft => (ft.shortcuts?.length ?? 0) > 0);
+        if (focusTreeLayout === 'gui' || hasShortcuts) {
+            // 通过依赖加载器加载，nationalfocusview.gui 被编辑时会重载这棵树；快捷键按钮无论布局
+            // 设置是什么都从这份文件取。gui 文件缺失或读不动时按标准布局继续，而不是让整个预览
+            // 报错消失。
             try {
                 const layoutGui = await this.loaderDependencies.loadMultiple([nationalFocusViewGuiFile], session, GuiFileLoader);
                 const guiFiles = layoutGui.flatMap(r => r.result.guiFiles).map(g => g.data);
-                layout = buildFocusTreeLayout(guiFiles);
+                if (focusTreeLayout === 'gui') {
+                    layout = buildFocusTreeLayout(guiFiles);
+                }
+                if (hasShortcuts) {
+                    shortcutGui = findFocusShortcutGui(guiFiles);
+                }
                 layoutDependencies = [nationalFocusViewGuiFile, ...mergeInLoadResult(layoutGui, 'dependencies')];
             } catch (e) {
                 Logger.error(`Cannot read ${nationalFocusViewGuiFile} for the focus tree layout; using the standard layout: ${e}`);
@@ -165,6 +175,7 @@ export class FocusTreeLoader extends ContentLoader<FocusTreeLoaderResult> {
                 gfxFiles: uniq([...gfxDependencies, focusesGFX]),
                 overlayGfxFiles,
                 layout,
+                shortcutGui,
             },
             dependencies: uniq([
                 this.file,

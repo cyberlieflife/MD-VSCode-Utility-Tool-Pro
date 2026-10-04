@@ -28,8 +28,15 @@ export interface FocusTree {
     // 文件声明的初始视图位置（命中了 focus 时用该焦点所在格，否则用给定的 x/y 格）；未声明时
     // undefined，预览仍在左上角打开。
     initialShowPosition?: { focus?: string; x: number; y: number };
+    // 树自己的 shortcut 块，按文件顺序。伪树没有。
+    shortcuts?: FocusTreeShortcut[];
     searchFilters: string[];
     warnings: FocusWarning[];
+}
+
+export interface FocusTreeShortcut {
+    name: string;
+    target: string;
 }
 
 interface FocusIconWithCondition {
@@ -132,7 +139,13 @@ interface FocusTreeDef {
     continuous_focus_position: Position;
     initial_show_position: InitialShowPositionDef;
     inlay_window: Raw[];
+    shortcut: ShortcutDef[];
     _token: Token;
+}
+
+interface ShortcutDef {
+    name: string;
+    target: string;
 }
 
 interface FocusDef {
@@ -245,6 +258,13 @@ const focusTreeSchema: SchemaDef<FocusTreeDef> = {
     inlay_window: {
         _innerType: 'raw',
         _type: 'array',
+    },
+    shortcut: {
+        _innerType: {
+            name: "string",
+            target: "string",
+        },
+        _type: "array",
     },
 };
 
@@ -366,6 +386,9 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
                     },
                 }
                 : {}),
+            shortcuts: focusTree.shortcut
+                .filter((v): v is ShortcutDef => !!v?.name && !!v.target)
+                .map((v) => ({ name: v.name, target: v.target })),
             conditionExprs,
             isSharedFocues: false,
             searchFilters: chain(focuses).flatMap(f => f.searchFilters).uniq().value(),
@@ -381,6 +404,33 @@ function getJointFocusTreeId(filePath: string): string {
     const fileName = path.basename(filePath, path.extname(filePath));
     const label = localize('focustree.jointfocustree', '<Joint focus tree>');
     return fileName ? `${label} (${fileName})` : label;
+}
+
+/**
+ * 依赖文件的 shared/joint 伪树中，真正在本文件旁边列出自己的那些。其焦点已经被本文件的某棵树
+ * 合并走（useConditionInFocus 开启时的 `shared_focus` 引用）的伪树不再列出：它只会重复那些焦点，
+ * 而且多出的这一个条目会让只有单棵国策树的文件也弹出树选择器。
+ */
+export function importedPseudoTreesToShow(ownTrees: FocusTree[], imported: FocusTree[]): FocusTree[] {
+    const merged = new Set<string>();
+    for (const tree of ownTrees) {
+        if (!tree.isSharedFocues) {
+            Object.keys(tree.focuses).forEach((id) => merged.add(id));
+        }
+    }
+    return imported.filter(
+        (tree) => tree.isSharedFocues && !Object.keys(tree.focuses).some((id) => merged.has(id)),
+    );
+}
+
+/**
+ * 预览的树选择器里列出的树。文件至少有一棵真正的 `focus_tree` 时只列它们：共享焦点在合并它的树
+ * 里就能看到，不再单独作为 `<Shared focuses>` 条目出现。只有共享或联合焦点的文件仍保留伪树，
+ * 否则没有东西可显示。loader 的结果保留全部树，因为其它文件要从这些伪树里合并。
+ */
+export function focusTreesToDisplay(trees: FocusTree[]): FocusTree[] {
+    const ownTrees = trees.filter((tree) => !tree.isSharedFocues);
+    return ownTrees.length > 0 ? ownTrees : trees;
 }
 
 export function getGfxNameForSearchFilter(filter: string): string {

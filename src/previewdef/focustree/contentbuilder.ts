@@ -1,26 +1,26 @@
 import * as vscode from 'vscode';
-import { FocusTree, Focus, getGfxNameForSearchFilter } from './schema';
+import { FocusTree, Focus, FocusTreeShortcut, focusTreesToDisplay, getGfxNameForSearchFilter } from './schema';
 import { getSpriteByGfxName, Image, getImageByPath, iconResolveStats, resetIconResolveStats, Sprite } from '../../util/image/imagecache';
 import { localize, i18nTableAsScript } from '../../util/i18n';
 import { forceError, randomString, mapLimit } from '../../util/common';
 import { HOIPartial, toNumberLike, toStringAsSymbolIgnoreCase } from '../../hoiformat/schema';
 import { html, htmlEscape, escapeAttr, previewedFileUriScript } from '../../util/html';
-import { GridBoxType, IconType, ButtonType } from '../../hoiformat/gui';
+import { GridBoxType, IconType, ButtonType, InstantTextBoxType } from '../../hoiformat/gui';
 import { FocusTreeLoader, ProgressCallback } from './loader';
 import { LoaderSession } from '../../util/loader/loader';
 import { debug, error } from '../../util/debug';
 import { StyleTable, normalizeForStyle } from '../../util/styletable';
-import { useConditionInFocus, focusTreePrerequisiteLines } from '../../util/featureflags';
+import { useConditionInFocus, focusTreePrerequisiteLines, localisationIndex } from '../../util/featureflags';
 import { flatMap, chain } from 'lodash';
 import { getFocusTitlebarImage, getFocusOverlayImage, loadFocusTitlebarStyles, resolveTitlebarGfxName } from "./titlebar";
-import { FocusItemLayout, FocusTreeLayout, focusTreeGridBoxFor, standardFocusTreeLayout } from "./layout";
+import { FocusItemLayout, FocusShortcutGui, FocusTreeLayout, focusTreeGridBoxFor, standardFocusTreeLayout } from "./layout";
 import { registerExclusiveLinkStyles } from "../../util/hoi4gui/exclusivelink";
 import { loadExclusiveLinkImages, nationalFocusViewGfxFile } from "../../util/hoi4gui/exclusivelinkimages";
 import { registerFocusLinkStyles } from "../../util/hoi4gui/focuslink";
 import { loadFocusLinkImages } from "../../util/hoi4gui/focuslinkimages";
 import { registerWarningStyles, warningListClass } from "./warningstyles";
 import { registerTraceStyles } from "./tracestyles";
-import { iconButtonHtml } from "../toolbaricons";
+import { iconButtonHtml, iconClassOf } from "../toolbaricons";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
 import { renderInstantTextBox } from "../../util/hoi4gui/instanttextbox";
@@ -41,6 +41,11 @@ export interface FocusTreeUpdatePayload {
     xGridSize: number;
     // 棋盘与各图层偏移的来源；网页端用它铺连线贴图、定位 continuous 框与初始视图。
     layout: FocusTreeLayout;
+    // 每棵树的快捷键按钮，按树索引、再按快捷键索引。放在树旁边而不是树里，解析出的树对象正是
+    // 部分更新指纹取用的那一份。
+    renderedShortcuts: string[][];
+    // 折叠快捷键按钮的按钮内容。
+    renderedShortcutToggle: string;
 }
 
 export interface FocusTreePayload extends FocusTreeUpdatePayload {
@@ -66,7 +71,7 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
         debug('Loader session focus tree', session.loadedLoaderNames());
         const tLoaded = Date.now();
 
-        const focusTrees = loadResult.result.focusTrees;
+        const focusTrees = focusTreesToDisplay(loadResult.result.focusTrees);
         if (focusTrees.length === 0) {
             return null;
         }
@@ -151,6 +156,17 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             hasWarnings: focusTrees.some(ft => ft.warnings.length > 0),
         };
 
+        const shortcutGui = loadResult.result.shortcutGui;
+        const renderedShortcuts: string[][] = [];
+        for (const tree of focusTrees) {
+            const items: string[] = [];
+            for (const [index, shortcut] of (tree.shortcuts ?? []).entries()) {
+                items.push((await renderShortcut(shortcut, index, tree, shortcutGui?.item, styleTable, loadResult.result.gfxFiles, resolveIcons)).replace(/\s\s+/g, ' '));
+            }
+            renderedShortcuts.push(items);
+        }
+        const renderedShortcutToggle = await renderShortcutToggle(shortcutGui, styleTable, loadResult.result.gfxFiles);
+
         return {
             focusTrees,
             renderedFocus,
@@ -159,6 +175,8 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             useConditionInFocus,
             xGridSize: layout.spacing.x,
             layout,
+            renderedShortcuts,
+            renderedShortcutToggle,
             styleTable,
             styleNonce,
             toolbarFlags,
@@ -180,8 +198,9 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
 export async function loadFocusTreesOnly(loader: FocusTreeLoader, dependencyChanged = false): Promise<{ focusTrees: FocusTree[]; layout: FocusTreeLayout } | null> {
     try {
         const r = await loader.load(new LoaderSession(dependencyChanged));
-        return r.result.focusTrees.length
-            ? { focusTrees: r.result.focusTrees, layout: r.result.layout ?? standardFocusTreeLayout }
+        const focusTrees = focusTreesToDisplay(r.result.focusTrees);
+        return focusTrees.length
+            ? { focusTrees, layout: r.result.layout ?? standardFocusTreeLayout }
             : null;
     } catch {
         return null;
@@ -198,6 +217,7 @@ export async function buildFocusTreeHtml(payload: FocusTreePayload, webview: vsc
     jsCodes.push('window.focusTrees = ' + JSON.stringify(payload.focusTrees));
     jsCodes.push('window.renderedFocus = ' + JSON.stringify(payload.renderedFocus));
     jsCodes.push('window.renderedInlayWindows = ' + JSON.stringify(payload.renderedInlayWindows));
+    jsCodes.push('window.renderedShortcuts = ' + JSON.stringify(payload.renderedShortcuts));
     jsCodes.push('window.gridBox = ' + JSON.stringify(payload.gridBox));
     if (payload.layout.links) {
         jsCodes.push('window.focusLinkOffsets = ' + JSON.stringify(payload.layout.links));
@@ -212,7 +232,7 @@ export async function buildFocusTreeHtml(payload: FocusTreePayload, webview: vsc
     jsCodes.push('window.xGridSize = ' + payload.xGridSize);
     jsCodes.push(i18nTableAsScript());
 
-    const baseContent = await renderFocusTreeShell(payload.focusTrees, payload.styleTable, payload.toolbarFlags, payload.styleNonce, payload.gfxFiles, payload.layout);
+    const baseContent = await renderFocusTreeShell(payload.focusTrees, payload.styleTable, payload.toolbarFlags, payload.styleNonce, payload.gfxFiles, payload.layout, payload.renderedShortcutToggle);
 
     return html(
         webview,
@@ -266,7 +286,7 @@ export function buildFocusTreeErrorHtml(webview: vscode.Webview, uri: vscode.Uri
  * toolbar). Focuses and inlays themselves are rendered separately into the payload and
  * injected by the webview, so this is a cheap synchronous step.
  */
-async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string, gfxFiles: string[], layout: FocusTreeLayout): Promise<string> {
+async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string, gfxFiles: string[], layout: FocusTreeLayout, shortcutToggle: string): Promise<string> {
     // Same reason as registerWarningStyles below: the shell stylesheet is the only one the webview
     // can still attach classes against after a render. See tracestyles.ts.
     registerTraceStyles(styleTable);
@@ -306,6 +326,7 @@ async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTa
             ${continuousFocusContent}
         </div>` +
         renderWarningContainer(styleTable) +
+        renderShortcutOverlay(styleTable, shortcutToggle) +
         await renderToolBar(focusTrees, styleTable, toolbarFlags, gfxFiles)
     );
 }
@@ -424,21 +445,24 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
             </div>
         </div>`;
 
+    // 收起的下拉和它最长的选项一样宽，而一个条件可以是整块触发器，所以盒子限宽、标签留在同一行。
+    const conditionContainerClass = styleTable.style('conditionContainer', () => `white-space:nowrap`);
+    const conditionSelectClass = styleTable.style('conditionSelect', () => `max-width:400px; overflow:hidden;`);
     const conditions = `
-        <div id="condition-container">
+        <div id="condition-container" class="${conditionContainerClass}">
             <label for="conditions" class="${styleTable.style('conditionsLabel', () => `margin-right:5px`)}">${localize('focustree.focusconditions', 'Focus conditions: ')}</label>
             <div class="select-container ${styleTable.style('marginRight10', () => `margin-right:10px`)}">
-                <div id="conditions" class="select multiple-select ${styleTable.style('conditions', () => `max-width:400px`)}" tabindex="0" role="combobox">
+                <div id="conditions" class="select multiple-select ${conditionSelectClass}" tabindex="0" role="combobox">
                     <span class="value"></span>
                 </div>
             </div>
         </div>`;
 
     const inlayConditions = `
-        <div id="inlay-condition-container">
+        <div id="inlay-condition-container" class="${conditionContainerClass}">
             <label for="inlay-conditions" class="${styleTable.style('inlayConditionsLabel', () => `margin-right:5px`)}">${localize('focustree.inlayconditions', 'Inlay conditions: ')}</label>
             <div class="select-container ${styleTable.style('marginRight10', () => `margin-right:10px`)}">
-                <div id="inlay-conditions" class="select multiple-select" tabindex="0" role="combobox">
+                <div id="inlay-conditions" class="select multiple-select ${conditionSelectClass}" tabindex="0" role="combobox">
                     <span class="value"></span>
                 </div>
             </div>
@@ -596,10 +620,13 @@ async function renderInlayWindow(inlay: FocusTree["inlayWindows"][number], style
         orientation: 'upper_left',
     };
 
+    // 树里的 inlay_window 位置就是窗口左上角该去的地方。根窗口自己的朝向（比如 lower_left）会
+    // 把窗口锚到父容器上方的角上，整整低出一个屏高。
     const content = await renderContainerWindow(
         {
             ...inlay.guiWindow,
             position: { x: toNumberLike(0), y: toNumberLike(0) },
+            orientation: toStringAsSymbolIgnoreCase('upper_left'),
         },
         parentInfo,
         {
@@ -654,11 +681,15 @@ async function renderInlayOverrideChild<T extends keyof RenderChildTypeMap>(
     }
 
     const scale = iconLikeChild.scale ?? 1;
+    // 图片只来自占位符：网页端按选中的条件把它换成对应 option 的类。这里若把第一张图作为背景
+    // 一起烧进来，它的规则在样式表里更靠后，会盖过被选中的那张；精灵只负责撑出尺寸。
     const gfxClassPlaceholder = `{{inlay_slot_class:${slot.id}}}`;
-    const spriteHtml = renderSprite({ x: 0, y: 0 }, sprite, sprite, 0, scale, {
-        styleTable,
-        classNames: gfxClassPlaceholder,
-    });
+    const spriteHtml = `<div class="${gfxClassPlaceholder} ${styleTable.style('positionAbsolute', () => `position: absolute;`)} ${styleTable.oneTimeStyle('inlay-gui-slot-image', () => `
+        left: 0px;
+        top: 0px;
+        width: ${sprite.width * scale}px;
+        height: ${sprite.height * scale}px;
+    `)}"></div>`;
     const textHtml = type === 'button' ? await renderInstantTextBox({
         ...iconLikeChild,
         position: { x: toNumberLike(0), y: toNumberLike(0) },
@@ -684,6 +715,179 @@ async function renderInlayOverrideChild<T extends keyof RenderChildTypeMap>(
             ${spriteHtml}
             ${textHtml}
         </div>`;
+}
+
+// 快捷键按钮组，落在游戏自己的左下角。始终渲染，所以树新增或去掉 shortcut 块不需要重载外壳；
+// 网页端按树填充列表，在没有快捷键的树上把整个浮层隐藏。用固定定位而不是放进画布，缩放不会
+// 把它带走。
+function renderShortcutOverlay(styleTable: StyleTable, toggle: string): string {
+    styleTable.raw('#shortcut-overlay', `
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        z-index: 3;
+        flex-direction: column-reverse;
+        align-items: flex-start;
+        user-select: none;
+    `);
+    styleTable.raw('#shortcut-list', `
+        display: flex;
+        flex-direction: column-reverse;
+        max-height: calc(100vh - 110px);
+        overflow-y: auto;
+    `);
+    styleTable.raw('#shortcut-overlay.collapsed #shortcut-list', `display: none;`);
+    styleTable.raw('#shortcut-toggle', `
+        position: relative;
+        padding: 0;
+        margin-top: 2px;
+        border: none;
+        background: none;
+        cursor: pointer;
+    `);
+    styleTable.raw('#shortcut-overlay.collapsed #shortcut-toggle > *', `transform: scaleX(-1);`);
+    const title = escapeAttr(localize('focustree.shortcuts.toggle', 'Show or hide the shortcuts'));
+    return `
+    <div id="shortcut-overlay" style="display:none">
+        <div id="shortcut-list"></div>
+        <button id="shortcut-toggle" title="${title}" aria-label="${title}" aria-expanded="true">${toggle}</button>
+    </div>`;
+}
+
+// 工作区里没有任何 nationalfocusview.gui 声明 focus_tree_shortcut_item 时，按原版窗口的尺寸画。
+const fallbackShortcutItem = {
+    size: { width: 190, height: 72 },
+    icon: { x: 37, y: 37, scale: 0.6 },
+    name: { x: 63, y: 6, width: 112, height: 60, fontSize: 14 },
+};
+
+// 一个快捷键按游戏的画法：nationalfocusview.gui 里的 item 窗口，`name` 文本框放本地化后的
+// 快捷键名，`focus_button` 放目标焦点的图标。
+async function renderShortcut(
+    shortcut: FocusTreeShortcut,
+    index: number,
+    tree: FocusTree,
+    item: FocusShortcutGui['item'],
+    styleTable: StyleTable,
+    gfxFiles: string[],
+    resolveIcons: boolean,
+): Promise<string> {
+    const label = await localiseShortcutName(shortcut.name);
+    const iconName = tree.focuses[shortcut.target]?.icon.find(i => i.icon)?.icon;
+    const image = !resolveIcons ? undefined : iconName ? await getFocusIcon(iconName, gfxFiles) : await getImageByPath(defaultFocusIcon);
+
+    // 图片挂在一个以图标命名的类上，和焦点图标一样：结构遍往这个类名下写占位，图标遍把真图盖上，
+    // 尺寸也放在那里。居中用 transform，位置就不受那个尺寸影响。
+    const icon = (x: number, y: number, scale: number, centered: boolean) => {
+        const pictureClass = styleTable.style(`shortcut-icon-${normalizeForStyle(iconName ?? '-empty')}-${Math.round(scale * 100)}`, () => image ? `
+            width: ${image.width * scale}px;
+            height: ${image.height * scale}px;
+            background-image: url(${image.uri});
+            background-size: ${image.width * scale}px ${image.height * scale}px;
+        ` : `
+            width: ${94 * scale}px;
+            height: ${86 * scale}px;
+            background: rgba(127, 127, 127, 0.35);
+        `);
+        return `<div class="${pictureClass} ${styleTable.oneTimeStyle('shortcut-icon', () => `
+            position: absolute;
+            left: ${x}px;
+            top: ${y}px;
+            ${centered ? 'transform: translate(-50%, -50%);' : ''}
+            pointer-events: none;
+        `)}"></div>`;
+    };
+    // 自己画盒子而不是用共享的文本框渲染器：那个按行高居中单行，而快捷键名会折成两行。
+    const text = (x: number, y: number, width: number, height: number, fontSize: number) =>
+        `<div class="${styleTable.oneTimeStyle('shortcut-name', () => `
+            position: absolute;
+            left: ${x}px;
+            top: ${y}px;
+            width: ${width}px;
+            height: ${height}px;
+            font-size: ${fontSize}px;
+        `)} ${styleTable.style('shortcut-name-common', () => `
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            overflow: hidden;
+            color: white;
+            text-shadow: 0 0 3px black, 0px 0px 5px black;
+            pointer-events: none;
+        `)}">${htmlEscape(label)}</div>`;
+
+    let width: number;
+    let height: number;
+    let content: string;
+    if (item) {
+        const parentInfo: ParentInfo = { size: { width: 1920, height: 1080 }, orientation: 'upper_left' };
+        [, , width, height] = calculateBBox(item, parentInfo);
+        content = await renderContainerWindow(item, parentInfo, {
+            styleTable,
+            ignorePosition: true,
+            // 两遍都要出图，和 inlay 窗口一样：图标遍只推 CSS，结构遍漏掉的标记就永远不会出现。
+            getSprite: (sprite) => getSpriteByGfxName(sprite, gfxFiles),
+            onRenderChild: async (type, child, childParent) => {
+                if (type === 'button' && child.name === 'focus_button') {
+                    const button = child as unknown as HOIPartial<ButtonType>;
+                    const [x, y] = calculateBBox({ ...button, size: undefined }, childParent);
+                    return icon(x, y, button.scale ?? 1, !!button.centerposition);
+                }
+                if (type === 'instanttextbox' && child.name === 'name') {
+                    const textbox = child as unknown as HOIPartial<InstantTextBoxType>;
+                    const [x, y, w, h] = calculateBBox({ ...textbox, size: { width: textbox.maxwidth, height: textbox.maxheight } }, childParent);
+                    const fontMatch = /\d+/.exec((textbox.font ?? '').replace('hoi4', ''));
+                    return text(x, y, w, h, Math.ceil(parseInt(fontMatch?.[0] ?? '16') * 0.7));
+                }
+                return undefined;
+            },
+        });
+    } else {
+        const fallback = fallbackShortcutItem;
+        ({ width, height } = fallback.size);
+        content = `<div class="${styleTable.style('shortcut-item-plain', () => `
+                position: absolute;
+                inset: 0;
+                box-sizing: border-box;
+                border: 1px solid var(--vscode-panel-border);
+                border-radius: 4px;
+                background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+            `)}"></div>` +
+            icon(fallback.icon.x, fallback.icon.y, fallback.icon.scale, true) +
+            text(fallback.name.x, fallback.name.y, fallback.name.width, fallback.name.height, fallback.name.fontSize);
+    }
+
+    return `<div data-shortcut-index="${index}" title="${escapeAttr(shortcut.target)}" class="${styleTable.oneTimeStyle('shortcut-item', () => `
+        position: relative;
+        flex: none;
+        width: ${width}px;
+        height: ${height}px;
+        cursor: pointer;
+    `)}">${content}</div>`;
+}
+
+// 折叠快捷键的按钮：nationalfocusview.gui 的 toggle_shortcuts，没有就画一个 chevron。它的箭头
+// 朝左，折叠时由网页端镜像过来。
+async function renderShortcutToggle(gui: FocusShortcutGui | undefined, styleTable: StyleTable, gfxFiles: string[]): Promise<string> {
+    const spriteName = gui?.toggle?.quadtexturesprite ?? gui?.toggle?.spritetype;
+    const sprite = spriteName ? await getSpriteByGfxName(spriteName, gfxFiles) : undefined;
+    if (!sprite) {
+        return `<i class="${iconClassOf('shortcutToggle')}"></i>`;
+    }
+    return `<div class="${styleTable.oneTimeStyle('shortcut-toggle-sprite', () => `
+        position: relative;
+        width: ${sprite.width}px;
+        height: ${sprite.height}px;
+    `)}">${renderSprite({ x: 0, y: 0 }, sprite, sprite, 0, 1, { styleTable })}</div>`;
+}
+
+// 游戏画在快捷键按钮上的名字；没有本地化索引或没有对应条目时用原始键。
+async function localiseShortcutName(name: string): Promise<string> {
+    if (!localisationIndex) {
+        return name;
+    }
+    return (await getLocalisedTextQuick(name)) || name;
 }
 
 // Per-focus rendered-HTML cache. The structure pass (resolveIcons=false) and the icon pass

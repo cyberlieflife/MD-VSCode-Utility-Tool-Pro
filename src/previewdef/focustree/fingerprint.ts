@@ -33,6 +33,10 @@ export interface FocusTreeStructureInput {
     gridBox: unknown;
     useConditionInFocus: boolean;
     xGridSize: number;
+    // The shortcut buttons: they sit outside the trees, so a localisation edit that only renames
+    // a shortcut still has to move the fingerprint.
+    renderedShortcuts?: string[][];
+    renderedShortcutToggle?: string;
     // Structure-only styleTable records: placeholder focus icons plus the (deterministic per
     // identity) titlebar/overlay/inlay sprite CSS and the structural styles.
     styleRecords: Record<string, string>;
@@ -42,7 +46,7 @@ export interface FocusTreeStructureInput {
 // icon-resolution pass has to produce. st-inlay-gui-slot- keys are counter-suffixed geometry
 // classes embedded in the persistent inlay markup; a count change mints new class names whose
 // rules only reach the webview through the icon-CSS repush, so they must move this fingerprint.
-const iconKeyPrefixes = ['st-focus-icon-', 'st-focus-titlebar-', 'st-focus-overlay-', 'st-inlay-gfx-', 'st-inlay-gui-slot-'];
+const iconKeyPrefixes = ['st-focus-icon-', 'st-focus-titlebar-', 'st-focus-overlay-', 'st-inlay-gfx-', 'st-inlay-gui-slot-', 'st-shortcut-icon-'];
 
 // Serialize a record with its keys in sorted order so insertion order (which varies under the
 // 8-way concurrent render) does not change the fingerprint.
@@ -68,6 +72,8 @@ export function computeStructuralFingerprint(input: FocusTreeStructureInput): st
         h32(JSON.stringify(input.gridBox)),
         input.useConditionInFocus ? '1' : '0',
         input.xGridSize.toString(16).padStart(2, '0'),
+        h32(JSON.stringify(input.renderedShortcuts ?? [])),
+        h32(input.renderedShortcutToggle ?? ''),
         hashStringRecord(input.styleRecords),
     ].join(':');
 }

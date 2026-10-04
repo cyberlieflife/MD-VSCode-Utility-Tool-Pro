@@ -71,6 +71,7 @@ function search(searchContent: string, navigate: boolean = true) {
 
 let useConditionInFocus: boolean = (window as any).useConditionInFocus;
 let focusTrees: FocusTree[] = (window as any).focusTrees;
+let renderedShortcuts: string[][] = (window as any).renderedShortcuts ?? [];
 
 let selectedExprs: ConditionItem[] = getState().selectedExprs ?? [];
 let selectedInlayExprs: ConditionItem[] = getState().selectedInlayExprs ?? [];
@@ -1167,7 +1168,10 @@ function updateFocusNameDisplay() {
     }
 }
 
+let renderGeneration = 0;
+
 async function buildContent() {
+    const generation = ++renderGeneration;
     const focusCheckState = getState().checkedFocuses ?? {};
     const checkedFocusesExprs = Object.keys(focusCheckState)
         .filter(fid => focusCheckState[fid])
@@ -1235,6 +1239,11 @@ async function buildContent() {
         connectionOffsets: (window as any).focusLinkOffsets,
         connectionTiles: focusLinkTiles(),
     });
+
+    // 本次 await 渲染期间已有更新的构建开始：屏幕该显示的是它的产物，这次在写入 DOM 前停下。
+    if (generation !== renderGeneration) {
+        return;
+    }
 
     // 记录本次渲染的原点与各焦点的格位，供首次打开按 initial_show_position 居中。
     renderedOrigin = {
@@ -1797,7 +1806,42 @@ function updateSelectedFocusTree(clearCondition: boolean) {
         }
     }
 
+    renderShortcuts(focusTree, renderedShortcuts[selectedFocusTreeIndex]);
     renderWarningList(focusTree);
+}
+
+// 按钮全部由服务端渲染，这里只把当前树的填进浮层，并在没有快捷键的树上隐藏浮层。每个按钮带着
+// 它在树快捷键里的下标，因为两个快捷键可能同名。
+export function renderShortcuts(focusTree: FocusTree, rendered: string[] = []) {
+    const count = Math.min(focusTree.shortcuts?.length ?? 0, rendered.length);
+    const overlay = document.getElementById("shortcut-overlay") as HTMLDivElement | null;
+    if (overlay) {
+        overlay.style.display = count > 0 ? "flex" : "none";
+    }
+    const list = document.getElementById("shortcut-list");
+    if (list) {
+        list.innerHTML = rendered.slice(0, count).join("");
+    }
+}
+
+// 一个监听器挂在浮层上，按钮就能按树替换而无需重新绑定。折叠状态属于读者，和其它工具栏开关
+// 一样跨重载保留。
+export function bindShortcuts(overlay: HTMLElement, currentTree: () => FocusTree | undefined) {
+    overlay.classList.toggle("collapsed", getState().shortcutsCollapsed ?? false);
+    overlay.addEventListener("click", (e) => {
+        const target = e.target as Element;
+        if (target.closest("#shortcut-toggle")) {
+            const collapsed = !overlay.classList.contains("collapsed");
+            overlay.classList.toggle("collapsed", collapsed);
+            setState({ shortcutsCollapsed: collapsed });
+            return;
+        }
+        const item = target.closest("[data-shortcut-index]") as HTMLElement | null;
+        const shortcut = item ? currentTree()?.shortcuts?.[Number(item.dataset.shortcutIndex)] : undefined;
+        if (shortcut) {
+            revealFocus(shortcut.target);
+        }
+    });
 }
 
 function getFocusPosition(
@@ -2006,7 +2050,8 @@ function renderInlayWindows(focusTree: FocusTree, exprs: ConditionItem[]): strin
     }
 
     const selectedInlayWindow = focusTree.inlayWindows.find(inlay => inlay.id === selectedInlayWindowId);
-    if (!selectedInlayWindow || !applyCondition(selectedInlayWindow.visible, exprs)) {
+    // 条件模式之外没有办法满足 visible 触发器，而勾上这个窗口本身就是读者要看到它的意思。
+    if (!selectedInlayWindow || (useConditionInFocus && !applyCondition(selectedInlayWindow.visible, exprs))) {
         return '';
     }
 
@@ -2160,6 +2205,12 @@ window.addEventListener('message', async (event) => {
     (window as any).focusTrees = msg.focusTrees;
     (window as any).renderedFocus = msg.renderedFocus;
     (window as any).renderedInlayWindows = msg.renderedInlayWindows;
+    renderedShortcuts = msg.renderedShortcuts ?? [];
+    (window as any).renderedShortcuts = renderedShortcuts;
+    const shortcutToggle = document.getElementById('shortcut-toggle');
+    if (shortcutToggle && msg.renderedShortcutToggle !== undefined) {
+        shortcutToggle.innerHTML = msg.renderedShortcutToggle;
+    }
     (window as any).gridBox = msg.gridBox;
     useConditionInFocus = msg.useConditionInFocus;
     (window as any).useConditionInFocus = msg.useConditionInFocus;
@@ -2354,6 +2405,11 @@ window.addEventListener('load', tryRun(async function() {
             await buildContent();
             retriggerSearch();
         });
+    }
+
+    const shortcutOverlay = document.getElementById('shortcut-overlay');
+    if (shortcutOverlay) {
+        bindShortcuts(shortcutOverlay, () => focusTrees[selectedFocusTreeIndex]);
     }
 
     // Allow branch

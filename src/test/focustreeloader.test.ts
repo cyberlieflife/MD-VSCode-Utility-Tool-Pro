@@ -160,5 +160,72 @@ describe('previewdef/focustree/loader inlay short-circuit', function () {
             refreshFeatureFlags();
             assert.strictEqual(await loader.shouldReloadImpl(new LoaderSession(false)), true);
         });
+
+        // 快捷键块与 gui 片段的解析都在 postLoad 里定形。
+        const shortcutTree = `focus_tree = {
+    id = test_shortcuts
+    shortcut = { name = TST_shortcut_one target = focus_a }
+    shortcut = { name = TST_shortcut_two target = focus_b }
+    focus = { id = focus_a x = 0 y = 0 }
+    focus = { id = focus_b x = 0 y = 1 }
+}`;
+
+        it('parses a tree shortcut block in file order and drops incomplete entries', async function () {
+            const result = await postLoad2(shortcutTree);
+            assert.deepStrictEqual(result.result.focusTrees[0].shortcuts, [
+                { name: 'TST_shortcut_one', target: 'focus_a' },
+                { name: 'TST_shortcut_two', target: 'focus_b' },
+            ]);
+
+            // name 与 target 缺一不可：缺的那条被丢掉，其余照常解析。
+            const partial = await postLoad2(`focus_tree = {
+    id = test_partial_shortcuts
+    shortcut = { name = TST_only_name }
+    shortcut = { target = focus_a }
+    shortcut = { name = TST_complete target = focus_a }
+    focus = { id = focus_a x = 0 y = 0 }
+}`);
+            assert.deepStrictEqual(partial.result.focusTrees[0].shortcuts, [
+                { name: 'TST_complete', target: 'focus_a' },
+            ]);
+        });
+
+        it('reads the shortcut item and toggle from nationalfocusview.gui when a tree has shortcuts', async function () {
+            // 该文件必须被接口目录列出，才会进入 GuiFileLoader 的加载集合。
+            const realReadDir2 = (vscode.workspace.fs as any).readDirectory;
+            (vscode.workspace.fs as any).readDirectory = async (uri: any) =>
+                underInterface(uri)
+                    ? [['a.gfx', File], ['b.gfx', File], ['c.gui', File], ['nationalfocusview.gui', File]]
+                    : [];
+            const realReadFile = (vscode.workspace.fs as any).readFile;
+            (vscode.workspace.fs as any).readFile = async (uri: any) => {
+                if (/nationalfocusview\.gui$/.test(uriPath(uri))) {
+                    return Buffer.from(`guiTypes = {
+    containerWindowType = {
+        name = "focus_tree_shortcut_item"
+        size = { width = 190 height = 72 }
+    }
+    containerWindowType = {
+        name = "nationalfocusview"
+        buttonType = { name = "toggle_shortcuts" spriteType = "GFX_toggle" }
+    }
+}`, 'utf-8');
+                }
+                return Buffer.from('', 'utf-8');
+            };
+            try {
+                const withShortcuts = await postLoad2(shortcutTree);
+                assert.ok(withShortcuts.result.shortcutGui, 'a tree with shortcuts loads the gui file');
+                assert.strictEqual(withShortcuts.result.shortcutGui.item?.name, 'focus_tree_shortcut_item');
+                assert.strictEqual(withShortcuts.result.shortcutGui.toggle?.name, 'toggle_shortcuts');
+
+                // 没有快捷键的树不付这份解析成本。
+                const plain = await postLoad2(noInlayTree);
+                assert.strictEqual(plain.result.shortcutGui, undefined);
+            } finally {
+                (vscode.workspace.fs as any).readDirectory = realReadDir2;
+                (vscode.workspace.fs as any).readFile = realReadFile;
+            }
+        });
     });
 });
