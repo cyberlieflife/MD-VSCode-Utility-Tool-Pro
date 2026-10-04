@@ -127,8 +127,10 @@ describe('util/image/imagedecoder', () => {
 
     describe('decodeImageToPng (worker path, real worker file)', () => {
         before(() => {
-            // Point the decoder at the worker file compiled into this test's outDir.
-            _setImageWorkerPathForTest(path.resolve(__dirname, '../util/image/imageWorker.js'));
+            // Point the decoder at the worker file compiled into this test's outDir. tsc keeps the
+            // source file's own casing, so the name must be all-lowercase here; a case-insensitive
+            // local filesystem would otherwise hide the mismatch until a case-sensitive runner fails.
+            _setImageWorkerPathForTest(path.resolve(__dirname, '../util/image/imageworker.js'));
         });
 
         after(async () => {
