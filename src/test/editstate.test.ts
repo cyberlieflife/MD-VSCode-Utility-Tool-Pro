@@ -379,9 +379,11 @@ describe('previewdef/worldmap/editor editState', () => {
         assert.strictEqual(msg.start, 1);
         assert.strictEqual(msg.end, 2);
         const state = JSON.parse(msg.data)[0];
-        assert.strictEqual(state.owner, 'SOV');
-        assert.deepStrictEqual(state.cores, ['GER', 'SOV']);
-        assert.deepStrictEqual(state.claims, ['POL']);
+        // The cached state keeps history values as value+condition entries, so the incremental
+        // message carries the same shape the loader produces.
+        assert.deepStrictEqual(state.owner, [{ value: 'SOV', condition: true }]);
+        assert.deepStrictEqual(state.cores, [{ value: 'GER', condition: true }, { value: 'SOV', condition: true }]);
+        assert.deepStrictEqual(state.claimBy, [{ value: 'POL', condition: true }]);
         assert.strictEqual(state.category, 'town');
         assert.strictEqual(state.manpower, 42);
         assert.strictEqual(state.buildings['infrastructure'], 4);

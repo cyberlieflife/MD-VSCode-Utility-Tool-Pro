@@ -183,7 +183,7 @@ describe('previewdef/worldmap/loader loadStateFromContent', () => {
         const content = 'state = {\n\tid = 171\n\tname = "STATE_171"\n\tmanpower = 2295085\n\tstate_category = city\n\thistory = {\n\t\towner = SPR\n\t\tvictory_points = {\n\t\t\t758 5\n\t\t}\n\t\tbuildings = {\n\t\t\tinfrastructure = 3\n\t\t\tdockyard = 2\n\t\t\tarms_factory = 1\n\t\t\tair_base = 2\n\t\t\t758 = {\n\t\t\t\tnaval_base = 6\n\t\t\t}\n\t\t}\n\t}\n\tprovinces = { 729 758 }\n}\n';
         const states = loadStateFromContent(content, 'history/states/171.txt', []);
         assert.strictEqual(states.length, 1);
-        assert.strictEqual(states[0].owner, 'SPR');
+        assert.strictEqual(states[0].owner[0]?.value, 'SPR');
         assert.strictEqual(states[0].victoryPoints[758], 5);
         assert.strictEqual(states[0].buildings['arms_factory'], 1);
         assert.strictEqual(states[0].buildings['dockyard'], 2);
@@ -202,8 +202,8 @@ describe('previewdef/worldmap/loader loadStateFromContent', () => {
         const content = 'state = {\n\tid = 42\n\tprovinces = { 1 }\n\thistory = {\n\t\towner = SPR\n\t\tadd_core_of = GLC\n\t\tadd_core_of = SPR\n\t\tadd_claim_by = BUL\n\t\tadd_claim_by = GRE\n\t}\n}\n';
         const states = loadStateFromContent(content, 'history/states/42.txt', []);
         assert.strictEqual(states.length, 1);
-        assert.deepStrictEqual(states[0].cores, ['GLC', 'SPR']);
-        assert.deepStrictEqual(states[0].claims, ['BUL', 'GRE']);
+        assert.deepStrictEqual(states[0].cores.map(c => c.value), ['GLC', 'SPR']);
+        assert.deepStrictEqual(states[0].claimBy.map(c => c.value), ['BUL', 'GRE']);
     });
 
     it('produces empty cores and claims when the history block has none', () => {
@@ -211,7 +211,7 @@ describe('previewdef/worldmap/loader loadStateFromContent', () => {
         const states = loadStateFromContent(content, 'history/states/42.txt', []);
         assert.strictEqual(states.length, 1);
         assert.deepStrictEqual(states[0].cores, []);
-        assert.deepStrictEqual(states[0].claims, []);
+        assert.deepStrictEqual(states[0].claimBy, []);
     });
 });
 

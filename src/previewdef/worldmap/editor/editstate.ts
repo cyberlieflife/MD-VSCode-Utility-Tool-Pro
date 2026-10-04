@@ -87,10 +87,11 @@ export async function editState(msg: EditStateMessage, cachedWorldMap: WorldMapD
         return result;
     }
 
-    // Commit the cached state only after the edit is on disk, mirroring moveProvince.
-    state.owner = msg.owner;
-    state.cores = msg.cores;
-    state.claims = msg.claims;
+    // Commit the cached state only after the edit is on disk, mirroring moveProvince. The edit
+    // rewrites the history unconditionally, so the cached values become single unconditional entries.
+    state.owner = msg.owner === undefined ? [] : [{ value: msg.owner, condition: true }];
+    state.cores = msg.cores.map(value => ({ value, condition: true }));
+    state.claimBy = msg.claims.map(value => ({ value, condition: true }));
     state.category = msg.category;
     if (msg.manpower !== undefined) {
         state.manpower = msg.manpower;

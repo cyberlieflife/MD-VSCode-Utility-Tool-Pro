@@ -485,6 +485,7 @@ const table: Partial<typeof __table> = {
     "worldmap.tooltip.type": "类型",
     "worldmap.tooltip.victorypoint": "胜利点",
     "worldmap.topbar.colorset": "配色：",
+    "worldmap.topbar.conditions": "条件：",
     "worldmap.topbar.colorset.continent": "大洲",
     "worldmap.topbar.colorset.country": "国家",
     "worldmap.topbar.colorset.manpower": "人力",

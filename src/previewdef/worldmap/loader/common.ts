@@ -1,17 +1,19 @@
 import { Zone, Point, Region, MapLoaderExtra } from "../definitions";
 import { DetailValue, Enum } from '../../../hoiformat/schema';
 import { clipNumber, hsvToRgb } from '../../../util/common';
-import { Loader as CommonLoader, FileLoader as CommonFileLoader, FolderLoader as CommonFolderLoader, mergeInLoadResult as commonMergeInLoadResult, LoadResult as CommonLoadResult, LoadResultOD as CommonLoadResultOD } from '../../../util/loader/loader';
+import { Loader as CommonLoader, FileLoader as CommonFileLoader, FolderLoader as CommonFolderLoader, mergeInLoadResult as commonMergeInLoadResult, mergeInLoadResultUnique as commonMergeInLoadResultUnique, LoadResult as CommonLoadResult, LoadResultOD as CommonLoadResultOD } from '../../../util/loader/loader';
 import { maxBy } from "lodash";
 
 export abstract class Loader<T> extends CommonLoader<T, MapLoaderExtra> {}
-export abstract class FileLoader<T> extends CommonFileLoader<T, MapLoaderExtra> {}
-export abstract class FolderLoader<T, F> extends CommonFolderLoader<T, F, MapLoaderExtra, MapLoaderExtra> {}
+export abstract class FileLoader<T, E = MapLoaderExtra> extends CommonFileLoader<T, E> {}
+export abstract class FolderLoader<T, F, E = MapLoaderExtra, EFile = MapLoaderExtra, Args extends unknown[] = []>
+    extends CommonFolderLoader<T, F, E, EFile, Args> {}
 
 export const mergeInLoadResult = commonMergeInLoadResult;
+export const mergeInLoadResultUnique = commonMergeInLoadResultUnique;
 
-export type LoadResult<T> = CommonLoadResult<T, MapLoaderExtra>;
-export type LoadResultOD<T> = CommonLoadResultOD<T, MapLoaderExtra>;
+export type LoadResult<T, E = MapLoaderExtra> = CommonLoadResult<T, E>;
+export type LoadResultOD<T, E = MapLoaderExtra> = CommonLoadResultOD<T, E>;
 
 export function pointEqual(a: Point, b: Point): boolean {
     return a.x === b.x && a.y === b.y;

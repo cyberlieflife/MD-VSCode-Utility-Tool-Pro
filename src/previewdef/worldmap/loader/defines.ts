@@ -68,7 +68,7 @@ class DefinesFileLoader extends FileLoader<DefinesFile> {
 // Defines files use `--[[ ]]` block comments and `--` line comments; both are stripped before
 // matching so a commented-out define doesn't win. The last match wins, like the game's own
 // last-definition-wins rule.
-function parseMinimumProvinceSize(content: string): number | undefined {
+export function parseMinimumProvinceSize(content: string): number | undefined {
     const contentWithoutComments = content
         .replace(/--\[\[[\s\S]*?\]\]/g, '')
         .replace(/--[^\r\n]*/g, '');

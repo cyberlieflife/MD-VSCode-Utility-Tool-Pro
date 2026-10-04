@@ -2,7 +2,7 @@ import { Subscriber, toBehaviorSubject } from "../util/event";
 import { Loader, FEWorldMap } from "./loader";
 import { ViewPoint } from "./viewpoint";
 import { vscode } from "../util/vscode";
-import { setState } from "../util/common";
+import { setState, getState } from "../util/common";
 import { WorldMapMessage, WorldMapWarning } from "../../src/previewdef/worldmap/definitions";
 import { feLocalize } from "../util/i18n";
 import { DivDropdown } from "../util/dropdown";
@@ -12,6 +12,7 @@ import { sendEvent } from '../util/telemetry';
 import { showContextMenu, closeContextMenu } from "../util/contextmenu";
 import { openEditStateDialog } from "./editstatedialog";
 import { applyIconState } from "../../src/previewdef/toolbaricons";
+import { conditionItemToStringValue, conditionToString, stringValueToConditionItem } from "../../src/hoiformat/condition";
 
 export type ViewMode = 'province' | 'state' | 'country' | 'strategicregion' | 'supplyarea' | 'warnings';
 export type ColorSet = 'provinceid' | 'provincetype' | 'terrain' | 'country' | 'stateid' | 'manpower' |
@@ -44,6 +45,8 @@ export class TopBar extends Subscriber {
     public selectedSupplyAreaId$: BehaviorSubject<number | undefined>;
     public warningFilter: DivDropdown;
     public display: DivDropdown;
+    // Bookmark-date conditions applied to state history (owner/cores/claims).
+    public conditions: DivDropdown;
 
     public warningsVisible: boolean = false;
 
@@ -64,6 +67,7 @@ export class TopBar extends Subscriber {
 
         this.addSubscription(this.warningFilter = new DivDropdown(document.getElementById('warningfilter') as HTMLDivElement, true));
         this.addSubscription(this.display = new DivDropdown(document.getElementById('display') as HTMLDivElement, true));
+        this.addSubscription(this.conditions = new DivDropdown(document.getElementById('conditions') as HTMLDivElement, true));
 
         this.viewMode$ = toBehaviorSubject<ViewMode>(document.getElementById('viewmode') as HTMLSelectElement, state.viewMode ?? 'province');
         this.colorSet$ = toBehaviorSubject<ColorSet>(document.getElementById('colorset') as HTMLSelectElement, state.colorSet ?? 'provinceid');
@@ -95,9 +99,38 @@ export class TopBar extends Subscriber {
 
         this.searchBox = document.getElementById("searchbox") as HTMLInputElement;
 
+        // The condition list only exists after a load, so the group starts hidden.
+        const conditionsGroup = this.conditions.select.closest<HTMLDivElement>('.group');
+        if (conditionsGroup) {
+            conditionsGroup.style.display = 'none';
+        }
+        this.addSubscription(this.conditions.selectedValues$.subscribe(selection => {
+            this.loader.worldMap.setSelectedConditions(selection.map(stringValueToConditionItem));
+        }));
+        this.addSubscription(this.loader.worldMap$.subscribe(wm => this.setupConditions(wm)));
+
         this.loadControls();
         this.registerEventListeners(canvas);
     }
+
+    private conditionSetupDone: boolean = false;
+
+    // Fills the conditions dropdown with the bookmark dates the state histories produced. Runs once
+    // per session: a re-emit would reset the user's selection while the preview refreshes.
+    private setupConditions = (worldMap: FEWorldMap) => {
+        if (worldMap.conditionExprs.length === 0 && !this.conditionSetupDone) {
+            return;
+        }
+
+        this.conditions.setupOptions(worldMap.conditionExprs.map(option => ({ value: conditionItemToStringValue(option), text: conditionToString(option) })));
+        this.conditions.selectedValues$.next(getState().selectedConditions ?? []);
+        const groupElement = this.conditions.select.closest<HTMLDivElement>('.group');
+        if (groupElement) {
+            groupElement.style.display = worldMap.conditionExprs.length > 0 ? 'inline-block' : 'none';
+        }
+
+        this.conditionSetupDone = true;
+    };
 
     private onViewModeChange() {
         document.querySelectorAll('#colorset > option[viewmode]').forEach(v => {
@@ -596,7 +629,7 @@ export class TopBar extends Subscriber {
             this.hoverProvinceId$.next(worldMap.getProvinceByPosition(x, y)?.id);
             this.editModeHoverProvinceId$.next(this.hoverProvinceId$.value);
             this.hoverStateId$.next(this.hoverProvinceId$.value === undefined ? undefined : worldMap.getStateByProvinceId(this.hoverProvinceId$.value)?.id);
-            this.hoverCountryTag$.next(this.hoverStateId$.value === undefined ? undefined : worldMap.getStateById(this.hoverStateId$.value)?.owner);
+            this.hoverCountryTag$.next(this.hoverStateId$.value === undefined ? undefined : worldMap.getStateOwner(worldMap.getStateById(this.hoverStateId$.value)));
             this.hoverStrategicRegionId$.next(this.hoverProvinceId$.value === undefined ? undefined : worldMap.getStrategicRegionByProvinceId(this.hoverProvinceId$.value)?.id);
             this.hoverSupplyAreaId$.next(this.hoverStateId$.value === undefined ? undefined : worldMap.getSupplyAreaByStateId(this.hoverStateId$.value)?.id);
         }));

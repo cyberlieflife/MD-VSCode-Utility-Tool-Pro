@@ -77,11 +77,11 @@ export function openEditStateDialog(worldMap: FEWorldMap, state: State) {
     box.appendChild(title);
 
     const ownerInput = makeField(box, feLocalize('worldmap.edit.state.owner', 'Owner (tag)'));
-    ownerInput.value = state.owner ?? '';
+    ownerInput.value = worldMap.getStateOwner(state) ?? '';
     const coresInput = makeField(box, feLocalize('worldmap.edit.state.cores', 'Cores (space-separated tags)'));
-    coresInput.value = state.cores.join(' ');
+    coresInput.value = state.cores.map(c => c.value).join(' ');
     const claimsInput = makeField(box, feLocalize('worldmap.edit.state.claims', 'Claimed by (space-separated tags)'));
-    claimsInput.value = (state.claims ?? []).join(' ');
+    claimsInput.value = state.claimBy.map(c => c.value).join(' ');
 
     // Category as a dropdown fed by the parsed state_categories definitions; when the definitions
     // are unavailable the field is skipped and the file keeps its current category.

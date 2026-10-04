@@ -1,4 +1,5 @@
-import { WorldMapMessage, Province, WorldMapData, RequestMapItemMessage, State, Country, Point, Region } from "./definitions";
+import { WorldMapMessage, Province, WorldMapData, RequestMapItemMessage, State, Country, Point, Region, Bookmark, ConditionItem } from "./definitions";
+import { applyCondition } from "../../src/hoiformat/condition";
 import { copyArray } from "../util/common";
 import { inBBox } from "./graphutils";
 import { Subscriber } from "../util/event";
@@ -40,6 +41,11 @@ interface FEWorldMapClassExtra {
     getCountryColorByTag(): Record<string, number>;
     getCountryByTag(tag: string | undefined): Country | undefined;
     getCountryRegionByTag(tag: string): { provinces: number[] } & Region | undefined;
+
+    // Selected conditions (bookmark dates) are applied when resolving a state's history values.
+    setSelectedConditions(conditions: ConditionItem[]): void;
+    getSelectedConditions(): ConditionItem[];
+    getStateOwner(state: State | undefined): string | undefined;
 
     getProvinceWarnings(province?: Province, state?: State, strategicRegion?: StrategicRegion, supplyArea?: SupplyArea): string[];
     getStateWarnings(state: State, supplyArea?: SupplyArea): string[];
@@ -300,6 +306,8 @@ export class FEWorldMapClass implements FEWorldMap {
     stateCategoryNames!: Record<string, string>;
     stateCategorySlots!: Record<string, number>;
     rivers!: River[];
+    conditionExprs!: ConditionItem[];
+    bookmarks!: Bookmark[];
 
     private provinces!: (Province | null | undefined)[];
     private states!: (State | null | undefined)[];
@@ -324,6 +332,8 @@ export class FEWorldMapClass implements FEWorldMap {
     // (per-province coloring / tooltips). Same per-instance lifetime as the other memos.
     private warningIndexMemo: WarningIndex | undefined = undefined;
     private countryColorByTagMemo: Record<string, number> | undefined = undefined;
+    // Bookmark-date conditions the user toggled; empty means "no date selected".
+    private selectedConditions: ConditionItem[] = [];
 
     constructor(worldMap?: WorldMapData & ExtraMapData) {
         Object.assign(this, worldMap ?? ({
@@ -331,6 +341,7 @@ export class FEWorldMapClass implements FEWorldMap {
             provinces: [], states: [], countries: [], warnings: [], continents: [], strategicRegions: [], supplyAreas: [], terrains: [],
             railways: [], supplyNodes: [], resources: [], factoryImages: { civilian: '', military: '' }, stateCategories: [], stateCategoryNames: {}, stateCategorySlots: {}, rivers: [],
             provinceDefinitionsFile: '',
+            conditionExprs: [], bookmarks: [],
             provincesCount: 0, statesCount: 0, countriesCount: 0, strategicRegionsCount: 0, supplyAreasCount: 0,
             badProvincesCount: 0, badStatesCount: 0, badStrategicRegionsCount: 0, badSupplyAreasCount: 0,
             railwaysCount: 0, supplyNodesCount: 0,
@@ -537,13 +548,26 @@ export class FEWorldMapClass implements FEWorldMap {
         return tag === undefined ? undefined : this.countries.find(c => c.tag === tag);
     }
 
+    public setSelectedConditions(conditions: ConditionItem[]): void {
+        this.selectedConditions = conditions;
+    }
+
+    public getSelectedConditions(): ConditionItem[] {
+        return this.selectedConditions;
+    }
+
+    // The first history entry whose condition holds under the selected conditions.
+    public getStateOwner(state: State | undefined): string | undefined {
+        return state?.owner.find(o => applyCondition(o.condition, this.selectedConditions))?.value;
+    }
+
     // The union of the country's owned states, for centering the view and highlighting on hover.
     // The bounding box spans the owned provinces; a wrap-around country (spanning the map seam) is
     // centered on its widest run rather than the full span, which would otherwise cover the map.
     public getCountryRegionByTag(tag: string): { provinces: number[] } & Region | undefined {
         const provinces: number[] = [];
         this.forEachState(state => {
-            if (state.owner === tag) {
+            if (this.getStateOwner(state) === tag) {
                 provinces.push(...state.provinces);
             }
         });

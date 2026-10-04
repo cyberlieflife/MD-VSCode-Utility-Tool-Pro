@@ -1,5 +1,8 @@
+import { ConditionComplexExpr, ConditionItem } from "../../hoiformat/condition";
 import { Token } from "../../hoiformat/hoiparser";
 import { Warning } from "../../util/common";
+
+export type { ConditionItem };
 
 export interface WorldMapData {
     width: number;
@@ -34,6 +37,9 @@ export interface WorldMapData {
     // State category key -> base building slots, for UI hints (missing when undefined in the file).
     stateCategorySlots: Record<string, number>;
     rivers: River[];
+    // Every condition leaf the state histories produced, offered as toggles in the webview.
+    conditionExprs: ConditionItem[];
+    bookmarks: Bookmark[];
     warnings: WorldMapWarning[];
 }
 
@@ -103,15 +109,36 @@ export interface State extends Region, TokenInFile {
     name: string;
     manpower: number;
     category: string;
-    owner: string | undefined;
+    // History values are lists of value + condition: a bookmark date selects which entry applies.
+    // The first entry whose condition holds under the selected conditions wins.
+    owner: WithCondition<string>[];
+    controller: WithCondition<string>[];
     provinces: number[];
-    cores: string[];
+    cores: WithCondition<string>[];
     impassable: boolean;
     impassableIgnoredLinks: number[];
     victoryPoints: Record<number, number | undefined>;
     resources: Record<string, number | undefined>;
     buildings: Record<string, number | undefined>;
-    claims: string[];
+    claimBy: WithCondition<string>[];
+    isDemilitarizedZone: WithCondition<boolean>[];
+}
+
+export interface WithCondition<T> {
+    condition: ConditionComplexExpr;
+    value: T;
+}
+
+export interface Bookmark {
+    name: string;
+    date: BookmarkDate;
+}
+
+export interface BookmarkDate {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
 }
 
 export interface Railway {
@@ -335,4 +362,7 @@ export interface EditStateMessage {
 
 export type ProgressReporter = (progress: string) => Promise<void>;
 
-export type MapLoaderExtra = { warnings: WorldMapWarning[] };
+export type MapLoaderExtra = {
+    warnings: WorldMapWarning[];
+    conditionExprs?: ConditionItem[];
+};

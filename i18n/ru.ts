@@ -485,6 +485,7 @@ const table: Partial<typeof __table> = {
     "worldmap.tooltip.type": "Тип",
     "worldmap.tooltip.victorypoint": "Очки победы",
     "worldmap.topbar.colorset": "Набор цветов: ",
+    "worldmap.topbar.conditions": "Условия: ",
     "worldmap.topbar.colorset.continent": "Континент",
     "worldmap.topbar.colorset.country": "Страна",
     "worldmap.topbar.colorset.manpower": "Людские ресурсы",

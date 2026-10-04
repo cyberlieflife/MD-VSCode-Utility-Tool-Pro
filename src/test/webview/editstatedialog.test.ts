@@ -17,14 +17,18 @@ describe('webview/worldmap editstatedialog', () => {
             { name: 'steel', displayName: '钢材', file: '', },
             { name: 'oil', displayName: '石油', file: '', },
         ],
+        // Mirrors FEWorldMap: the dialog reads the owner through the condition-aware accessor.
+        getStateOwner: (s: any) => s?.owner?.find((o: any) => o.condition === true)?.value,
     } as any;
 
     const state = {
         id: 42,
         file: 'history/states/42.txt',
-        owner: 'GER',
-        cores: ['GER'],
-        claims: ['POL'],
+        owner: [{ value: 'GER', condition: true }],
+        controller: [{ value: 'GER', condition: true }],
+        cores: [{ value: 'GER', condition: true }],
+        claimBy: [{ value: 'POL', condition: true }],
+        isDemilitarizedZone: [],
         category: 'city',
         manpower: 1358394,
         buildings: { infrastructure: 2, industrial_complex: 3, arms_factory: 1 },

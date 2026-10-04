@@ -1,10 +1,11 @@
-import { Province, Point, State, Zone, Terrain, StrategicRegion, SupplyArea } from "../../src/previewdef/worldmap/definitions";
+import { Province, Point, State, Zone, Terrain, StrategicRegion, SupplyArea, WithCondition } from "../../src/previewdef/worldmap/definitions";
 import { FEWorldMap, Loader } from "./loader";
 import { ViewPoint } from "./viewpoint";
 import { bboxCenter, distanceSqr, distanceHamming, mergeRiverRuns, RiverPixel } from "./graphutils";
 import { TopBar, topBarHeight, ColorSet, ViewMode } from "./topbar";
 import { Subscriber } from "../util/event";
 import { arrayToMap } from "../util/common";
+import { applyCondition } from "../../src/hoiformat/condition";
 import { feLocalize } from "../util/i18n";
 import { chain, max } from "lodash";
 import { combineLatest, fromEvent } from 'rxjs';
@@ -444,7 +445,7 @@ export class Renderer extends Subscriber {
             const showLocalised = topBar.display.selectedValues$.value.includes('localisedlabel');
             for (const province of renderedProvinces) {
                 const state = worldMap.getStateById(provinceToState[province.id]);
-                const owner = state?.owner;
+                const owner = worldMap.getStateOwner(state);
                 if (owner !== undefined && !renderedCountries[owner]) {
                     renderedCountries[owner] = true;
                     const region = worldMap.getCountryRegionByTag(owner);
@@ -796,8 +797,8 @@ ${feLocalize('worldmap.tooltip.strategicregion', 'Strategic region')}=${strategi
 `: ''
 }
 ${stateObject ? `
-${feLocalize('worldmap.tooltip.owner', 'Owner')}=${stateObject.owner}
-${feLocalize('worldmap.tooltip.coreof', 'Core of')}=${stateObject.cores.join(',')}
+${feLocalize('worldmap.tooltip.owner', 'Owner')}=${worldMap.getStateOwner(stateObject) ?? ''}
+${feLocalize('worldmap.tooltip.coreof', 'Core of')}=${solveWithConditionAsSet(stateObject.cores, worldMap.getSelectedConditions()).join(',')}
 ${feLocalize('worldmap.tooltip.manpower', 'Manpower')}=${toCommaDivideNumber(stateObject.manpower)}` : ''
 }
 ${supplyArea ? `
@@ -952,8 +953,8 @@ ${feLocalize('worldmap.tooltip.state', 'State')}=${state.id}
 ${supplyArea ? `
 ${feLocalize('worldmap.tooltip.supplyarea', 'Supply area')}=${supplyArea.id}
 ` : ''}
-${feLocalize('worldmap.tooltip.owner', 'Owner')}=${state.owner}
-${feLocalize('worldmap.tooltip.coreof', 'Core of')}=${state.cores.join(',')}
+${feLocalize('worldmap.tooltip.owner', 'Owner')}=${worldMap.getStateOwner(state) ?? ''}
+${feLocalize('worldmap.tooltip.coreof', 'Core of')}=${solveWithConditionAsSet(state.cores, worldMap.getSelectedConditions()).join(',')}
 ${feLocalize('worldmap.tooltip.manpower', 'Manpower')}=${toCommaDivideNumber(state.manpower)}
 ${feLocalize('worldmap.tooltip.category', 'Category')}=${state.category}
 ${supplyArea ? `
@@ -973,7 +974,7 @@ ${worldMap.getStateWarnings(state, supplyArea).map(v => '|r|' + v).join('\n')}`,
     private renderCountryTooltip(tag: string, worldMap: FEWorldMap) {
         const states: number[] = [];
         worldMap.forEachState(state => {
-            if (state.owner === tag) {
+            if (worldMap.getStateOwner(state) === tag) {
                 states.push(state.id);
             }
         });
@@ -1507,7 +1508,7 @@ function getColorByColorSet(
         case 'country':
             {
                 const stateId = provinceToState[province.id];
-                const owner = worldMap.getStateById(stateId)?.owner;
+                const owner = worldMap.getStateOwner(worldMap.getStateById(stateId));
                 // O(1) tag -> color lookup replaces a per-province countries.find() scan.
                 return owner === undefined ? defaultColor(province) : worldMap.getCountryColorByTag()[owner] ?? defaultColor(province);
             }
@@ -1706,4 +1707,9 @@ function defaultColor(province: Province) {
 
 function toCommaDivideNumber(value: number): string {
     return value.toString(10).replace(/(?<!^)(\d{3})(?=(?:\d{3})*$)/g, ',$1');
+}
+
+// The values whose conditions hold under the currently selected bookmark dates.
+function solveWithConditionAsSet<T>(value: WithCondition<T>[] | undefined, selectedConditions: import("../../src/hoiformat/condition").ConditionItem[]): T[] {
+    return value?.filter(item => applyCondition(item.condition, selectedConditions)).map(item => item.value) ?? [];
 }

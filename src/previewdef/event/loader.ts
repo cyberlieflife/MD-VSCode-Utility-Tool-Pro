@@ -37,7 +37,7 @@ export class EventsLoader extends ContentLoader<EventsLoaderResult> {
         const events = getEvents(parseHoi4File(content, localize('infile', 'In file {0}:\n', this.file)), this.file);
         // 选项里引用的子事件可能定义在别的文件，没有 `#!event:` 注释时靠索引补上依赖，
         // 否则它们只会画成 unresolved 占位。
-        const childEventFiles = await this.findChildEventFiles(events, eventsDependencies);
+        const childEventFiles = await this.findChildEventFiles(events);
         for (const childEventFile of childEventFiles) {
             if (!eventsDependencies.includes(childEventFile) && childEventFile !== this.file) {
                 eventsDependencies.push(childEventFile);
@@ -85,7 +85,7 @@ export class EventsLoader extends ContentLoader<EventsLoaderResult> {
      * the index switch is off or the index isn't built yet: the preview then shows the ids it has,
      * instead of waiting for a build that may never run.
      */
-    private async findChildEventFiles(events: HOIEvents, eventsDependencies: string[]): Promise<string[]> {
+    private async findChildEventFiles(events: HOIEvents): Promise<string[]> {
         if (!eventTreePreview) {
             return [];
         }

@@ -89,7 +89,7 @@ const hoi4Fs: vscode.FileSystem = {
     async copy(source: vscode.Uri, destination: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
         await hoi4FsProvider.copy(source, destination, options);
     },
-    isWritableFileSystem(scheme: string): boolean {
+    isWritableFileSystem(_scheme: string): boolean {
         return false;
     },
 };
