@@ -54,6 +54,8 @@
     "hoi4modutilities.previewworld.title": "Предпросмотр карты мира",
     "hoi4modutilities.scanreferences.title": "Найти похожее",
     "hoi4modutilities.selecthoifolder.title": "Выбрать путь установки HOI4",
+    "hoi4modutilities.imageDecodeWorkers.title": "Рабочие потоки декодирования изображений",
+    "hoi4modutilities.imageDecodeWorkers.desc": "Максимальное число рабочих потоков для декодирования DDS/TGA в PNG. Большие значения ускоряют предпросмотры с множеством иконок (деревья фокусов), но используют больше CPU и памяти. После изменения требуется перезагрузка.",
     "hoi4modutilities.showindexstatus.title": "Показать состояние индексов",
     "hoi4modutilities.previewWheel.title": "Предпросмотры: поведение колеса мыши",
     "hoi4modutilities.previewWheel.desc": "Что делает обычное колесо мыши в предпросмотрах деревьев фокусов, технологий, MIO, событий и решений. Ctrl+колесо, кнопки масштаба и клавиши +/- масштабируют согласно этой настройке. После изменения откройте предпросмотр заново.",

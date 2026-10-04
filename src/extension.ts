@@ -19,6 +19,7 @@ import { registerIdeaSwapIndex } from "./util/ideaSwapIndex";
 import { registerModifierInlayHint } from "./inlayhint/modifierInlayHint";
 import { registerAuditFocusTreesCommand } from "./previewdef/focustree/warningreport";
 import { registerIndexStatusCommand } from "./util/indexStatus";
+import { disposeImageDecodeWorkers } from "./util/image/imagedecoder";
 
 export function activate(context: vscode.ExtensionContext) {
     let locale = (context as any).extension?.packageJSON.locale;
@@ -53,6 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(registerGfxIndex());
     context.subscriptions.push(registerLocalisationIndex());
     context.subscriptions.push(registerIndexStatusCommand());
+    context.subscriptions.push({ dispose: disposeImageDecodeWorkers });
     context.subscriptions.push(registerIdeaPictureHover());
     context.subscriptions.push(registerIdeaSwapIndex());
     context.subscriptions.push(registerModifierInlayHint());
