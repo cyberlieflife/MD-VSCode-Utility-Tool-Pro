@@ -1,4 +1,3 @@
-import './setup';
 import * as assert from 'assert';
 import { takeRuntimeErrors } from './setup';
 import { copyArray, tryRun, getState, setState, enableZoom, scrollToState, subscribeNavigators, subscribeRefreshButton, initCommon } from '../../../webviewsrc/util/common';

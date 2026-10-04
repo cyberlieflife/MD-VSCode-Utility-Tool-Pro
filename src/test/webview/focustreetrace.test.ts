@@ -1,4 +1,3 @@
-import './setup';
 import * as assert from 'assert';
 import { loadEntrypoint } from './setup';
 import { GridBoxConnectionTiles, GridBoxItem, renderLineConnections } from '../../../src/util/hoi4gui/gridboxcommon';

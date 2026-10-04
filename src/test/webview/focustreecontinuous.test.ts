@@ -1,4 +1,3 @@
-import './setup';
 import * as assert from 'assert';
 import { loadEntrypoint, resetWebviewState, takePostedMessages } from './setup';
 import { FocusTree } from '../../../src/previewdef/focustree/schema';

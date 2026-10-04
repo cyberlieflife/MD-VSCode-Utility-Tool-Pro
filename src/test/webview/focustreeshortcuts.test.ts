@@ -1,4 +1,3 @@
-import './setup';
 import * as assert from 'assert';
 import { loadEntrypoint } from './setup';
 import { FocusTree, FocusTreeShortcut } from '../../../src/previewdef/focustree/schema';

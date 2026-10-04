@@ -8,7 +8,6 @@ import { clearDlcZipCache } from '../util/fileloader';
 // 与 focustreeloader.test.ts 同一套桩手法。
 
 const installPath = 'C:/game';
-const focusFolder = 'common/national_focus';
 
 const files: Record<string, string> = {};
 
