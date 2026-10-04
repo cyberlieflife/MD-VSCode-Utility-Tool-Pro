@@ -4,6 +4,7 @@
 .superpowers/**
 .mimosa/**
 .zcode/**
+.zcodeignore
 out/**
 out-test/**
 out-test-webview/**
