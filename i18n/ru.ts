@@ -430,6 +430,8 @@ const table: Partial<typeof __table> = {
     "worldmap.topbar.selectedregion": "Выбрано: ",
     "worldmap.topbar.selectedregion.none": "Нет",
     "worldmap.topbar.selectedregion.title": "К выбранной области",
+    "worldmap.openfiletype.country": "Страна",
+    "worldmap.openfiletype.provincedefinition": "Определение провинции",
     "worldmap.openfiletype.state": "Территория",
     "worldmap.openfiletype.strategicregion": "Стратегический регион",
     "worldmap.openfiletype.supplyarea": "Зона снабжения",

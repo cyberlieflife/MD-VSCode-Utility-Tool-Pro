@@ -21,12 +21,14 @@ async function loadDefinitions(definitionsFile: string, progressReporter: Progre
     await progressReporter(localize('worldmap.progress.loadingprovincedef', 'Loading province definitions...'));
 
     const [definitionsBuffer] = await readFileFromModOrHOI4(definitionsFile);
-    const definition = definitionsBuffer.toString().split(/(?:\r\n|\n|\r)/).map(line => line.split(/[,;]/)).filter(v => v.length >= 8);
+    const definition = definitionsBuffer.toString().split(/(?:\r\n|\n|\r)/)
+        .map((line, index) => ({ data: line.split(/[,;]/), index }))
+        .filter(v => v.data.length >= 8);
 
-    return definition.map(row => convertRowToProvince(row, warnings));
+    return definition.map(row => convertRowToProvince(row.data, row.index, warnings));
 }
 
-function convertRowToProvince(row: string[], _warnings: WorldMapWarning[]): ProvinceDefinition {
+function convertRowToProvince(row: string[], lineNumber: number, _warnings: WorldMapWarning[]): ProvinceDefinition {
     const r = parseInt(row[1]);
     const g = parseInt(row[2]);
     const b = parseInt(row[3]);
@@ -40,5 +42,6 @@ function convertRowToProvince(row: string[], _warnings: WorldMapWarning[]): Prov
         coastal: row[5].trim().toLowerCase() === 'true',
         terrain: row[6],
         continent,
+        lineNumber,
     };
 }

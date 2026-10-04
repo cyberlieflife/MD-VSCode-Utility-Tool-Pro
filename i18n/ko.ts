@@ -430,6 +430,8 @@ const table: Partial<typeof __table> = {
     "worldmap.topbar.selectedregion": "선택됨: ",
     "worldmap.topbar.selectedregion.none": "없음",
     "worldmap.topbar.selectedregion.title": "선택 영역으로 이동",
+    "worldmap.openfiletype.country": "국가",
+    "worldmap.openfiletype.provincedefinition": "프로빈스 정의",
     "worldmap.openfiletype.state": "주",
     "worldmap.openfiletype.strategicregion": "전략구역",
     "worldmap.openfiletype.supplyarea": "보급구역",

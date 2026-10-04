@@ -69,7 +69,7 @@ export async function copyFilesIntoWorkspace(files: string[], options: CopyFiles
     return copied;
 }
 
-export async function openOrCopyHoiFile(file: string, start: number | undefined, end: number | undefined, options: OpenOrCopyHoiFileOptions): Promise<void> {
+export async function openOrCopyHoiFile(file: string, start: number | undefined, end: number | undefined, options: OpenOrCopyHoiFileOptions, lineNumber?: number): Promise<void> {
     const [uri] = await copyFilesIntoWorkspace([file], options);
     if (!uri) {
         return;
@@ -77,8 +77,10 @@ export async function openOrCopyHoiFile(file: string, start: number | undefined,
 
     try {
         const document = await vscode.workspace.openTextDocument(uri);
+        const line = lineNumber === undefined ? undefined : Math.max(0, Math.min(lineNumber, document.lineCount - 1));
         await vscode.window.showTextDocument(document, {
-            selection: start !== undefined && end !== undefined ? new vscode.Range(document.positionAt(start), document.positionAt(end)) : undefined,
+            selection: start !== undefined && end !== undefined ? new vscode.Range(document.positionAt(start), document.positionAt(end)) :
+                (line !== undefined ? document.lineAt(line).range : undefined),
             viewColumn: options.viewColumn,
         });
     } catch (e) {

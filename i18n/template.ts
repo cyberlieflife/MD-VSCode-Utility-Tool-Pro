@@ -348,6 +348,8 @@ const table: Partial<typeof __table> = {
     "worldmap.topbar.selectedregion": "Selected: ",
     "worldmap.topbar.selectedregion.none": "None",
     "worldmap.topbar.selectedregion.title": "Navigate to selected",
+    "worldmap.openfiletype.country": "country",
+    "worldmap.openfiletype.provincedefinition": "province definition",
     "worldmap.openfiletype.state": "state",
     "worldmap.openfiletype.strategicregion": "strategic region",
     "worldmap.openfiletype.supplyarea": "supply area",

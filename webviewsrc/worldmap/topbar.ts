@@ -193,7 +193,23 @@ export class TopBar extends Subscriber {
 
     private openMapItem(useHoverValue = false) {
         sendEvent('worldmap.open.' + this.viewMode$.value + (useHoverValue ? '.dblclick' : ''));
-        if (this.viewMode$.value === 'state') {
+        if (this.viewMode$.value === 'province') {
+            // 省份视图：双击/打开按钮跳到省份定义文件里该省份所在的行。
+            const selected = useHoverValue ? this.hoverProvinceId$.value : this.selectedProvinceId$.value;
+            if (selected !== undefined) {
+                const province = this.loader.worldMap.getProvinceById(selected);
+                if (province && province.lineNumber !== undefined) {
+                    vscode.postMessage<WorldMapMessage>({
+                        command: 'openfile',
+                        type: 'provincedefinition',
+                        file: this.loader.worldMap.provinceDefinitionsFile,
+                        start: undefined,
+                        end: undefined,
+                        lineNumber: province.lineNumber,
+                    });
+                }
+            }
+        } else if (this.viewMode$.value === 'state') {
             const selected = useHoverValue ? this.hoverStateId$.value : this.selectedStateId$.value;
             if (selected) {
                 const state = this.loader.worldMap.getStateById(selected);
@@ -229,9 +245,10 @@ export class TopBar extends Subscriber {
             this.openMapItem();
         }));
 
-        this.addSubscription(combineLatest([this.viewMode$, this.selectedStateId$, this.selectedStrategicRegionId$, this.selectedSupplyAreaId$]).subscribe(
-            ([viewMode, selectedStateId, selectedStrategicRegionId, selectedSupplyAreaId]) => {
-                open.disabled = !((viewMode === 'state' && selectedStateId !== undefined) ||
+        this.addSubscription(combineLatest([this.viewMode$, this.selectedProvinceId$, this.selectedStateId$, this.selectedStrategicRegionId$, this.selectedSupplyAreaId$]).subscribe(
+            ([viewMode, selectedProvinceId, selectedStateId, selectedStrategicRegionId, selectedSupplyAreaId]) => {
+                open.disabled = !((viewMode === 'province' && selectedProvinceId !== undefined) ||
+                    (viewMode === 'state' && selectedStateId !== undefined) ||
                     (viewMode === 'strategicregion' && selectedStrategicRegionId !== undefined) ||
                     (viewMode === 'supplyarea' && selectedSupplyAreaId !== undefined));
             }

@@ -27,6 +27,8 @@ export interface WorldMapData {
     resources: Resource[];
     factoryImages: FactoryImages;
     stateCategories: string[];
+    // Relative path of the province definition file (from map/default.map), for opening a province's definition line.
+    provinceDefinitionsFile: string;
     // State category key -> localised display name, for UI dropdowns (falls back to the key).
     stateCategoryNames: Record<string, string>;
     // State category key -> base building slots, for UI hints (missing when undefined in the file).
@@ -52,6 +54,8 @@ export interface ProvinceMap {
     continents: string[];
     terrains: Terrain[];
     rivers: River[];
+    // Relative path of the province definition file (from map/default.map), for opening a province's definition line.
+    provinceDefinitionsFile: string;
 }
 
 export interface ProvinceGraph extends Region {
@@ -67,6 +71,9 @@ export interface ProvinceDefinition {
     coastal: boolean;
     terrain: string;
     continent: number;
+    // 0-based line index of this province's row in the definition file. Provinces that exist only
+    // in the bmp (no definition row) have no line to jump to.
+    lineNumber?: number;
 }
 
 export type Province = Omit<ProvinceGraph & ProvinceDefinition, 'edges'> & {
@@ -271,10 +278,13 @@ export interface ProvinceMapSummaryMessage {
 
 export interface OpenFileMessage {
     command: 'openfile';
-    type: 'state' | 'strategicregion' | 'supplyarea';
+    type: 'state' | 'strategicregion' | 'supplyarea' | 'country' | 'provincedefinition';
     file: string;
     start: number | undefined;
     end: number | undefined;
+    // Selects the whole line at this 0-based index; used when the file has one row per map item
+    // (province definitions) instead of a token range.
+    lineNumber?: number;
 }
 
 export interface ExportMapMessage {

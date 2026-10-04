@@ -584,6 +584,8 @@ const internalTable = /* SOT Do not remove this comment */{
 };/* EOT Do not remove this comment */
 
 export const __table = Object.assign(internalTable, {
+    "worldmap.openfiletype.country": "country",
+    "worldmap.openfiletype.provincedefinition": "province definition",
     "worldmap.openfiletype.state": "state",
     "worldmap.openfiletype.strategicregion": "strategic region",
     "worldmap.openfiletype.supplyarea": "supply area",

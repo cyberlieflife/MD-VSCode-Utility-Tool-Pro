@@ -430,6 +430,8 @@ const table: Partial<typeof __table> = {
     "worldmap.topbar.selectedregion": "已选择：",
     "worldmap.topbar.selectedregion.none": "无",
     "worldmap.topbar.selectedregion.title": "导航到已选区域",
+    "worldmap.openfiletype.country": "国家",
+    "worldmap.openfiletype.provincedefinition": "省份定义",
     "worldmap.openfiletype.state": "省份",
     "worldmap.openfiletype.strategicregion": "战略区域",
     "worldmap.openfiletype.supplyarea": "补给区域",

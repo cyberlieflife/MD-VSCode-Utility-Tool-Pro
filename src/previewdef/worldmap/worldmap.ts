@@ -4,7 +4,7 @@ import worldmapviewstyles from './worldmapview.css';
 import { localize, localizeText, i18nTableAsScript } from '../../util/i18n';
 import { html } from '../../util/html';
 import { error, debug } from '../../util/debug';
-import { WorldMapMessage, ProgressReporter, WorldMapData, MapItemMessage, RequestMapItemMessage, MoveProvinceMessage, AddMapItemMessage, EditStateMessage } from './definitions';
+import { WorldMapMessage, ProgressReporter, WorldMapData, MapItemMessage, RequestMapItemMessage, MoveProvinceMessage, AddMapItemMessage, EditStateMessage, OpenFileMessage } from './definitions';
 import { matchPathEnd } from '../../util/nodecommon';
 import { writeFile, getConfiguration, readFile } from '../../util/vsccommon';
 import { slice, debounceByInput, forceError } from '../../util/common';
@@ -179,7 +179,7 @@ export class WorldMap {
                     await this.sendMapData('supplynodes', msg, (await this.worldMapLoader.getWorldMap()).supplyNodes);
                     break;
                 case 'openfile':
-                    await this.openFile(msg.file, msg.type, msg.start, msg.end);
+                    await this.openFile(msg.file, msg.type, msg.start, msg.end, msg.lineNumber);
                     break;
                 case 'telemetry':
                     await sendByMessage(msg);
@@ -260,13 +260,13 @@ export class WorldMap {
         }
     }
 
-    private async openFile(file: string, type: 'state' | 'strategicregion' | 'supplyarea', start: number | undefined, end: number | undefined): Promise<void> {
+    private async openFile(file: string, type: OpenFileMessage['type'], start: number | undefined, end: number | undefined, lineNumber?: number): Promise<void> {
         const typeName = localize('worldmap.openfiletype.' + type as any, type);
         await openOrCopyHoiFile(file, start, end, {
             mustOpenFolderMessage: localize('worldmap.mustopenafolder', 'Must open a folder before opening {0} file.', typeName),
             selectFolderMessage: localize('worldmap.selectafolder', 'Select a folder to copy {0} file', typeName),
             failedToOpenMessage: (errorMessage) => localize('worldmap.failedtoopenstate', 'Failed to open {0} file: {1}.', typeName, errorMessage),
-        });
+        }, lineNumber);
     }
 
     private async sendDifferences(cachedWorldMap: WorldMapData, worldMap: WorldMapData): Promise<boolean> {
