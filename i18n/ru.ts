@@ -327,6 +327,7 @@ const table: Partial<typeof __table> = {
     "miopreview.warnings.traitnoid": "A trait defined in this file don't have token property: {0}.",
     "moddependencies.nouserdatadir": "Не удалось найти папку пользовательских данных Hearts of Iron IV, поэтому моды, от которых зависит этот .mod, не найдены. Укажите в {0} папку, содержащую папку mod лаунчера.",
     "moddependencies.opensettings": "Открыть настройки",
+    "modfile.cannotread": "(не удаётся прочитать)",
     "modfile.clicktoselect": "Нажмите чтобы выбрать файл мода...",
     "modfile.errorreading": "Ошибка при прочтении файла: ",
     "modfile.filenotexist": "Файла мода не существует: {0}",

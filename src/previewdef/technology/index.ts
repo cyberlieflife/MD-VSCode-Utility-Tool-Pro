@@ -26,13 +26,15 @@ class TechnologyTreePreview extends LoaderPreview<TechnologyTreeLoader> {
     // technologyCountryIcons decides whether there is a country dropdown at all and whether
     // the loader builds the lists behind it; gfxIndex decides whether those lists can be read
     // and whether the dropdown's warning shows; technologyGfxRoots changes which gfx files the
-    // icons resolve against; localisationIndex changes every label and the name-mode warning.
+    // icons resolve against; localisationIndex changes every label and the name-mode warning;
+    // previewLocalisation changes the language those labels are read in.
     protected override get reloadOnConfigurationChange(): readonly string[] {
         return [
             'technologyCountryIcons',
             'technologyGfxRoots',
             'gfxIndex',
             'localisationIndex',
+            'previewLocalisation',
         ];
     }
 

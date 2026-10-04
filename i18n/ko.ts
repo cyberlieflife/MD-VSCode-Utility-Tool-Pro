@@ -327,6 +327,7 @@ const table: Partial<typeof __table> = {
     "miopreview.warnings.traitnoid": "이 파일에 정의된 특성에 토큰이 존재하지 않습니다: {0}.",
     "moddependencies.nouserdatadir": "Hearts of Iron IV 사용자 데이터 폴더를 찾을 수 없어 이 .mod이(가) 의존하는 모드를 해석할 수 없습니다. {0}을(를) 런처의 mod 폴더가 있는 위치로 설정하세요.",
     "moddependencies.opensettings": "설정 열기",
+    "modfile.cannotread": "(읽을 수 없음)",
     "modfile.clicktoselect": "클릭하여 .mod 파일을 선택하세요...",
     "modfile.errorreading": "파일을 읽는데 실패했습니다: ",
     "modfile.filenotexist": ".mod 파일이 존재하지 않음: {0}",

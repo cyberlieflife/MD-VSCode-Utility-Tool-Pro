@@ -11,6 +11,10 @@
 // This setup file is wired into the mocha invocation through the `--require`
 // flag in the npm test script. It runs before any test file is loaded.
 
+// Silences debug() output so a passing run is not buried under every debug line the code under
+// test prints; see src/util/debug.ts.
+process.env.MD_UTILITIES_TEST = '1';
+
 const Module = require('module');
 const path = require('path');
 
@@ -235,3 +239,163 @@ const stub = buildStub();
     children: [],
     paths: [],
 };
+
+// Members a test replaces through stubVscode, and the values buildStub produced for them, so
+// restoreVscodeStubs can put them back.
+const pristine = {
+    getConfiguration: (stub.workspace as any).getConfiguration,
+    workspaceFolders: (stub.workspace as any).workspaceFolders,
+    onDidChangeConfiguration: (stub.workspace as any).onDidChangeConfiguration,
+    onDidChangeWorkspaceFolders: (stub.workspace as any).onDidChangeWorkspaceFolders,
+    onDidChangeTextDocument: (stub.workspace as any).onDidChangeTextDocument,
+    createFileSystemWatcher: (stub.workspace as any).createFileSystemWatcher,
+    getWorkspaceFolder: (stub.workspace as any).getWorkspaceFolder,
+    stat: (stub.workspace as any).fs.stat,
+    readDirectory: (stub.workspace as any).fs.readDirectory,
+    readFile: (stub.workspace as any).fs.readFile,
+    writeFile: (stub.workspace as any).fs.writeFile,
+    createDirectory: (stub.workspace as any).fs.createDirectory,
+    activeTextEditor: (stub.window as any).activeTextEditor,
+    showErrorMessage: (stub.window as any).showErrorMessage,
+    showInformationMessage: (stub.window as any).showInformationMessage,
+    showWarningMessage: (stub.window as any).showWarningMessage,
+    showQuickPick: (stub.window as any).showQuickPick,
+    showOpenDialog: (stub.window as any).showOpenDialog,
+    withProgress: (stub.window as any).withProgress,
+    registerCommand: (stub.commands as any).registerCommand,
+};
+
+export interface VscodeStubOverrides {
+    /** The object `workspace.getConfiguration()` answers. */
+    configuration?: Record<string, unknown>;
+    /** Replaces `workspace.getConfiguration` itself, for a suite that varies the answer per call. */
+    getConfiguration?: (...args: any[]) => any;
+    workspaceFolders?: any;
+    getWorkspaceFolder?: (...args: any[]) => any;
+    onDidChangeConfiguration?: (...args: any[]) => any;
+    onDidChangeWorkspaceFolders?: (...args: any[]) => any;
+    onDidChangeTextDocument?: (...args: any[]) => any;
+    createFileSystemWatcher?: (...args: any[]) => any;
+    stat?: (...args: any[]) => any;
+    readDirectory?: (...args: any[]) => any;
+    readFile?: (...args: any[]) => any;
+    writeFile?: (...args: any[]) => any;
+    createDirectory?: (...args: any[]) => any;
+    activeTextEditor?: any;
+    showErrorMessage?: (...args: any[]) => any;
+    showInformationMessage?: (...args: any[]) => any;
+    showWarningMessage?: (...args: any[]) => any;
+    showQuickPick?: (...args: any[]) => any;
+    showOpenDialog?: (...args: any[]) => any;
+    withProgress?: (...args: any[]) => any;
+    registerCommand?: (...args: any[]) => any;
+}
+
+/**
+ * Replaces the stubbed vscode members named in `overrides`; members left out keep whatever they
+ * currently have. Safe to call more than once per test. Always pair with `restoreVscodeStubs` in
+ * an `afterEach`.
+ */
+export function stubVscode(overrides: VscodeStubOverrides): void {
+    const workspace = stub.workspace as any;
+    const fs = stub.workspace.fs as any;
+    const window = stub.window as any;
+
+    if (overrides.configuration !== undefined) {
+        const configuration = {
+            get: (_k: any) => undefined,
+            update: () => Promise.resolve(),
+            inspect: () => undefined,
+            ...overrides.configuration,
+        };
+        workspace.getConfiguration = () => configuration;
+    }
+    if (overrides.getConfiguration !== undefined) {
+        workspace.getConfiguration = overrides.getConfiguration;
+    }
+    if ('workspaceFolders' in overrides) {
+        workspace.workspaceFolders = overrides.workspaceFolders;
+    }
+    if (overrides.getWorkspaceFolder !== undefined) {
+        workspace.getWorkspaceFolder = overrides.getWorkspaceFolder;
+    }
+    if (overrides.onDidChangeConfiguration !== undefined) {
+        workspace.onDidChangeConfiguration = overrides.onDidChangeConfiguration;
+    }
+    if (overrides.onDidChangeWorkspaceFolders !== undefined) {
+        workspace.onDidChangeWorkspaceFolders = overrides.onDidChangeWorkspaceFolders;
+    }
+    if (overrides.onDidChangeTextDocument !== undefined) {
+        workspace.onDidChangeTextDocument = overrides.onDidChangeTextDocument;
+    }
+    if (overrides.createFileSystemWatcher !== undefined) {
+        workspace.createFileSystemWatcher = overrides.createFileSystemWatcher;
+    }
+    if (overrides.stat !== undefined) {
+        fs.stat = overrides.stat;
+    }
+    if (overrides.readDirectory !== undefined) {
+        fs.readDirectory = overrides.readDirectory;
+    }
+    if (overrides.readFile !== undefined) {
+        fs.readFile = overrides.readFile;
+    }
+    if (overrides.writeFile !== undefined) {
+        fs.writeFile = overrides.writeFile;
+    }
+    if (overrides.createDirectory !== undefined) {
+        fs.createDirectory = overrides.createDirectory;
+    }
+    if ('activeTextEditor' in overrides) {
+        window.activeTextEditor = overrides.activeTextEditor;
+    }
+    if (overrides.showErrorMessage !== undefined) {
+        window.showErrorMessage = overrides.showErrorMessage;
+    }
+    if (overrides.showInformationMessage !== undefined) {
+        window.showInformationMessage = overrides.showInformationMessage;
+    }
+    if (overrides.showWarningMessage !== undefined) {
+        window.showWarningMessage = overrides.showWarningMessage;
+    }
+    if (overrides.showQuickPick !== undefined) {
+        window.showQuickPick = overrides.showQuickPick;
+    }
+    if (overrides.showOpenDialog !== undefined) {
+        window.showOpenDialog = overrides.showOpenDialog;
+    }
+    if (overrides.withProgress !== undefined) {
+        window.withProgress = overrides.withProgress;
+    }
+    if (overrides.registerCommand !== undefined) {
+        (stub.commands as any).registerCommand = overrides.registerCommand;
+    }
+}
+
+/** Puts every stubbable member back to the value `buildStub()` produced. */
+export function restoreVscodeStubs(): void {
+    const workspace = stub.workspace as any;
+    const fs = stub.workspace.fs as any;
+    const window = stub.window as any;
+
+    workspace.getConfiguration = pristine.getConfiguration;
+    workspace.workspaceFolders = pristine.workspaceFolders;
+    workspace.onDidChangeConfiguration = pristine.onDidChangeConfiguration;
+    workspace.onDidChangeWorkspaceFolders = pristine.onDidChangeWorkspaceFolders;
+    workspace.onDidChangeTextDocument = pristine.onDidChangeTextDocument;
+    workspace.createFileSystemWatcher = pristine.createFileSystemWatcher;
+    workspace.getWorkspaceFolder = pristine.getWorkspaceFolder;
+    fs.stat = pristine.stat;
+    fs.readDirectory = pristine.readDirectory;
+    fs.readFile = pristine.readFile;
+    fs.writeFile = pristine.writeFile;
+    fs.createDirectory = pristine.createDirectory;
+    window.activeTextEditor = pristine.activeTextEditor;
+    window.showErrorMessage = pristine.showErrorMessage;
+    window.showInformationMessage = pristine.showInformationMessage;
+    window.showWarningMessage = pristine.showWarningMessage;
+    window.showQuickPick = pristine.showQuickPick;
+    window.showOpenDialog = pristine.showOpenDialog;
+    window.withProgress = pristine.withProgress;
+    (stub.commands as any).registerCommand = pristine.registerCommand;
+}

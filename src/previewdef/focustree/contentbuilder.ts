@@ -468,22 +468,14 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
             </div>
         </div>`;
     
-    const warningsButton = !flags.hasWarnings ? '' : `
-        <button id="show-warnings" title="${localize('focustree.warnings', 'Toggle warnings')}">
-            <i class="codicon codicon-warning"></i>
-        </button>
-        <button id="toggle-warning-markers" title="${localize('focustree.warningmarkers', 'Toggle warning markers')}">
-            <i class="codicon codicon-location"></i>
-        </button>
-        <button id="copy-warnings" title="${localize('focustree.copywarnings', 'Copy warnings')}">
-            <i class="codicon codicon-copy"></i>
-        </button>`;
+    // The warning buttons stay in place, disabled while no tree has a warning.
+    const hasNoWarnings = !flags.hasWarnings;
+    const warningsButton = iconButtonHtml('showWarnings', localize, { domId: 'show-warnings', on: false, disabled: hasNoWarnings })
+        + iconButtonHtml('warningMarkers', localize, { domId: 'toggle-warning-markers', on: true, disabled: hasNoWarnings })
+        + iconButtonHtml('copyWarnings', localize, { domId: 'copy-warnings', disabled: hasNoWarnings });
 
     const hasAllowBranch = focusTrees.some(ft => ft.allowBranchOptions.length > 0);
-    const resetCheckboxesButton = !hasAllowBranch ? '' : `
-        <button id="reset-focus-checkboxes" title="${localize('focustree.resetcheckboxes', 'Reset focus checkboxes')}">
-            <i class="codicon codicon-clear-all"></i>
-        </button>`;
+    const resetCheckboxesButton = !hasAllowBranch ? '' : iconButtonHtml('resetCheckboxes', localize, { domId: 'reset-focus-checkboxes' });
 
     // The continuous focus box is dragged in the webview, so the toggle lives here and the position
     // is written back through a message; the button is hidden again by the webview on a tree the

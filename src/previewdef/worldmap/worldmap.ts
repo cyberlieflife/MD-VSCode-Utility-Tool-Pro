@@ -18,6 +18,7 @@ import { contextContainer } from '../../context';
 import { moveProvince } from './editor/moveprovince';
 import { addMapItem } from './editor/addmapitem';
 import { editState } from './editor/editstate';
+import { renderWorldMapIcons } from './toolbar';
 
 interface WorldMapWebviewAssets {
     commonJs: string;
@@ -131,7 +132,7 @@ export class WorldMap {
         const assets = await readWorldMapWebviewAssets();
         return html(
             webview,
-            localizeText(worldmapview),
+            localizeText(renderWorldMapIcons(worldmapview, localize)),
             [
                 { content: i18nTableAsScript() },
                 { content: 'window.__enableSupplyArea = ' + getConfiguration().enableSupplyArea + ';' },

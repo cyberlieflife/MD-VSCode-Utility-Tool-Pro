@@ -1,13 +1,24 @@
 on:
+  # No branch filter: it would name the base branch, and "*" does not match a "/" -- so a pull
+  # request into a branch such as release/version-bump ran no tests at all.
   pull_request:
-    branches:
-      - '*'
+  workflow_dispatch:
 
 name: Test
+
+# The job runs npm lifecycle scripts and webpack over branch code, so the token it gets should open
+# nothing but the tree.
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -23,6 +34,12 @@ jobs:
       run: npm test
     - name: Package VSIX
       run: npm run package
+    # The unit tests compile webviewsrc to commonjs, where an exported const read before its
+    # declaration answers `undefined` instead of throwing. What ships is ESM, where the same read
+    # throws and the preview draws its toolbar over an empty canvas, so the bundles are evaluated
+    # here -- against the production build `npm run package` just wrote.
+    - name: Smoke test webview bundles
+      run: npm run smoke:webviews
     - name: Upload VSIX
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:

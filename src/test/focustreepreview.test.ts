@@ -174,38 +174,40 @@ describe('previewdef/focustree preview full-reload paths', function () {
         uri: vscode.Uri.file('C:/ws/' + focusFile),
     } as any;
 
-    it('reloads the shell in place when the warning flag appears, then keeps updating in place', async function () {
+    it('keeps the warning buttons in the shell, disabled while no tree warns, then updates in place', async function () {
         const h = makePreview();
 
-        // 第一次：全量渲染，树里没有布局警告，外壳里没有警告按钮。
+        // 第一次：全量渲染。警告按钮常驻外壳，没有警告时画成禁用态。
         await h.preview.onDocumentChange(document);
         assert.strictEqual(h.htmlWrites, 1);
-        assert.ok(!h.html.includes('show-warnings'), 'a clean tree must not bake the warning buttons');
+        assert.ok(h.html.includes('show-warnings'), 'the warning buttons stay in the shell');
+        assert.ok(/id="show-warnings"[^>]*disabled/.test(h.html), 'a clean tree draws them disabled');
         await settleBackground(h.preview);
 
-        // 制造一条布局警告（两个焦点同位置）：hasWarnings 从 false 变 true，必须全量重载。
+        // 制造一条布局警告（两个焦点同位置）：hasWarnings 从 false 变 true，按钮转为可用。
         files[focusFile] = warningTree;
         await h.preview.onDocumentChange(document);
-        assert.strictEqual(h.htmlWrites, 2, 'the shell must be rewritten for the warning buttons');
-        assert.ok(h.html.includes('show-warnings'), 'the rewritten shell carries the warning buttons');
+        assert.ok(h.html.includes('show-warnings'), 'the shell carries the warning buttons');
+        assert.ok(!/id="show-warnings"[^>]*disabled/.test(h.html), 'the buttons are enabled with the warnings');
         await settleBackground(h.preview);
 
         // 旗标不变（警告仍是同一类）、只有结构变化：走就地更新（不重写 html，给网页端发结构更新消息）。
+        const htmlWritesAfterWarnings = h.htmlWrites;
         const updatesBefore = h.messages.filter(m => m?.type === 'update').length;
         files[focusFile] = warningTree2;
         await h.preview.onDocumentChange(document);
-        assert.strictEqual(h.htmlWrites, 2, 'structure-only edits stay in place');
+        assert.strictEqual(h.htmlWrites, htmlWritesAfterWarnings, 'structure-only edits stay in place');
         assert.ok(
             h.messages.filter(m => m?.type === 'update').length > updatesBefore,
             `later edits must post a structure update; messages=${JSON.stringify(h.messages.map(m => m?.type))}`,
         );
         await settleBackground(h.preview);
 
-        // 反向：警告消失同样触发全量重载，按钮随之移除。
+        // 反向：警告消失，按钮回到禁用态。
         files[focusFile] = noWarningTree;
         await h.preview.onDocumentChange(document);
-        assert.strictEqual(h.htmlWrites, 3);
-        assert.ok(!h.html.includes('show-warnings'), 'the buttons are gone with the warnings');
+        assert.ok(h.html.includes('show-warnings'), 'the buttons stay in the shell');
+        assert.ok(/id="show-warnings"[^>]*disabled/.test(h.html), 'the buttons are disabled again without warnings');
     });
 
     it('takes the full-reload path while the panel is hidden', async function () {

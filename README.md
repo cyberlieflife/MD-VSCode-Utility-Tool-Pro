@@ -48,25 +48,65 @@
 
 ## Extension Settings / 扩展设置
 
+The Settings editor lists them under the extension in five sections, one page each. / 设置编辑器按五个分组列出这些设置，每组一页。
+
+**Game and mod / 游戏与模组**
+
 | Setting / 设置项 | Type / 类型 | Description / 说明 |
 | --- | --- | --- |
 | `mdHoi4Utilities.installPath` | `string` | Heart of Iron IV install path. Without this, most features are broken. / 钢铁雄心 IV 安装路径。未设置时大部分功能不可用。 |
 | `mdHoi4Utilities.loadDlcContents` | `boolean` | Whether to load DLC images when previewing files (all DLCs are around 600MB; enabling this uses more memory). / 预览时是否加载 DLC 图片（全部 DLC 约 600MB，开启会占用更多内存）。 |
 | `mdHoi4Utilities.modFile` | `string` | Path to the working `.mod` file, used to read `replace_path`. If not specified, uses the first `.mod` file in the first folder of the workspace. / 工作 `.mod` 文件路径，用于读取 `replace_path`。未设置时使用工作区第一个文件夹里的第一个 `.mod`。 |
-| `mdHoi4Utilities.enableSupplyArea` | `boolean` | Check this to enable supply areas when developing mods for HOI4 1.10 or below. / 为 HOI4 1.10 及以下版本做模组时勾选，启用补给区域。 |
-| `mdHoi4Utilities.previewLocalisation` | `enum` | Language of the content shown in the event tree preview. / 事件树预览中显示的语言。 |
+| `mdHoi4Utilities.parentModPaths` | `string[]` | Absolute folders of the mods this workspace extends, searched after the workspace folders and before the game install. / 本工作区所扩展模组的绝对路径，在工作区文件夹之后、游戏安装目录之前查找。 |
+| `mdHoi4Utilities.userDataPath` | `string` | The Hearts of Iron IV user data folder (the one with `dlc_load.json`), where the `.mod` file's `dependencies` are looked up. Found automatically when empty. / 钢铁雄心 IV 用户数据目录（含 `dlc_load.json`），用于解析 `.mod` 的 `dependencies`。留空时自动查找。 |
+
+**Previews / 预览**
+
+| Setting / 设置项 | Type / 类型 | Description / 说明 |
+| --- | --- | --- |
+| `mdHoi4Utilities.previewLocalisation` | `enum` | Language of the content shown in the previews. / 预览中显示的语言。 |
+| `mdHoi4Utilities.previewWheel` | `enum` | What a plain mouse wheel does in a preview: `scroll` (the default), `zoom`, or `auto` (zoom for a mouse, scroll for a trackpad). / 预览里裸滚轮的行为：`scroll`（默认）、`zoom`，或 `auto`（鼠标滚轮缩放，触控板滚动）。 |
+| `mdHoi4Utilities.eventTreePreview` | `boolean` | Enable the event tree preview. / 启用事件树预览。 |
 | `mdHoi4Utilities.ideaPreview` | `boolean` | Enable the idea preview. / 启用理念预览。 |
-| `mdHoi4Utilities.ideaSwapIndex` | `boolean` | Scan `common` and `events` for `swap_ideas` so the idea preview shows chains (reads many files on the first build). / 扫描 `common` 与 `events` 中的 `swap_ideas`，让理念预览显示交换链（首次构建会读取大量文件）。 |
-| `mdHoi4Utilities.ideaPlaceholderIcon` | `string` | Image drawn for an idea whose `picture` does not resolve. / 理念 `picture` 无法解析时绘制的图像。 |
-| `mdHoi4Utilities.modifierFormatFiles` | `string[]` | Files that say how a modifier reads, written like `common/modifier_definitions`. / 指定修正显示格式的文件，写法同 `common/modifier_definitions`。 |
 | `mdHoi4Utilities.characterPreview` | `boolean` | Enable the character preview. / 启用角色预览。 |
-| `mdHoi4Utilities.characterTraitStructuralKeys` | `string[]` | Trait keys that describe the trait rather than grant a modifier. / 描述特质本身而非提供修正的特质键。 |
 | `mdHoi4Utilities.decisionPreview` | `boolean` | Enable the decision preview. / 启用决议预览。 |
-| `mdHoi4Utilities.decisionGfxFiles` | `string[]` | `.gfx` files or folders that define the mod's decision sprites. / 定义模组决议精灵的 `.gfx` 文件或文件夹。 |
 | `mdHoi4Utilities.bopPreview` | `boolean` | Enable the balance of power preview. / 启用权力平衡预览。 |
+| `mdHoi4Utilities.useConditionInFocus` | `boolean` | Show conditions in the focus tree preview. / 在国策树预览中显示条件。 |
 | `mdHoi4Utilities.focusTreeLayout` | `enum` | Where the focus tree preview takes its layout from: `standard`, or the mod's `interface/nationalfocusview.gui`. / 焦点树预览的布局来源：`standard` 内置布局，或模组的 `interface/nationalfocusview.gui`。 |
 | `mdHoi4Utilities.focusTreePrerequisiteLines` | `enum` | Which of the game's prerequisite line colours the focus tree preview draws: `available` (blue) or `completed` (green). / 焦点树预览按游戏的哪种前置连线颜色绘制：`available` 蓝色或 `completed` 绿色。 |
 | `mdHoi4Utilities.focusOverlayGfxFiles` | `string[]` | `.gfx` files or folders that define the mod's focus overlay sprites, searched after the game's `interface/goals.gfx`. / 定义模组焦点覆盖层精灵的 `.gfx` 文件或文件夹，在游戏的 `interface/goals.gfx` 之后查找。 |
+| `mdHoi4Utilities.decisionGfxFiles` | `string[]` | `.gfx` files or folders that define the mod's decision sprites. / 定义模组决议精灵的 `.gfx` 文件或文件夹。 |
+| `mdHoi4Utilities.ideaPlaceholderIcon` | `string` | Image drawn for an idea whose `picture` does not resolve. / 理念 `picture` 无法解析时绘制的图像。 |
+| `mdHoi4Utilities.characterTraitStructuralKeys` | `string[]` | Trait keys that describe the trait rather than grant a modifier. / 描述特质本身而非提供修正的特质键。 |
+| `mdHoi4Utilities.modifierFormatFiles` | `string[]` | Files that say how a modifier reads, written like `common/modifier_definitions`. / 指定修正显示格式的文件，写法同 `common/modifier_definitions`。 |
+| `mdHoi4Utilities.technologyGfxRoots` | `string[]` | Folders scanned for `.gfx` files used by the technology tree preview. / 科技树预览扫描 `.gfx` 文件的文件夹。 |
+| `mdHoi4Utilities.technologyCountryIcons` | `boolean` | Offer a country dropdown in the technology tree preview and draw each technology with that country's icon. / 科技树预览提供国家下拉，并按所选国家绘制科技图标。 |
+| `mdHoi4Utilities.inlayWindowGfxRoots` | `string[]` | Folders scanned first for the `.gfx` files focus inlay windows use, before the whole `interface/` folder. Empty by default. / 优先扫描的国策内嵌窗口 `.gfx` 文件夹，之后仍会扫描整个 `interface/`。默认为空。 |
+| `mdHoi4Utilities.modifierInlayHint` | `boolean` | Show the localised name of modifiers inline in `.txt` script files. / 在 `.txt` 脚本文件中内联显示修正的本地化名称。 |
+
+**World map / 世界地图**
+
+| Setting / 设置项 | Type / 类型 | Description / 说明 |
+| --- | --- | --- |
+| `mdHoi4Utilities.enableSupplyArea` | `boolean` | Check this to enable supply areas when developing mods for HOI4 1.10 or below. / 为 HOI4 1.10 及以下版本做模组时勾选，启用补给区域。 |
+| `mdHoi4Utilities.worldMapRetainContextWhenHidden` | `boolean` | Keep the world map preview's webview loaded while the tab is hidden (faster to switch back, uses more memory). / 标签页隐藏时保留世界地图预览的网页内容（切回更快，占用更多内存）。 |
+
+**Indexes and performance / 索引与性能**
+
+| Setting / 设置项 | Type / 类型 | Description / 说明 |
+| --- | --- | --- |
+| `mdHoi4Utilities.sharedFocusIndex` | `boolean` | Index shared focuses so other trees can pull them in. / 建立共享国策索引，供其它国策树引用。 |
+| `mdHoi4Utilities.ideaSwapIndex` | `boolean` | Scan `common` and `events` for `swap_ideas` so the idea preview shows chains (reads many files on the first build). / 扫描 `common` 与 `events` 中的 `swap_ideas`，让理念预览显示交换链（首次构建会读取大量文件）。 |
+| `mdHoi4Utilities.gfxIndex` | `boolean` | Index every sprite definition. Faster icon lookups, more memory. / 建立精灵定义索引。图标查找更快，占用更多内存。 |
+| `mdHoi4Utilities.localisationIndex` | `boolean` | Index localisation so previews show translated text. Uses more memory. / 建立本地化索引，让预览显示译文。占用更多内存。 |
+| `mdHoi4Utilities.imageDecodeWorkers` | `number` | Threads used to decode `.dds` / `.tga` images (1–16, default 4). / 解码 `.dds` / `.tga` 图片使用的线程数（1–16，默认 4）。 |
+
+**Auditor / 检查器**
+
+| Setting / 设置项 | Type / 类型 | Description / 说明 |
+| --- | --- | --- |
+| `mdHoi4Utilities.auditor.reportFolder` | `string` | Folder the focus-tree audit report is written to (`focus-tree-audit.md`). Empty opens the report in an untitled editor. / 国策树审计报告的写入文件夹（`focus-tree-audit.md`）。留空时在未命名编辑器中打开报告。 |
+| `mdHoi4Utilities.auditor.includeVanilla` | `boolean` | Also check the focus trees in the HOI4 install path, not only the working mod's. / 除工作模组外，也检查 HOI4 安装目录中的国策树。 |
 
 ## Known Issues / 已知问题
 

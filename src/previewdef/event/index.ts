@@ -6,7 +6,6 @@ import { LoaderPreview } from '../loaderpreview';
 import { EventsLoader } from './loader';
 import { eventTreePreview } from '../../util/featureflags';
 import { localize } from '../../util/i18n';
-import { ConfigurationKey } from '../../constants';
 
 function canPreviewEvent(document: vscode.TextDocument) {
     if (!eventTreePreview) {
@@ -23,20 +22,12 @@ function canPreviewEvent(document: vscode.TextDocument) {
 }
 
 class EventPreview extends LoaderPreview<EventsLoader> {
-    private configurationHandler: vscode.Disposable;
-
     constructor(uri: vscode.Uri, panel: vscode.WebviewPanel) {
         super(uri, panel, (file, contentProvider) => new EventsLoader(file, contentProvider), renderEventFile);
-        this.configurationHandler = vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration(`${ConfigurationKey}.previewLocalisation`)) {
-                this.reload();
-            }
-        });
     }
 
-    public dispose(): void {
-        super.dispose();
-        this.configurationHandler.dispose();
+    protected override get reloadOnConfigurationChange(): readonly string[] {
+        return ['previewLocalisation', 'localisationIndex', 'gfxIndex'];
     }
 }
 

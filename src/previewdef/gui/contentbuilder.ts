@@ -12,6 +12,7 @@ import { localize } from '../../util/i18n';
 import { getSpriteByGfxName } from '../../util/image/imagecache';
 import { LoaderSession } from '../../util/loader/loader';
 import { StyleTable, normalizeForStyle } from '../../util/styletable';
+import { actionGroupHtml, iconButtonHtml } from "../toolbaricons";
 import { GuiFileLoader, GuiFileLoaderResult } from "./loader";
 
 export async function renderGuiFile(loader: GuiFileLoader, uri: vscode.Uri, webview: vscode.Webview): Promise<string> {
@@ -109,12 +110,10 @@ function renderTopBar(folders: string[], styleTable: StyleTable): string {
                 ${folders.map(folder => `<option value="containerwindow_${folder}">${folder}</option>`)}
             </select>
         </div>
-        <button id="refresh" title="${localize('common.topbar.refresh.title', 'Refresh')}">
-            <i class="codicon codicon-refresh"></i>
-        </button>
-        <button id="toggleVisibility" title="${localize('guipreview.topbar.toggleVisibility.title', 'Show or Hide Container Windows')}">
-            <i class="codicon codicon-eye"></i>
-        </button>
+        ${actionGroupHtml({
+            refresh: iconButtonHtml('refresh', localize, { domId: 'refresh' }),
+            containerWindows: iconButtonHtml('containerWindows', localize, { domId: 'toggleVisibility', on: false }),
+        })}
     </div>
     <div
     id="toggleVisibilityContent"

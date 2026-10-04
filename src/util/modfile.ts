@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ConfigurationKey, Commands } from '../constants';
 import { PromiseCache } from './cache';
 import { localize } from './i18n';
+import { statusBarIcon } from '../previewdef/toolbaricons';
 import { basename, fileOrUriStringToUri, getConfiguration, uriToFilePathWhenPossible, isFile, readDir } from './vsccommon';
 
 export const modFileStatusContainer: { current: vscode.StatusBarItem | null } = {
@@ -32,12 +33,15 @@ export function updateSelectedModFileStatus(modFile: vscode.Uri | undefined, err
         if (modFile) {
             const modFileName = basename(modFile, ".mod");
             modName.command = Commands.SelectModFile;
-            modName.text = (error ? "$(error) " : "$(file-code) ") + modFileName;
+            // The error icon alone does not say what is wrong, so the text says it too.
+            modName.text = error
+                ? statusBarIcon('modFileError') + ' ' + modFileName + ' ' + localize('modfile.cannotread', '(cannot read)')
+                : statusBarIcon('modFile') + ' ' + modFileName;
             modName.tooltip = (error ? localize('modfile.errorreading', "Error reading this file: ") : '') + uriToFilePathWhenPossible(modFile);
             modName.show();
         } else {
             modName.command = Commands.SelectModFile;
-            modName.text = "$(file-code) " + localize('modfile.nomodfile', '(No mod descriptor)');
+            modName.text = statusBarIcon("modFile") + " " + localize('modfile.nomodfile', '(No mod descriptor)');
             modName.tooltip = localize('modfile.clicktoselect', 'Click to select a mod file...');
             modName.show();
         }

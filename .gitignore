@@ -23,6 +23,11 @@ i18n/*.js.map
 out-test/
 out-test-webview/
 
+# compat runner's mod checkouts and its per-run report
+compat-mods/
+compat-report.md
+compat-args.txt
+
 # Logs
 *.log
 logs/

@@ -327,6 +327,7 @@ const internalTable = /* SOT Do not remove this comment */{
     "miopreview.warnings.traitnoid": "A trait defined in this file don't have token property: {0}.",
     "moddependencies.nouserdatadir": "Can't find the Hearts of Iron IV user data directory, so the mods this .mod depends on can't be found. Set {0} to the folder that holds the launcher's mod folder.",
     "moddependencies.opensettings": "Open Settings",
+    "modfile.cannotread": "(cannot read)",
     "modfile.clicktoselect": "Click to select a mod file...",
     "modfile.errorreading": "Error reading this file: ",
     "modfile.filenotexist": "Mod file not exist: {0}",

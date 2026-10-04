@@ -11,6 +11,7 @@ import { Renderer } from './renderer';
 import { sendEvent } from '../util/telemetry';
 import { showContextMenu, closeContextMenu } from "../util/contextmenu";
 import { openEditStateDialog } from "./editstatedialog";
+import { applyIconState } from "../../src/previewdef/toolbaricons";
 
 export type ViewMode = 'province' | 'state' | 'strategicregion' | 'supplyarea' | 'warnings';
 export type ColorSet = 'provinceid' | 'provincetype' | 'terrain' | 'country' | 'stateid' | 'manpower' |
@@ -158,6 +159,7 @@ export class TopBar extends Subscriber {
             } else {
                 warningsContainer.style.display = 'none';
             }
+            applyIconState(showWarnings as HTMLElement, 'showWarnings', this.warningsVisible, feLocalize);
         }));
     }
 

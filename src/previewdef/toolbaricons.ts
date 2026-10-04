@@ -147,6 +147,20 @@ export const iconActions = {
 		surfaces: ["worldmap"],
 		shownWhen: "the view mode is state, strategic region or supply area",
 	},
+	editRegion: {
+		icon: "edit",
+		tooltipKey: "worldmap.topbar.edit.title",
+		tooltip: "Edit",
+		surfaces: ["worldmap"],
+		shownWhen: "the view mode is state or strategic region",
+	},
+	addRegion: {
+		icon: "add",
+		tooltipKey: "worldmap.topbar.add.title",
+		tooltip: "Add",
+		surfaces: ["worldmap"],
+		shownWhen: "the view mode is state or strategic region",
+	},
 	clearTrace: {
 		icon: "close",
 		tooltipKey: "toolbar.cleartrace",
@@ -207,6 +221,8 @@ export const actionGroupOrder: readonly IconActionId[] = [
 	"containerWindows",
 	"saveImage",
 	"openFile",
+	"editRegion",
+	"addRegion",
 	"clearTrace",
 ];
 

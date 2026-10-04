@@ -1,6 +1,8 @@
 import { normalizeForStyle } from "../src/util/styletable";
 import { Checkbox } from "./util/checkbox";
 import { setState, getState, scrollToState, tryRun, subscribeRefreshButton, initCommon } from "./util/common";
+import { applyIconState } from "../src/previewdef/toolbaricons";
+import { feLocalize } from "./util/i18n";
 
 const existingCheckboxes: Checkbox[] = [];
 
@@ -99,6 +101,10 @@ function refreshToggleVisibilityContent() {
     const toggleVisibilityContent = document.getElementById('toggleVisibilityContent') as HTMLDivElement;
     toggleVisibilityContent.style.display = toggleVisibilityContentVisible ? 'block' : 'none';
     mainContent.style.marginTop = toggleVisibilityContentVisible ? '240px' : '40px';
+    const toggle = document.getElementById('toggleVisibility');
+    if (toggle) {
+        applyIconState(toggle, 'containerWindows', !!toggleVisibilityContentVisible, feLocalize);
+    }
 }
 
 window.addEventListener('load', tryRun(function() {

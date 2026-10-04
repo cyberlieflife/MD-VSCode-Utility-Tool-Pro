@@ -327,6 +327,7 @@ const table: Partial<typeof __table> = {
     "miopreview.warnings.traitnoid": "在这个文件中有特质没有token字段：{0}。",
     "moddependencies.nouserdatadir": "找不到 Hearts of Iron IV 用户数据目录，无法解析此 .mod 依赖的模组。请把 {0} 设为包含启动器 mod 文件夹的目录。",
     "moddependencies.opensettings": "打开设置",
+    "modfile.cannotread": "（无法读取）",
     "modfile.clicktoselect": "点击选择模组文件……",
     "modfile.errorreading": "读取文件出错：",
     "modfile.filenotexist": "模组文件不存在：{0}",

@@ -27,7 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
         locale = 'en';
     }
 
-    Logger.initialize();
+    context.subscriptions.push(Logger.initialize());
 
     loadI18n(locale);
 

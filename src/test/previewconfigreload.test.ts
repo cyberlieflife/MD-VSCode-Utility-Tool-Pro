@@ -1,0 +1,191 @@
+import * as assert from 'assert';
+import * as vscode from 'vscode';
+import { PreviewBase } from '../previewdef/previewbase';
+import { focusTreePreviewDef } from '../previewdef/focustree';
+import { eventPreviewDef } from '../previewdef/event';
+import { ideaPreviewDef } from '../previewdef/idea';
+import { decisionPreviewDef } from '../previewdef/decision';
+import { characterPreviewDef } from '../previewdef/character';
+import { technologyPreviewDef } from '../previewdef/technology';
+import { mioPreviewDef } from '../previewdef/mio';
+import { guiPreviewDef } from '../previewdef/gui';
+import { gfxPreviewDef } from '../previewdef/gfx';
+
+// The previews that read settings have to redraw when one of them changes, and the redraw has to
+// force the loader session: a setting change does not move the document's hash, so without the
+// force a loader answers from its cache and the page repaints what it already had.
+describe('previewdef configuration reload', () => {
+    function panelStub(): any {
+        return {
+            webview: {
+                html: '',
+                cspSource: '',
+                asWebviewUri: (u: unknown) => u,
+                postMessage: () => Promise.resolve(true),
+                onDidReceiveMessage: () => ({ dispose: () => undefined }),
+            },
+            visible: true,
+            onDidChangeViewState: () => ({ dispose: () => undefined }),
+            onDidDispose: () => ({ dispose: () => undefined }),
+        };
+    }
+
+    let fire: ((e: vscode.ConfigurationChangeEvent) => void) | undefined;
+    let subscriptions: number;
+    let disposals: number;
+    const originalOnDidChangeConfiguration = (vscode.workspace as any).onDidChangeConfiguration;
+
+    function stub(): void {
+        fire = undefined;
+        subscriptions = 0;
+        disposals = 0;
+        (vscode.workspace as any).onDidChangeConfiguration = (handler: any) => {
+            subscriptions++;
+            fire = handler;
+            return {
+                dispose: () => {
+                    disposals++;
+                },
+            };
+        };
+    }
+
+    function changed(...keys: string[]): vscode.ConfigurationChangeEvent {
+        return {
+            affectsConfiguration: (section: string) =>
+                keys.some(key => section === `mdHoi4Utilities.${key}`),
+        } as vscode.ConfigurationChangeEvent;
+    }
+
+    class Watching extends PreviewBase {
+        public reloads: boolean[] = [];
+
+        protected get reloadOnConfigurationChange(): readonly string[] {
+            return ['gfxIndex'];
+        }
+
+        protected reload(dependencyChanged = false): void {
+            this.reloads.push(dependencyChanged);
+        }
+
+        protected getContent(): Promise<string> {
+            return Promise.resolve('');
+        }
+    }
+
+    class Indifferent extends PreviewBase {
+        protected getContent(): Promise<string> {
+            return Promise.resolve('');
+        }
+    }
+
+    afterEach(() => {
+        (vscode.workspace as any).onDidChangeConfiguration = originalOnDidChangeConfiguration;
+    });
+
+    it('reloads when a declared setting changes', () => {
+        stub();
+        const preview = new Watching(vscode.Uri.file('/tmp/a.txt'), panelStub());
+
+        fire!(changed('gfxIndex'));
+
+        assert.deepStrictEqual(preview.reloads, [true]);
+    });
+
+    it('ignores a setting it did not declare', () => {
+        stub();
+        const preview = new Watching(vscode.Uri.file('/tmp/a.txt'), panelStub());
+
+        fire!(changed('previewLocalisation'));
+
+        assert.deepStrictEqual(preview.reloads, []);
+    });
+
+    it('forces the loader session, so the page is not repainted from cache', () => {
+        stub();
+        const preview = new Watching(vscode.Uri.file('/tmp/a.txt'), panelStub());
+
+        fire!(changed('gfxIndex'));
+
+        assert.strictEqual(preview.reloads[0], true);
+    });
+
+    it('does not subscribe at all when nothing is declared', () => {
+        stub();
+        new Indifferent(vscode.Uri.file('/tmp/a.txt'), panelStub());
+
+        assert.strictEqual(subscriptions, 0);
+    });
+
+    it('releases the subscription when the preview is disposed', () => {
+        stub();
+        const preview = new Watching(vscode.Uri.file('/tmp/a.txt'), panelStub());
+
+        assert.strictEqual(subscriptions, 1);
+        preview.dispose();
+
+        assert.strictEqual(disposals, 1);
+    });
+
+    describe('what each preview watches', () => {
+        // Pinned so emptying a list, or adding a preview that reads a setting without declaring it,
+        // fails here rather than silently going stale on screen.
+        const expected: [string, any, string[]][] = [
+            [
+                'focustree',
+                focusTreePreviewDef,
+                [
+                    'useConditionInFocus',
+                    'focusTreeLayout',
+                    'focusTreePrerequisiteLines',
+                    'focusOverlayGfxFiles',
+                    'sharedFocusIndex',
+                    'inlayWindowGfxRoots',
+                    'gfxIndex',
+                    'localisationIndex',
+                    'previewLocalisation',
+                ],
+            ],
+            ['event', eventPreviewDef, ['previewLocalisation', 'localisationIndex', 'gfxIndex']],
+            [
+                'idea',
+                ideaPreviewDef,
+                ['previewLocalisation', 'localisationIndex', 'gfxIndex', 'ideaSwapIndex', 'ideaPlaceholderIcon', 'modifierFormatFiles'],
+            ],
+            [
+                'decision',
+                decisionPreviewDef,
+                ['previewLocalisation', 'localisationIndex', 'gfxIndex', 'decisionGfxFiles', 'modifierFormatFiles'],
+            ],
+            [
+                'character',
+                characterPreviewDef,
+                ['previewLocalisation', 'localisationIndex', 'gfxIndex', 'characterTraitStructuralKeys', 'modifierFormatFiles'],
+            ],
+            [
+                'technology',
+                technologyPreviewDef,
+                [
+                    'technologyCountryIcons',
+                    'technologyGfxRoots',
+                    'gfxIndex',
+                    'localisationIndex',
+                    'previewLocalisation',
+                ],
+            ],
+            ['mio', mioPreviewDef, ['localisationIndex', 'previewLocalisation', 'gfxIndex']],
+            ['gui', guiPreviewDef, ['gfxIndex', 'localisationIndex', 'previewLocalisation']],
+            // The gfx preview parses the open document and reads nothing else, so a setting change
+            // cannot make its page stale.
+            ['gfx', gfxPreviewDef, []],
+        ];
+
+        for (const [name, def, keys] of expected) {
+            it(`${name} watches exactly its own settings`, () => {
+                const watched = def.previewConstructor?.prototype
+                    ?.reloadOnConfigurationChange as readonly string[] | undefined;
+                assert.deepStrictEqual([...(watched ?? [])], keys);
+            });
+        }
+    });
+});

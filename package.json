@@ -49,7 +49,8 @@
 	"contributes": {
 		"configuration": [
 			{
-				"title": "%hoi4modutilities.displayName%",
+				"title": "%hoi4modutilities.section.gameAndMod%",
+				"order": 1,
 				"properties": {
 					"mdHoi4Utilities.installPath": {
 						"title": "%hoi4modutilities.installPath.title%",
@@ -69,12 +70,27 @@
 						"default": "",
 						"description": "%hoi4modutilities.modFile.desc%"
 					},
-					"mdHoi4Utilities.enableSupplyArea": {
-						"title": "%hoi4modutilities.enableSupplyArea.title%",
-						"type": "boolean",
-						"default": false,
-						"description": "%hoi4modutilities.enableSupplyArea.desc%"
+					"mdHoi4Utilities.parentModPaths": {
+						"title": "%hoi4modutilities.parentModPaths.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.parentModPaths.desc%"
 					},
+					"mdHoi4Utilities.userDataPath": {
+						"title": "%hoi4modutilities.userDataPath.title%",
+						"type": "string",
+						"default": "",
+						"description": "%hoi4modutilities.userDataPath.desc%"
+					}
+				}
+			},
+			{
+				"title": "%hoi4modutilities.section.previews%",
+				"order": 2,
+				"properties": {
 					"mdHoi4Utilities.previewLocalisation": {
 						"title": "%hoi4modutilities.previewLocalisation.title%",
 						"type": "string",
@@ -92,32 +108,6 @@
 						],
 						"description": "%hoi4modutilities.previewLocalisation.desc%"
 					},
-					"mdHoi4Utilities.inlayWindowGfxRoots": {
-						"title": "Focus inlay window GFX roots",
-						"type": "array",
-						"default": [
-							"interface/scripted_gui"
-						],
-						"items": {
-							"type": "string"
-						},
-						"description": "Workspace/mod/HOI4-relative root folders to scan recursively for .gfx files used by focus inlay windows."
-					},
-					"mdHoi4Utilities.technologyGfxRoots": {
-						"title": "Technology GFX roots",
-						"type": "array",
-						"default": [],
-						"items": {
-							"type": "string"
-						},
-						"description": "Workspace/mod-relative root folders to scan recursively for .gfx files used by the technology tree preview (e.g. \"interface/technologies\")."
-					},
-					"mdHoi4Utilities.technologyCountryIcons": {
-						"title": "Technology: country icons",
-						"type": "boolean",
-						"default": true,
-						"description": "Offer a country dropdown in the technology tree preview and draw each technology with the selected country's own icon when it has one, falling back to the generic icon. The list of countries is read from the GFX index, so it is empty while that index is off."
-					},
 					"mdHoi4Utilities.previewWheel": {
 						"title": "%hoi4modutilities.previewWheel.title%",
 						"type": "string",
@@ -134,70 +124,17 @@
 						],
 						"description": "%hoi4modutilities.previewWheel.desc%"
 					},
-					"mdHoi4Utilities.imageDecodeWorkers": {
-						"title": "%hoi4modutilities.imageDecodeWorkers.title%",
-						"type": "number",
-						"default": 4,
-						"minimum": 1,
-						"maximum": 16,
-						"description": "%hoi4modutilities.imageDecodeWorkers.desc%"
-					},
-					"mdHoi4Utilities.parentModPaths": {
-						"title": "%hoi4modutilities.parentModPaths.title%",
-						"type": "array",
-						"default": [],
-						"items": {
-							"type": "string"
-						},
-						"description": "%hoi4modutilities.parentModPaths.desc%"
-					},
-					"mdHoi4Utilities.userDataPath": {
-						"title": "%hoi4modutilities.userDataPath.title%",
-						"type": "string",
-						"default": "",
-						"description": "%hoi4modutilities.userDataPath.desc%"
-					},
-					"mdHoi4Utilities.worldMapRetainContextWhenHidden": {
-						"title": "World map: keep webview in memory when hidden",
-						"type": "boolean",
-						"default": true,
-						"description": "Keep the world map preview's webview loaded while the tab is hidden (faster to switch back, uses more memory). Turn off to free the webview when hidden and reload it on return, lowering memory use on large maps. The extension-host copy of the map is always released while hidden."
-					},
-					"mdHoi4Utilities.useConditionInFocus": {
-						"title": "%hoi4modutilities.useConditionInFocus.title%",
-						"type": "boolean",
-						"default": true,
-						"description": "%hoi4modutilities.useConditionInFocus.desc%"
-					},
 					"mdHoi4Utilities.eventTreePreview": {
 						"title": "%hoi4modutilities.eventTreePreview.title%",
 						"type": "boolean",
 						"default": true,
 						"description": "%hoi4modutilities.eventTreePreview.desc%"
 					},
-					"mdHoi4Utilities.sharedFocusIndex": {
-						"title": "%hoi4modutilities.sharedFocusIndex.title%",
+					"mdHoi4Utilities.decisionPreview": {
+						"title": "%hoi4modutilities.decisionPreview.title%",
 						"type": "boolean",
 						"default": true,
-						"description": "%hoi4modutilities.sharedFocusIndex.desc%"
-					},
-					"mdHoi4Utilities.gfxIndex": {
-						"title": "%hoi4modutilities.gfxIndex.title%",
-						"type": "boolean",
-						"default": false,
-						"description": "%hoi4modutilities.gfxIndex.desc%"
-					},
-					"mdHoi4Utilities.localisationIndex": {
-						"title": "%hoi4modutilities.localisationIndex.title%",
-						"type": "boolean",
-						"default": true,
-						"description": "%hoi4modutilities.localisationIndex.desc%"
-					},
-					"mdHoi4Utilities.modifierInlayHint": {
-						"title": "%hoi4modutilities.modifierInlayHint.title%",
-						"type": "boolean",
-						"default": true,
-						"description": "%hoi4modutilities.modifierInlayHint.desc%"
+						"description": "%hoi4modutilities.decisionPreview.desc%"
 					},
 					"mdHoi4Utilities.ideaPreview": {
 						"title": "%hoi4modutilities.ideaPreview.title%",
@@ -205,11 +142,23 @@
 						"default": true,
 						"description": "%hoi4modutilities.ideaPreview.desc%"
 					},
-					"mdHoi4Utilities.ideaSwapIndex": {
-						"title": "%hoi4modutilities.ideaSwapIndex.title%",
+					"mdHoi4Utilities.characterPreview": {
+						"title": "%hoi4modutilities.characterPreview.title%",
 						"type": "boolean",
-						"default": false,
-						"description": "%hoi4modutilities.ideaSwapIndex.desc%"
+						"default": true,
+						"description": "%hoi4modutilities.characterPreview.desc%"
+					},
+					"mdHoi4Utilities.bopPreview": {
+						"title": "%hoi4modutilities.bopPreview.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.bopPreview.desc%"
+					},
+					"mdHoi4Utilities.useConditionInFocus": {
+						"title": "%hoi4modutilities.useConditionInFocus.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.useConditionInFocus.desc%"
 					},
 					"mdHoi4Utilities.focusTreeLayout": {
 						"title": "%hoi4modutilities.focusTreeLayout.title%",
@@ -239,6 +188,15 @@
 						"default": "available",
 						"description": "%hoi4modutilities.focusTreePrerequisiteLines.desc%"
 					},
+					"mdHoi4Utilities.inlayWindowGfxRoots": {
+						"title": "Focus inlay window GFX roots",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "Workspace/mod-relative folders scanned first for the .gfx files focus inlay windows use (e.g. \"interface/scripted_gui\"). The whole interface/ folder is always scanned after them. An inlay_window_gfx_roots = { ... } list in the mod's .mod file adds to this."
+					},
 					"mdHoi4Utilities.focusOverlayGfxFiles": {
 						"title": "%hoi4modutilities.focusOverlayGfxFiles.title%",
 						"type": "array",
@@ -248,6 +206,122 @@
 						},
 						"description": "%hoi4modutilities.focusOverlayGfxFiles.desc%"
 					},
+					"mdHoi4Utilities.decisionGfxFiles": {
+						"title": "%hoi4modutilities.decisionGfxFiles.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.decisionGfxFiles.desc%"
+					},
+					"mdHoi4Utilities.ideaPlaceholderIcon": {
+						"title": "%hoi4modutilities.ideaPlaceholderIcon.title%",
+						"type": "string",
+						"default": "",
+						"description": "%hoi4modutilities.ideaPlaceholderIcon.desc%"
+					},
+					"mdHoi4Utilities.characterTraitStructuralKeys": {
+						"title": "%hoi4modutilities.characterTraitStructuralKeys.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.characterTraitStructuralKeys.desc%"
+					},
+					"mdHoi4Utilities.modifierFormatFiles": {
+						"title": "%hoi4modutilities.modifierFormatFiles.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.modifierFormatFiles.desc%"
+					},
+					"mdHoi4Utilities.technologyGfxRoots": {
+						"title": "Technology GFX roots",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "Workspace/mod-relative root folders to scan recursively for .gfx files used by the technology tree preview (e.g. \"interface/technologies\")."
+					},
+					"mdHoi4Utilities.technologyCountryIcons": {
+						"title": "Technology: country icons",
+						"type": "boolean",
+						"default": true,
+						"description": "Offer a country dropdown in the technology tree preview and draw each technology with the selected country's own icon when it has one, falling back to the generic icon. The list of countries is read from the GFX index, so it is empty while that index is off."
+					},
+					"mdHoi4Utilities.modifierInlayHint": {
+						"title": "%hoi4modutilities.modifierInlayHint.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.modifierInlayHint.desc%"
+					}
+				}
+			},
+			{
+				"title": "%hoi4modutilities.section.worldMap%",
+				"order": 3,
+				"properties": {
+					"mdHoi4Utilities.enableSupplyArea": {
+						"title": "%hoi4modutilities.enableSupplyArea.title%",
+						"type": "boolean",
+						"default": false,
+						"description": "%hoi4modutilities.enableSupplyArea.desc%"
+					},
+					"mdHoi4Utilities.worldMapRetainContextWhenHidden": {
+						"title": "World map: keep webview in memory when hidden",
+						"type": "boolean",
+						"default": true,
+						"description": "Keep the world map preview's webview loaded while the tab is hidden (faster to switch back, uses more memory). Turn off to free the webview when hidden and reload it on return, lowering memory use on large maps. The extension-host copy of the map is always released while hidden."
+					}
+				}
+			},
+			{
+				"title": "%hoi4modutilities.section.indexes%",
+				"order": 4,
+				"properties": {
+					"mdHoi4Utilities.sharedFocusIndex": {
+						"title": "%hoi4modutilities.sharedFocusIndex.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.sharedFocusIndex.desc%"
+					},
+					"mdHoi4Utilities.ideaSwapIndex": {
+						"title": "%hoi4modutilities.ideaSwapIndex.title%",
+						"type": "boolean",
+						"default": false,
+						"description": "%hoi4modutilities.ideaSwapIndex.desc%"
+					},
+					"mdHoi4Utilities.gfxIndex": {
+						"title": "%hoi4modutilities.gfxIndex.title%",
+						"type": "boolean",
+						"default": false,
+						"description": "%hoi4modutilities.gfxIndex.desc%"
+					},
+					"mdHoi4Utilities.localisationIndex": {
+						"title": "%hoi4modutilities.localisationIndex.title%",
+						"type": "boolean",
+						"default": true,
+						"description": "%hoi4modutilities.localisationIndex.desc%"
+					},
+					"mdHoi4Utilities.imageDecodeWorkers": {
+						"title": "%hoi4modutilities.imageDecodeWorkers.title%",
+						"type": "number",
+						"default": 4,
+						"minimum": 1,
+						"maximum": 16,
+						"description": "%hoi4modutilities.imageDecodeWorkers.desc%"
+					}
+				}
+			},
+			{
+				"title": "%hoi4modutilities.section.auditor%",
+				"order": 5,
+				"properties": {
 					"mdHoi4Utilities.auditor.reportFolder": {
 						"title": "%hoi4modutilities.auditor.reportFolder.title%",
 						"type": "string",
@@ -259,57 +333,6 @@
 						"type": "boolean",
 						"default": false,
 						"description": "%hoi4modutilities.auditor.includeVanilla.desc%"
-					},
-					"mdHoi4Utilities.ideaPlaceholderIcon": {
-						"title": "%hoi4modutilities.ideaPlaceholderIcon.title%",
-						"type": "string",
-						"default": "",
-						"description": "%hoi4modutilities.ideaPlaceholderIcon.desc%"
-					},
-					"mdHoi4Utilities.modifierFormatFiles": {
-						"title": "%hoi4modutilities.modifierFormatFiles.title%",
-						"type": "array",
-						"default": [],
-						"items": {
-							"type": "string"
-						},
-						"description": "%hoi4modutilities.modifierFormatFiles.desc%"
-					},
-					"mdHoi4Utilities.characterPreview": {
-						"title": "%hoi4modutilities.characterPreview.title%",
-						"type": "boolean",
-						"default": true,
-						"description": "%hoi4modutilities.characterPreview.desc%"
-					},
-					"mdHoi4Utilities.characterTraitStructuralKeys": {
-						"title": "%hoi4modutilities.characterTraitStructuralKeys.title%",
-						"type": "array",
-						"default": [],
-						"items": {
-							"type": "string"
-						},
-						"description": "%hoi4modutilities.characterTraitStructuralKeys.desc%"
-					},
-					"mdHoi4Utilities.decisionPreview": {
-						"title": "%hoi4modutilities.decisionPreview.title%",
-						"type": "boolean",
-						"default": true,
-						"description": "%hoi4modutilities.decisionPreview.desc%"
-					},
-					"mdHoi4Utilities.decisionGfxFiles": {
-						"title": "%hoi4modutilities.decisionGfxFiles.title%",
-						"type": "array",
-						"default": [],
-						"items": {
-							"type": "string"
-						},
-						"description": "%hoi4modutilities.decisionGfxFiles.desc%"
-					},
-					"mdHoi4Utilities.bopPreview": {
-						"title": "%hoi4modutilities.bopPreview.title%",
-						"type": "boolean",
-						"default": true,
-						"description": "%hoi4modutilities.bopPreview.desc%"
 					}
 				}
 			}
@@ -426,10 +449,14 @@
 		"lint": "eslint src --ext ts",
 		"watch": "tsc -watch -p ./",
 		"compile-test-webview": "tsc -p ./tsconfig.webview.test.json",
-		"pretest": "tsc -p ./tsconfig.test.json && tsc -p ./tsconfig.webview.test.json",
-		"test": "mocha --exit --require ./out-test/src/test/_vscode_stub.js \"./out-test/src/test/**/*.test.js\" \"./out-test-webview/src/test/webview/**/*.test.js\"",
-		"clean": "rimraf dist out static",
+		"pretest": "node scripts/compile-tests.js",
+		"test": "mocha --exit --forbid-only --require ./out-test/src/test/_vscode_stub.js \"./out-test/src/test/**/*.test.js\" \"./out-test-webview/src/test/webview/**/*.test.js\"",
+		"clean": "rimraf dist out static out-test out-test-webview",
 		"geni18n": "npm run compile-ts && node scripts/genzhi18n.js",
+		"bench": "npm run compile-test && node scripts/bench.js",
+		"smoke:webviews": "node scripts/smoke-webviews.js",
+		"compat": "node scripts/compile-tests.js && node --require ./out-test/src/test/_vscode_stub.js out-test/src/test/compat/runcompat.js",
+		"vanilla-manifest": "node scripts/vanilla-manifest.js",
 		"package": "vsce package",
 		"package:patch": "npm version patch --no-git-tag-version && vsce package",
 		"package:minor": "npm version minor --no-git-tag-version && vsce package",

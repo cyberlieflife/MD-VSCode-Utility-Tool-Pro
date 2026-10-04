@@ -89,6 +89,16 @@ export async function countryTagsExpiryToken(): Promise<string> {
     return hoiFilesExpiryToken((await loadCountryTags()).files);
 }
 
+/**
+ * Drops the cached tag list. A run that mounts a different mod (the compat runner, a headless
+ * test) otherwise keeps reading the tags of the folder it saw first: the token above is built from
+ * the files the last load recorded, so a load that found no folder at all produces the empty token
+ * and never expires.
+ */
+export function clearCountryTagsCache(): void {
+    countryTagListCache.clear();
+}
+
 // The listing goes through fileloader's own short-TTL cache, and the expiry token above is built
 // from the files this returned rather than from a fresh listing. So a *newly created* country_tags
 // file is not noticed by the token -- it is picked up when three idle seconds drop the entry.

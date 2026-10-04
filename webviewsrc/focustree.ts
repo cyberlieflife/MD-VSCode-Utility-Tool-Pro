@@ -21,6 +21,7 @@ import { propagateAllowBranches, AllowBranchFocus } from "./focusbranch";
 import { patchFocusTreeContent } from "./focustreepatch";
 import { warningBadgeClass, warningBoxClass, warningEntryClass, warningFlashClass } from "../src/previewdef/focustree/warningstyles";
 import { traceLineClass, traceDimClass } from "../src/previewdef/focustree/tracestyles";
+import { applyIconState } from "../src/previewdef/toolbaricons";
 
 initCommon();
 
@@ -2586,6 +2587,7 @@ window.addEventListener('load', tryRun(async function() {
             const visible = warnings.style.display === 'block';
             document.body.style.overflow = visible ? '' : 'hidden';
             warnings.style.display = visible ? 'none' : 'block';
+            applyIconState(showWarnings, 'showWarnings', !visible, feLocalize);
         });
     }
 
@@ -2597,6 +2599,7 @@ window.addEventListener('load', tryRun(async function() {
             const visible = !showWarningMarkers();
             setState({ showFocusWarningMarkers: visible });
             setWarningMarkersVisible(visible);
+            applyIconState(toggleWarningMarkers, 'warningMarkers', visible, feLocalize);
         });
     }
 
