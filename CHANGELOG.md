@@ -12,6 +12,7 @@
 
 ### Bugfixes
 
+- [MIO Preview] The MIO preview no longer throws when its page loads without MIO data (a preview whose data has not arrived yet), and the webview test harness now fails a test whose page reported an uncaught error instead of letting it pass silently.
 - [Focus Tree] Focus overlays are now looked up in `interface/goals.gfx`, where the game defines them; the preview looked in a `goals_overlays.gfx` file that does not exist in the game's own interface folder.
 
 ## [v1.2.0] - 2026-10-03

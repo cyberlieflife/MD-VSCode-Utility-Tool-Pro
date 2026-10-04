@@ -232,6 +232,10 @@ function calculateTraitVisible(mio: Mio, allowBranchOptionsValue: Record<string,
 
 function updateSelectedMio(clearCondition: boolean) {
     const mio = mios[selectedMioIndex];
+    // 页面还没渲染（或这份文件没有 MIO 数据）时 load 处理器仍会被调用；没有可更新的对象。
+    if (!mio) {
+        return;
+    }
 
     const conditionExprs = mio.conditionExprs;
 
@@ -405,6 +409,12 @@ window.addEventListener('message', tryRun(async (event: MessageEvent) => {
 }));
 
 window.addEventListener('load', tryRun(async function() {
+    // 页面可能没有 MIO 数据（其它 spec 或空文件先加载、又由 load 处理器兜底调用）：这时页面里
+    // 没有任何可绑定的对象，直接跳过整段初始化。
+    if (!Array.isArray(mios) || mios.length === 0) {
+        return;
+    }
+
     // Mio selection
     const mioSelect = document.getElementById('mios') as HTMLSelectElement | null;
     if (mioSelect) {

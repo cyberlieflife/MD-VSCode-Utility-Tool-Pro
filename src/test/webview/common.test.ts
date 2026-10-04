@@ -1,8 +1,15 @@
 import './setup';
 import * as assert from 'assert';
+import { takeRuntimeErrors } from './setup';
 import { copyArray, tryRun, getState, setState, enableZoom, scrollToState, subscribeNavigators, subscribeRefreshButton, initCommon } from '../../../webviewsrc/util/common';
 
 describe('webview/util/common', function () {
+    // tryRun 报上来的是遥测里的错误载荷，形态可能是 Error 或序列化后的对象。
+    function errorText(error: unknown): string {
+        const message = (error as { message?: unknown } | undefined)?.message;
+        return typeof message === 'string' ? message : String(error);
+    }
+
     beforeEach(function () {
         document.body.innerHTML = '';
         setState({});
@@ -38,12 +45,19 @@ describe('webview/util/common', function () {
         it('returns undefined on sync error', function () {
             const wrapped = tryRun(() => { throw new Error('fail'); });
             assert.strictEqual(wrapped(), undefined);
+            // tryRun 把错误报成遥测，根钩子会因此判失败；这里断言并取走它。
+            const errors = takeRuntimeErrors();
+            assert.strictEqual(errors.length, 1);
+            assert.ok(errorText(errors[0]).includes('fail'), errorText(errors[0]));
         });
 
         it('catches async errors and returns undefined', async function () {
             const wrapped = tryRun(async () => { throw new Error('async fail'); });
             const result = await wrapped();
             assert.strictEqual(result, undefined);
+            const errors = takeRuntimeErrors();
+            assert.strictEqual(errors.length, 1);
+            assert.ok(errorText(errors[0]).includes('async fail'), errorText(errors[0]));
         });
     });
 
