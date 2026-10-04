@@ -50,6 +50,29 @@ function onChangeWorkspaceConfiguration(e: vscode.ConfigurationChangeEvent): voi
     }
 }
 
+/**
+ * The `.mod` file the extension works from: the `modFile` setting when set, else the first `.mod`
+ * in the first workspace folder that has one. Undefined when there is neither; the file is not
+ * checked to exist here.
+ */
+export async function getSelectedModFileUri(): Promise<vscode.Uri | undefined> {
+    const conf = getConfiguration();
+    if (conf.modFile !== '') {
+        return fileOrUriStringToUri(conf.modFile);
+    }
+
+    if (vscode.workspace.workspaceFolders) {
+        for (const workspaceFolder of vscode.workspace.workspaceFolders) {
+            const mods = await workspaceModFilesCache.get(workspaceFolder.uri.toString());
+            if (mods.length > 0) {
+                return mods[0];
+            }
+        }
+    }
+
+    return undefined;
+}
+
 async function checkAndUpdateModFileStatus(modFile: vscode.Uri | undefined): Promise<void> {
     if (modFile === undefined) {
         updateSelectedModFileStatus(undefined);

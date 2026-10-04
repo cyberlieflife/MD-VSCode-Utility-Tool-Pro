@@ -142,6 +142,21 @@
 						"maximum": 16,
 						"description": "%hoi4modutilities.imageDecodeWorkers.desc%"
 					},
+					"mdHoi4Utilities.parentModPaths": {
+						"title": "%hoi4modutilities.parentModPaths.title%",
+						"type": "array",
+						"default": [],
+						"items": {
+							"type": "string"
+						},
+						"description": "%hoi4modutilities.parentModPaths.desc%"
+					},
+					"mdHoi4Utilities.userDataPath": {
+						"title": "%hoi4modutilities.userDataPath.title%",
+						"type": "string",
+						"default": "",
+						"description": "%hoi4modutilities.userDataPath.desc%"
+					},
 					"mdHoi4Utilities.worldMapRetainContextWhenHidden": {
 						"title": "World map: keep webview in memory when hidden",
 						"type": "boolean",

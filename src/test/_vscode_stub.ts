@@ -24,9 +24,16 @@ function buildStub() {
         file(p: string) {
             const fsPath = String(p);
             return { fsPath, path: '/' + fsPath.replace(/\\/g, '/'), scheme: 'file', toString: () => 'file://' + fsPath };
-        },
-        parse(v: string) {
-            return { fsPath: v, path: v, scheme: 'file', toString: () => v };
+        },        parse(v: string) {
+            // 与真实 API 一致：'file://' 前缀不属于 fsPath。解析往返（toString → parse）是生产代码
+            // 常见的做法（缓存键就是 URI 字符串），旧的最小实现会让 fsPath 带上前缀。
+            let fsPath = String(v);
+            let path = fsPath;
+            if (fsPath.startsWith('file://')) {
+                fsPath = fsPath.slice('file://'.length);
+                path = '/' + fsPath;
+            }
+            return { fsPath, path, scheme: 'file', toString: () => v };
         },
         joinPath(base: any, ...pathSegments: string[]) {
             const basePath = (base && base.fsPath) || '';
@@ -113,6 +120,18 @@ function buildStub() {
     function Position(this: any, line: number, character: number) { this.line = line; this.character = character; }
     function Range(this: any, s: any, e: any) { this.start = s; this.end = e; }
 
+    // Real VS Code's Disposable only wraps a cleanup function; code that builds one directly (the
+    // parent-mods listener set does) needs the constructor here.
+    class Disposable {
+        constructor(private readonly callOnDispose?: () => unknown) {}
+        dispose(): void {
+            this.callOnDispose?.();
+        }
+        static from(...items: { dispose(): unknown }[]): Disposable {
+            return new Disposable(() => items.forEach(item => item.dispose()));
+        }
+    }
+
     class InlayHint {
         position: any;
         label: any;
@@ -145,7 +164,7 @@ function buildStub() {
             public delete(_uri: any, range: any) { this.ops.push({ kind: 'delete', range }); }
             public replace(_uri: any, range: any, text: string) { this.ops.push({ kind: 'replace', range, text }); }
         },
-        Disposable: { from: (...d: any[]) => ({ dispose: () => d.forEach(x => x && x.dispose && x.dispose()) }) },
+        Disposable,
         // Event semantics match the real vscode API: `event(cb)` registers the listener and
         // returns a disposable, `fire` invokes the registered listeners. The previous stub
         // dropped listeners, which made event-firing code paths (e.g. gfxindex build

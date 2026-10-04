@@ -12,6 +12,7 @@ import { UserError, memoizeWithTtl } from './common';
 import type * as AdmZip from 'adm-zip';
 import { Hoi4FsSchema } from '../constants';
 import { trimStart } from 'lodash';
+import { getParentModUris } from './parentmods';
 
 const dlcZipPathsCache = new PromiseCache({
     factory: getDlcZipPaths,
@@ -137,11 +138,17 @@ export function invalidateFileDiscoveryCache(): void {
  * Which of the mod / parent mod / HOI4 / DLC sources a lookup looks in.
  *
  * `mod` and `hoi4` select which roots a relative path is resolved against; the opened workspace
- * folders are searched as part of the mod half (`mod: false` skips them too).
+ * folders are searched as part of the mod half (`mod: false` skips them too). The parent-mod half
+ * sits between the two: what the workspace does not override comes from the mods this one extends,
+ * before the game's own files.
  */
 export interface FileSourceOptions {
     mod?: boolean;
     hoi4?: boolean;
+    /** false 时跳过父模组层（例如只查本体文件的调用）。 */
+    parent?: boolean;
+    /** 覆盖默认的父模组列表；省略时取 getParentModUris()（设置 + 解析出的依赖）。 */
+    parentModUris?: readonly vscode.Uri[];
 }
 
 export function getFilePathFromMod(relativePath: string): Promise<vscode.Uri | undefined> {
@@ -155,15 +162,22 @@ export function getFilePathFromMod(relativePath: string): Promise<vscode.Uri | u
 // order don't split the cache. Cleared by clearDlcZipCache on folder/config change.
 const getFilePathMemo = memoizeWithTtl(
     (key: string): Promise<vscode.Uri | undefined> => {
-        const [relativePath, mod, hoi4] = JSON.parse(key) as [string, boolean | null, boolean | null];
-        return getFilePathFromModOrHOI4Impl(relativePath, { mod: mod ?? undefined, hoi4: hoi4 ?? undefined });
+        const [relativePath, mod, hoi4, parent, parentModUris] = JSON.parse(key) as [string, boolean | null, boolean | null, boolean | null, string[] | null];
+        return getFilePathFromModOrHOI4Impl(relativePath, {
+            mod: mod ?? undefined,
+            hoi4: hoi4 ?? undefined,
+            parent: parent ?? undefined,
+            parentModUris: parentModUris === null ? undefined : parentModUris.map(uri => vscode.Uri.parse(uri)),
+        });
     },
     { ttl: 500, maxSize: 1000 },
 );
 
 export function getFilePathFromModOrHOI4(relativePath: string, options?: FileSourceOptions): Promise<vscode.Uri | undefined> {
     const normalizedPath = relativePath.replace(/\/\/+|\\+/g, '/');
-    return getFilePathMemo(JSON.stringify([normalizedPath, options?.mod ?? null, options?.hoi4 ?? null]));
+    // 父模组列表也是解析结果的一部分：同一路径在不同父模组集合下可能落在不同文件上。
+    const parentModUris = options?.parentModUris?.map(uri => uri.toString()) ?? null;
+    return getFilePathMemo(JSON.stringify([normalizedPath, options?.mod ?? null, options?.hoi4 ?? null, options?.parent ?? null, parentModUris]));
 }
 
 async function getFilePathFromModOrHOI4Impl(relativePath: string, options?: FileSourceOptions): Promise<vscode.Uri | undefined> {
@@ -192,6 +206,17 @@ async function getFilePathFromModOrHOI4Impl(relativePath: string, options?: File
 
         if (absolutePath !== undefined) {
             return absolutePath;
+        }
+
+        // Then the mods this one extends, in setting order. Before the replace_path check: that
+        // blocks vanilla only, a submod's replace_path never hides its parent's files.
+        if (options?.parent !== false) {
+            for (const parent of options?.parentModUris ?? getParentModUris()) {
+                const findPath = vscode.Uri.joinPath(parent, relativePath);
+                if (await isFile(findPath)) {
+                    return findPath;
+                }
+            }
         }
 
         const replacePaths = await getReplacePaths();
@@ -425,24 +450,45 @@ async function parseHoi4FileCachedImpl(relativePath: string, options: ParseOptio
     return parseCache.get(JSON.stringify([relativePath, options ?? null, resolve]));
 }
 
-// Short-lived cache of directory listings. listFilesFromModOrHOI4 walks the workspace, the HOI4
-// install and every DLC on each call, and a single preview render calls it many times in quick
-// succession (e.g. the inlay scan over interface/). A small TTL collapses those repeated walks
-// while staying fresh enough to pick up new files within a couple of seconds.
+// Short-lived cache of directory listings. listFilesFromModOrHOI4 walks the workspace, the parent
+// mods, the HOI4 install and every DLC on each call, and a single preview render calls it many times
+// in quick succession (e.g. the inlay scan over interface/). A small TTL collapses those repeated
+// walks while staying fresh enough to pick up new files within a couple of seconds.
 const fileListCache = new PromiseCache<string[]>({
-    factory: key => listFilesFromModOrHOI4Impl(JSON.parse(key)[0], JSON.parse(key)[1]),
+    factory: key => {
+        const [relativePath, options] = JSON.parse(key) as [string, (Omit<ListFilesOptions, 'parentModUris'> & { parentModUris?: string[] | null }) | null];
+        if (options === null) {
+            return listFilesFromModOrHOI4Impl(relativePath, null);
+        }
+        const { parentModUris, ...rest } = options;
+        if (parentModUris === null || parentModUris === undefined) {
+            return listFilesFromModOrHOI4Impl(relativePath, rest);
+        }
+        // 缓存的键里父模组以字符串保存（Uri 序列化成 {} 会丢掉路径），这里还原。
+        return listFilesFromModOrHOI4Impl(relativePath, { ...rest, parentModUris: parentModUris.map(uri => vscode.Uri.parse(uri)) });
+    },
     life: 3 * 1000,
     maxSize: 300,
 });
 
-export function listFilesFromModOrHOI4(relativePath: string, options?: { mod?: boolean, hoi4?: boolean, recursively?: boolean }): Promise<string[]> {
-    return fileListCache.get(JSON.stringify([relativePath, options ?? null]));
+/** 目录列举的选项：源选择外加上是否递归。 */
+export interface ListFilesOptions extends FileSourceOptions {
+    recursively?: boolean;
 }
 
-async function listFilesFromModOrHOI4Impl(relativePath: string, options?: { mod?: boolean, hoi4?: boolean, recursively?: boolean } | null): Promise<string[]> {
+export function listFilesFromModOrHOI4(relativePath: string, options?: ListFilesOptions): Promise<string[]> {
+    const cacheOptions = options?.parentModUris
+        ? { ...options, parentModUris: options.parentModUris.map(uri => uri.toString()) }
+        : options;
+    return fileListCache.get(JSON.stringify([relativePath, cacheOptions ?? null]));
+}
+
+async function listFilesFromModOrHOI4Impl(relativePath: string, options?: ListFilesOptions | null): Promise<string[]> {
     const readFunction = options?.recursively ? readDirFilesRecursively : readDirFiles;
     relativePath = relativePath.replace(/\/\/+|\\+/g, '/');
     const result: string[] = [];
+    // 访问过父模组目录后，两个半边可能给出同一个文件名（工作区覆盖了父模组的那份），早退路径也要去重。
+    let visitedParent = false;
 
     if (options?.mod !== false) {
         // Find in opened workspace folders
@@ -450,6 +496,19 @@ async function listFilesFromModOrHOI4Impl(relativePath: string, options?: { mod?
             for (const folder of vscode.workspace.workspaceFolders) {
                 const findPath = vscode.Uri.joinPath(folder.uri, relativePath);
                 if (await isDirectory(findPath)) {
+                    try {
+                        result.push(...await readFunction(findPath));
+                    } catch(e) {}
+                }
+            }
+        }
+
+        // Find in the mods this one extends
+        if (options?.parent !== false) {
+            for (const parent of options?.parentModUris ?? getParentModUris()) {
+                const findPath = vscode.Uri.joinPath(parent, relativePath);
+                if (await isDirectory(findPath)) {
+                    visitedParent = true;
                     try {
                         result.push(...await readFunction(findPath));
                     } catch(e) {}
@@ -468,7 +527,9 @@ async function listFilesFromModOrHOI4Impl(relativePath: string, options?: { mod?
     }
 
     if (options?.hoi4 === false) {
-        return result;
+        // Once a parent folder was visited the two halves can name the same file, so the early exit
+        // deduplicates too -- otherwise a name the workspace overrides would be listed twice.
+        return visitedParent ? [...new Set(result)] : result;
     }
 
     // Find in HOI4 install path
