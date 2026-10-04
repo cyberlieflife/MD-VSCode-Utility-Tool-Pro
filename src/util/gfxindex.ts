@@ -10,6 +10,8 @@ import { localize } from './i18n';
 import { uniq } from 'lodash';
 import { sendEvent } from './telemetry';
 import { Logger } from './logger';
+import { getParentModUris, onDidChangeParentMods } from './parentmods';
+import { whenModDependenciesSettled } from './moddependencies';
 import { loadCacheManifest, loadCacheData, saveCacheManifest, saveCacheData, getFileMtimes, computeStaleFiles, IndexTimer } from './indexCache';
 
 interface GfxIndexItem {
@@ -18,6 +20,8 @@ interface GfxIndexItem {
 
 const globalGfxIndex: Record<string, GfxIndexItem | undefined> = {};
 let workspaceGfxIndex: Record<string, GfxIndexItem | undefined> = {};
+// 每个父模组一份索引，按设置/依赖里的顺序排列；查找时工作区覆盖它、它覆盖本体。
+let parentGfxIndexes: Record<string, GfxIndexItem | undefined>[] = [];
 
 // Reverse map for O(1) removal: file path -> sprite names from that file
 const workspaceGfxFileToKeys = new Map<string, string[]>();
@@ -59,6 +63,7 @@ export function ensureGfxIndex(): Promise<void> {
         const estimatedSize: [number] = [0];
         gfxIndexBuildPromise = Promise.all([
             buildGlobalGfxIndex(estimatedSize),
+            buildParentGfxIndex(estimatedSize),
             buildWorkspaceGfxIndex(estimatedSize),
         ]).then(
             () => {
@@ -89,6 +94,17 @@ export function registerGfxIndex(): vscode.Disposable {
         disposables.push(vscode.workspace.onDidCreateFiles(onCreateFiles));
         disposables.push(vscode.workspace.onDidDeleteFiles(onDeleteFiles));
         disposables.push(vscode.workspace.onDidRenameFiles(onRenameFiles));
+        // 父模组名单变化（设置、`.mod` 依赖或工作区文件夹）：重建这半个索引，让新父模组的精灵
+        // 立刻可查；已开的预览靠 built 通知重新解析之前 miss 掉的图标。
+        disposables.push(onDidChangeParentMods(e => {
+            if (!e.folders) {
+                return;
+            }
+            const estimatedSize: [number] = [0];
+            void buildParentGfxIndex(estimatedSize).then(() => {
+                gfxIndexBuiltEmitter.fire();
+            }, (e2) => error(e2));
+        }));
     }
 
     return vscode.Disposable.from(...disposables);
@@ -105,7 +121,12 @@ export async function getGfxContainerFile(gfxName: string | undefined): Promise<
     // file", see getSpriteByGfxName) and the sprite is lost for the panel's lifetime. Awaiting the
     // settled promise costs one microtask.
     await ensureGfxIndex();
-    return (globalGfxIndex[gfxName] ?? workspaceGfxIndex[gfxName])?.file;
+    // The game's order: the working mod, then the mods it extends, then vanilla.
+    return (
+        workspaceGfxIndex[gfxName] ??
+        parentGfxIndexes.map(index => index[gfxName]).find(item => item !== undefined) ??
+        globalGfxIndex[gfxName]
+    )?.file;
 }
 
 export async function getGfxContainerFiles(gfxNames: (string | undefined)[]): Promise<string[]> {
@@ -124,7 +145,11 @@ export async function getIndexedGfxNames(): Promise<string[]> {
     }
 
     await ensureGfxIndex();
-    return uniq([...Object.keys(globalGfxIndex), ...Object.keys(workspaceGfxIndex)]);
+    return uniq([
+        ...Object.keys(workspaceGfxIndex),
+        ...parentGfxIndexes.flatMap(index => Object.keys(index)),
+        ...Object.keys(globalGfxIndex),
+    ]);
 }
 
 const GFX_CACHE_VERSION = 2;
@@ -138,6 +163,26 @@ async function buildGlobalGfxIndex(estimatedSize: [number]): Promise<void> {
     const options = { mod: false, recursively: true };
     const gfxFiles = (await listFilesFromModOrHOI4('interface', options)).filter(f => f.toLocaleLowerCase().endsWith('.gfx')).map(f => 'interface/' + f);
     await buildGfxIndexWithCache('gfxIndex.global', gfxFiles, globalGfxIndex, null, options, estimatedSize);
+}
+
+// 父模组各占一份索引：查找顺序是工作区覆盖父模组、父模组覆盖本体，而每个父模组一份索引才能让
+// 各自的缓存键（列举 + mtime）互不干扰；名单在设置或 `.mod` 依赖变化时重建。
+async function buildParentGfxIndex(estimatedSize: [number]): Promise<void> {
+    // 依赖解析可能还在进行；此时列举只会看到显式设置的那些父模组，缓存命名空间也不会再出现。
+    await whenModDependenciesSettled();
+    const parents = getParentModUris();
+    parentGfxIndexes = parents.map(() => ({}));
+    if (parents.length === 0) {
+        // 没有父模组就没有这半个索引：不列举、不写缓存。
+        return;
+    }
+    await Promise.all(parents.map(async (parent, index) => {
+        const options = { mod: false, hoi4: false, recursively: true, parentModUris: [parent] as vscode.Uri[] };
+        const gfxFiles = (await listFilesFromModOrHOI4('interface', options))
+            .filter(f => f.toLocaleLowerCase().endsWith('.gfx'))
+            .map(f => 'interface/' + f);
+        await buildGfxIndexWithCache(`gfxIndex.parent.${index}`, gfxFiles, parentGfxIndexes[index]!, null, options, estimatedSize);
+    }));
 }
 
 async function buildWorkspaceGfxIndex(estimatedSize: [number]): Promise<void> {

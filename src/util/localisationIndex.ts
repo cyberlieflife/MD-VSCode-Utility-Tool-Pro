@@ -8,15 +8,21 @@ import { sendEvent } from './telemetry';
 import { Logger } from "./logger";
 import { ConfigurationKey } from '../constants';
 import { loadCacheManifest, loadCacheData, saveCacheManifest, saveCacheData, getFileMtimes, computeStaleFiles, IndexTimer } from './indexCache';
+import { getParentModUris, onDidChangeParentMods } from './parentmods';
+import { whenModDependenciesSettled } from './moddependencies';
 
 type LocalisationData = Record<string, Record<string, string>>;
 
 const globalLocalisationIndex: LocalisationData = {};
 let workspaceLocalisationIndex: LocalisationData = {};
+// 每个父模组一份，按设置/依赖里的顺序；查找时工作区覆盖它、它覆盖本体。
+let parentLocalisationIndexes: LocalisationData[] = [];
 
 // Tracks which localisation keys came from which file, per language
 // langKey -> filePath -> Set<localisationKey>
 const workspaceLocalisationFileMap: Record<string, Record<string, Set<string>>> = {};
+// 父模组半区的平行表，只在重建时按文件回退用。
+const parentLocalisationFileMaps: Record<string, Record<string, Set<string>>>[] = [];
 
 // Mapping of language ISO codes to yml file language suffixes
 const localeMapping: Record<string, string> = {
@@ -60,6 +66,17 @@ export function registerLocalisationIndex(): vscode.Disposable {
         disposables.push(vscode.workspace.onDidCreateFiles(onCreateFiles));
         disposables.push(vscode.workspace.onDidDeleteFiles(onDeleteFiles));
         disposables.push(vscode.workspace.onDidRenameFiles(onRenameFiles));
+        // 父模组名单变化：只重建这半个索引（缓存键按父模组序号分开，重建不牵动工作区与本体）。
+        disposables.push(onDidChangeParentMods(e => {
+            if (!e.folders) {
+                return;
+            }
+            const estimatedSize: [number] = [0];
+            void buildParentLocalisationIndexes(estimatedSize, buildPriority).then(
+                () => undefined,
+                (e2) => Logger.error(`[Localisation] rebuilding the parent half failed: ${String(e2)}`),
+            );
+        }));
     }
 
     return vscode.Disposable.from(...disposables);
@@ -163,6 +180,7 @@ function buildLocalisationIndexes(priority: BuildPriority): Promise<void> {
     const estimatedSize: [number] = [0];
     const task = Promise.all([
         buildGlobalLocalisationIndex(estimatedSize, priority),
+        buildParentLocalisationIndexes(estimatedSize, priority),
         buildWorkspaceLocalisationIndex(estimatedSize, priority),
     ]).then(() => {
         localisationIndexSize[0] = estimatedSize[0];
@@ -204,8 +222,10 @@ function lookupLocalisedText(localisationKey: string, language: string): string 
 
     return globalLocalisationIndex[langKey]?.[localisationKey] ||
         workspaceLocalisationIndex[langKey]?.[localisationKey] ||
+        parentLocalisationIndexes.map(index => index[langKey]?.[localisationKey]).find(value => value) ||
         globalLocalisationIndex[defaultLangKey]?.[localisationKey] ||
-        workspaceLocalisationIndex[defaultLangKey]?.[localisationKey];
+        workspaceLocalisationIndex[defaultLangKey]?.[localisationKey] ||
+        parentLocalisationIndexes.map(index => index[defaultLangKey]?.[localisationKey]).find(value => value);
 }
 
 export function getLocalisedText(localisationKey: string | undefined, language: string): string | undefined {
@@ -249,6 +269,25 @@ async function buildWorkspaceLocalisationIndex(estimatedSize: [number], priority
     const options = {mod: true, hoi4: false, recursively: true};
     const localisationFiles = (await listFilesFromModOrHOI4('localisation', options)).filter(f => localisationFileFilter.test(f)).map(f => 'localisation/' + f);
     await buildLocalisationIndexWithCache('localisationIndex.workspace', localisationFiles, workspaceLocalisationIndex, workspaceLocalisationFileMap, options, estimatedSize, priority);
+}
+
+// 父模组各占一份索引，理由与 GFX 索引相同：工作区覆盖父模组、父模组覆盖本体，各自一份才能让缓存键
+// 互不干扰。名单变化时只重建这半个索引。
+async function buildParentLocalisationIndexes(estimatedSize: [number], priority: BuildPriority): Promise<void> {
+    await whenModDependenciesSettled();
+    const parents = getParentModUris();
+    parentLocalisationIndexes = parents.map(() => ({}));
+    parentLocalisationFileMaps.length = parents.length;
+    if (parents.length === 0) {
+        // 没有父模组就没有这半个索引：不列举、不写缓存。
+        return;
+    }
+    await Promise.all(parents.map(async (parent, index) => {
+        const options = { mod: false, hoi4: false, recursively: true, parentModUris: [parent] as vscode.Uri[] };
+        const localisationFiles = (await listFilesFromModOrHOI4('localisation', options)).filter(f => localisationFileFilter.test(f)).map(f => 'localisation/' + f);
+        parentLocalisationFileMaps[index] = {};
+        await buildLocalisationIndexWithCache(`localisationIndex.parent.${index}`, localisationFiles, parentLocalisationIndexes[index]!, parentLocalisationFileMaps[index]!, options, estimatedSize, priority);
+    }));
 }
 
 // Runs the file-parse phase. Fast: all files in parallel (8-way, like the original eager build).
