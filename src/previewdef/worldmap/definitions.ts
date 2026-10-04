@@ -159,6 +159,10 @@ interface WarningRiver extends WarningSourceBase {
 export interface Country {
     tag: string;
     color: number;
+    // Localised country name (falls back to undefined when the localisation has no entry).
+    localisedName?: string;
+    // The country's definition file, for opening it from the map.
+    file: string;
 }
 
 export interface Terrain {

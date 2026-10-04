@@ -4,9 +4,12 @@ import { readFileFromModOrHOI4AsJson } from "../../../util/fileloader";
 import { error } from "../../../util/debug";
 import { FolderLoader, FileLoader, Loader, LoadResult, LoadResultOD, mergeInLoadResult, convertColor } from "./common";
 import { localize } from "../../../util/i18n";
+import { ensureLocalisationIndex, getLocalisedTextUnchecked } from "../../../util/localisationIndex";
+import { isoBySettingName } from "../../../util/locales";
 import { LoaderSession } from "../../../util/loader/loader";
 import { flatMap } from "lodash";
 import { Tag, countryTagsFolder, loadCountryTagsFile } from "../../../util/countrytags";
+import * as vscode from "vscode";
 
 interface CountryFile {
     color: DetailValue<Enum>;
@@ -85,6 +88,14 @@ export class CountriesLoader extends Loader<Country[]> {
         const countries = countriesResult.map(r => r.result).filter((c): c is Country => c !== undefined);
 
         await applyColorFromColorTxt(countries, colorsFileResult.result);
+
+        // Localised names for the country labels and tooltips; the game's localisation keys a country
+        // by its bare tag. The index is built on demand and a missing translation keeps the tag.
+        await ensureLocalisationIndex();
+        const language = targetLocalisationLanguage();
+        for (const country of countries) {
+            country.localisedName = getLocalisedTextUnchecked(country.tag, language);
+        }
 
         const allResults = [tagsResult, colorsFileResult, ...countriesResult];
 
@@ -178,6 +189,7 @@ async function loadCountry(tag: string, countryFile: string): Promise<Country | 
         return {
             tag,
             color: convertColor(data.color),
+            file: countryFile,
         };
     } catch (e) {
         error(e);
@@ -192,4 +204,11 @@ async function applyColorFromColorTxt(countries: Country[], colorsFile: HOIParti
             country.color = convertColor(colorIncolors?._value.color);
         }
     }
+}
+
+// The language to translate into: the preview-localisation setting wins over the VSCode UI
+// language, mirroring getLocalisedTextQuick in util/localisationIndex.
+function targetLocalisationLanguage(): string {
+    const previewLocalisation = vscode.workspace.getConfiguration('mdHoi4Utilities').get<string>('previewLocalisation');
+    return (previewLocalisation && isoBySettingName[previewLocalisation]) || vscode.env.language;
 }

@@ -22,6 +22,7 @@ fromEvent(window, 'load').subscribe(function() {
     topBar.colorSet$.subscribe(setStateForKey('colorSet'));
     topBar.selectedProvinceId$.subscribe(setStateForKey('selectedProvinceId'));
     topBar.selectedStateId$.subscribe(setStateForKey('selectedStateId'));
+    topBar.selectedCountryTag$.subscribe(setStateForKey('selectedCountryTag'));
     topBar.selectedStrategicRegionId$.subscribe(setStateForKey('selectedStrategicRegionId'));
     topBar.selectedSupplyAreaId$.subscribe(setStateForKey('selectedSupplyAreaId'));
     topBar.warningFilter.selectedValues$.subscribe(setStateForKey('warningFilter'));

@@ -18,6 +18,7 @@ const waterNoWarning = 0x20E020;
 const renderScaleByViewMode: Record<ViewMode, { edge: number, labels: number }> = {
     province: { edge: 2, labels: 3 },
     state: { edge: 1, labels: 1 },
+    country: { edge: 0.25, labels: 0.25 },
     strategicregion: { edge: 0.25, labels: 0.25 },
     supplyarea: { edge: 0.5, labels: 1 },
     warnings: { edge: 2, labels: 3 },
@@ -198,6 +199,9 @@ export class Renderer extends Subscriber {
                 } else {
                     this.renderStateHoverSelection(this.loader.worldMap);
                 }
+                break;
+            case 'country':
+                this.renderCountryHoverSelection(this.loader.worldMap);
                 break;
             case 'strategicregion':
                 if (this.topBar.editMode$.value) {
@@ -434,6 +438,31 @@ export class Renderer extends Subscriber {
                 context.fillStyle = toColor(getHighConstrastColor(provinceColor));
                 const labelPosition = province.centerOfMass;
                 context.fillText(province.id.toString(), viewPoint.convertX(labelPosition.x + xOffset), viewPoint.convertY(labelPosition.y));
+            }
+        } else if (viewMode === 'country') {
+            const renderedCountries: Record<string, boolean> = {};
+            const showLocalised = topBar.display.selectedValues$.value.includes('localisedlabel');
+            for (const province of renderedProvinces) {
+                const state = worldMap.getStateById(provinceToState[province.id]);
+                const owner = state?.owner;
+                if (owner !== undefined && !renderedCountries[owner]) {
+                    renderedCountries[owner] = true;
+                    const region = worldMap.getCountryRegionByTag(owner);
+                    if (region) {
+                        const labelPosition = region.centerOfMass;
+                        const provinceAtLabel = worldMap.getProvinceByPosition(labelPosition.x, labelPosition.y);
+                        const provinceColor = getColorByColorSet(colorSet, provinceAtLabel ?? province, worldMap, renderContext);
+                        context.fillStyle = toColor(getHighConstrastColor(provinceColor));
+                        const country = worldMap.getCountryByTag(owner);
+                        if (country?.localisedName && showLocalised) {
+                            const fontSize = 10;
+                            context.fillText(country.localisedName, viewPoint.convertX(labelPosition.x + xOffset), viewPoint.convertY(labelPosition.y) - fontSize / 2);
+                            context.fillText(owner, viewPoint.convertX(labelPosition.x + xOffset), viewPoint.convertY(labelPosition.y) + fontSize / 2);
+                        } else {
+                            context.fillText(owner, viewPoint.convertX(labelPosition.x + xOffset), viewPoint.convertY(labelPosition.y));
+                        }
+                    }
+                }
             }
         } else {
             const renderedRegions: Record<number, boolean> = {};
@@ -860,6 +889,15 @@ ${worldMap.getProvinceWarnings(province, stateObject, strategicRegion, supplyAre
         hover && this.isTooltipVisible() && this.renderStateTooltip(hover, worldMap);
     }
 
+    private renderCountryHoverSelection(worldMap: FEWorldMap) {
+        const hoverTag = this.topBar.hoverCountryTag$.value;
+        const selectedTag = this.topBar.selectedCountryTag$.value;
+        const hover = hoverTag === undefined ? undefined : worldMap.getCountryRegionByTag(hoverTag);
+        const selected = selectedTag === undefined ? undefined : worldMap.getCountryRegionByTag(selectedTag);
+        this.renderHoverSelection(worldMap, hover, selected);
+        hover && hoverTag !== undefined && this.isTooltipVisible() && this.renderCountryTooltip(hoverTag, worldMap);
+    }
+
     private renderStrategicRegionHoverSelection(worldMap: FEWorldMap) {
         const hover = worldMap.getStrategicRegionById(this.topBar.hoverStrategicRegionId$.value);
         this.renderHoverSelection(worldMap, hover, worldMap.getStrategicRegionById(this.topBar.selectedStrategicRegionId$.value));
@@ -930,6 +968,20 @@ ${worldMap.getStateWarnings(state, supplyArea).map(v => '|r|' + v).join('\n')}`,
             (x, y) => {
                 Renderer.drawFactoryResourceRows(this.backCanvasContext, state, Renderer.getFactoryResourceRowsLayout(state, Renderer.TOOLTIP_ICON_ROW_SCALE, Renderer.TOOLTIP_ICON_ROW_LABEL_WIDTH), x, y, Renderer.TOOLTIP_ICON_ROW_SCALE, Renderer.TOOLTIP_ICON_ROW_LABEL_WIDTH);
             });
+    }
+
+    private renderCountryTooltip(tag: string, worldMap: FEWorldMap) {
+        const states: number[] = [];
+        worldMap.forEachState(state => {
+            if (state.owner === tag) {
+                states.push(state.id);
+            }
+        });
+
+        const country = worldMap.getCountryByTag(tag);
+        this.renderTooltip(`
+${feLocalize('worldmap.tooltip.country', 'Country')}=${tag}${country?.localisedName ? ` (${country.localisedName})` : ''}
+${feLocalize('worldmap.tooltip.states', 'States')}=${states.join(',')}`);
     }
 
     private renderStrategicRegionTooltip(strategicRegion: StrategicRegion, worldMap: FEWorldMap) {

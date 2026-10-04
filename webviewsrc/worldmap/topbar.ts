@@ -13,7 +13,7 @@ import { showContextMenu, closeContextMenu } from "../util/contextmenu";
 import { openEditStateDialog } from "./editstatedialog";
 import { applyIconState } from "../../src/previewdef/toolbaricons";
 
-export type ViewMode = 'province' | 'state' | 'strategicregion' | 'supplyarea' | 'warnings';
+export type ViewMode = 'province' | 'state' | 'country' | 'strategicregion' | 'supplyarea' | 'warnings';
 export type ColorSet = 'provinceid' | 'provincetype' | 'terrain' | 'country' | 'stateid' | 'manpower' |
     'victorypoint' | 'continent' | 'warnings' | 'strategicregionid' | 'supplyareaid' | 'supplyvalue' | 'resources';
 
@@ -36,6 +36,8 @@ export class TopBar extends Subscriber {
     public selectedProvinceId$: BehaviorSubject<number | undefined>;
     public hoverStateId$: BehaviorSubject<number | undefined>;
     public selectedStateId$: BehaviorSubject<number | undefined>;
+    public hoverCountryTag$: BehaviorSubject<string | undefined>;
+    public selectedCountryTag$: BehaviorSubject<string | undefined>;
     public hoverStrategicRegionId$: BehaviorSubject<number | undefined>;
     public selectedStrategicRegionId$: BehaviorSubject<number | undefined>;
     public hoverSupplyAreaId$: BehaviorSubject<number | undefined>;
@@ -69,6 +71,8 @@ export class TopBar extends Subscriber {
         this.selectedProvinceId$ = new BehaviorSubject<number | undefined>(state.selectedProvinceId ?? undefined);
         this.hoverStateId$ = new BehaviorSubject<number | undefined>(undefined);
         this.selectedStateId$ = new BehaviorSubject<number | undefined>(state.selectedStateId ?? undefined);
+        this.hoverCountryTag$ = new BehaviorSubject<string | undefined>(undefined);
+        this.selectedCountryTag$ = new BehaviorSubject<string | undefined>(state.selectedCountryTag ?? undefined);
         this.hoverStrategicRegionId$ = new BehaviorSubject<number | undefined>(undefined);
         this.selectedStrategicRegionId$ = new BehaviorSubject<number | undefined>(state.selectedStrategicRegionId ?? undefined);
         this.hoverSupplyAreaId$ = new BehaviorSubject<number | undefined>(undefined);
@@ -217,6 +221,14 @@ export class TopBar extends Subscriber {
                     vscode.postMessage<WorldMapMessage>({ command: 'openfile', type: 'state', file: state.file, start: state.token?.start, end: state.token?.end });
                 }
             }
+        } else if (this.viewMode$.value === 'country') {
+            const selected = useHoverValue ? this.hoverCountryTag$.value : this.selectedCountryTag$.value;
+            if (selected) {
+                const country = this.loader.worldMap.getCountryByTag(selected);
+                if (country) {
+                    vscode.postMessage<WorldMapMessage>({ command: 'openfile', type: 'country', file: country.file, start: 0, end: 0 });
+                }
+            }
         } else if (this.viewMode$.value === 'strategicregion') {
             const selected = useHoverValue ? this.hoverStrategicRegionId$.value : this.selectedStrategicRegionId$.value;
             if (selected) {
@@ -245,10 +257,11 @@ export class TopBar extends Subscriber {
             this.openMapItem();
         }));
 
-        this.addSubscription(combineLatest([this.viewMode$, this.selectedProvinceId$, this.selectedStateId$, this.selectedStrategicRegionId$, this.selectedSupplyAreaId$]).subscribe(
-            ([viewMode, selectedProvinceId, selectedStateId, selectedStrategicRegionId, selectedSupplyAreaId]) => {
+        this.addSubscription(combineLatest([this.viewMode$, this.selectedProvinceId$, this.selectedStateId$, this.selectedCountryTag$, this.selectedStrategicRegionId$, this.selectedSupplyAreaId$]).subscribe(
+            ([viewMode, selectedProvinceId, selectedStateId, selectedCountryTag, selectedStrategicRegionId, selectedSupplyAreaId]) => {
                 open.disabled = !((viewMode === 'province' && selectedProvinceId !== undefined) ||
                     (viewMode === 'state' && selectedStateId !== undefined) ||
+                    (viewMode === 'country' && selectedCountryTag !== undefined) ||
                     (viewMode === 'strategicregion' && selectedStrategicRegionId !== undefined) ||
                     (viewMode === 'supplyarea' && selectedSupplyAreaId !== undefined));
             }
@@ -371,6 +384,7 @@ export class TopBar extends Subscriber {
             this.viewMode$,
             this.selectedProvinceId$,
             this.selectedStateId$,
+            this.selectedCountryTag$,
             this.selectedStrategicRegionId$,
             this.selectedSupplyAreaId$,
         ]).subscribe(() => {
@@ -387,12 +401,14 @@ export class TopBar extends Subscriber {
         }));
     }
 
-    private getSelectedItemId(): number | undefined {
+    private getSelectedItemId(): number | string | undefined {
         switch (this.viewMode$.value) {
             case 'province':
                 return this.selectedProvinceId$.value;
             case 'state':
                 return this.selectedStateId$.value;
+            case 'country':
+                return this.selectedCountryTag$.value;
             case 'strategicregion':
                 return this.selectedStrategicRegionId$.value;
             case 'supplyarea':
@@ -410,13 +426,15 @@ export class TopBar extends Subscriber {
         }
         switch (this.viewMode$.value) {
             case 'province':
-                return worldMap.getProvinceById(id) !== undefined;
+                return worldMap.getProvinceById(id as number) !== undefined;
             case 'state':
-                return worldMap.getStateById(id) !== undefined;
+                return worldMap.getStateById(id as number) !== undefined;
+            case 'country':
+                return worldMap.getCountryByTag(id as string) !== undefined;
             case 'strategicregion':
-                return worldMap.getStrategicRegionById(id) !== undefined;
+                return worldMap.getStrategicRegionById(id as number) !== undefined;
             case 'supplyarea':
-                return worldMap.getSupplyAreaById(id) !== undefined;
+                return worldMap.getSupplyAreaById(id as number) !== undefined;
             default:
                 return false;
         }
@@ -428,10 +446,12 @@ export class TopBar extends Subscriber {
         if (id === undefined) {
             return;
         }
-        const region = this.viewMode$.value === 'province' ? worldMap.getProvinceById(id) :
-            this.viewMode$.value === 'state' ? worldMap.getStateById(id) :
-            this.viewMode$.value === 'strategicregion' ? worldMap.getStrategicRegionById(id) :
-            worldMap.getSupplyAreaById(id);
+        // A country has no region of its own: the view centers on the union of its states.
+        const region = this.viewMode$.value === 'province' ? worldMap.getProvinceById(id as number) :
+            this.viewMode$.value === 'state' ? worldMap.getStateById(id as number) :
+            this.viewMode$.value === 'country' ? worldMap.getCountryRegionByTag(id as string) :
+            this.viewMode$.value === 'strategicregion' ? worldMap.getStrategicRegionById(id as number) :
+            worldMap.getSupplyAreaById(id as number);
         if (region && region.boundingBox.h > 0 && region.boundingBox.w > 0) {
             this.viewPoint.centerZone(region.boundingBox);
         }
@@ -488,6 +508,9 @@ export class TopBar extends Subscriber {
                 break;
             case 'state':
                 this.selectedStateId$.next(this.hoverStateId$.value);
+                break;
+            case 'country':
+                this.selectedCountryTag$.next(this.hoverCountryTag$.value);
                 break;
             case 'strategicregion':
                 this.selectedStrategicRegionId$.next(this.hoverStrategicRegionId$.value);
@@ -573,6 +596,7 @@ export class TopBar extends Subscriber {
             this.hoverProvinceId$.next(worldMap.getProvinceByPosition(x, y)?.id);
             this.editModeHoverProvinceId$.next(this.hoverProvinceId$.value);
             this.hoverStateId$.next(this.hoverProvinceId$.value === undefined ? undefined : worldMap.getStateByProvinceId(this.hoverProvinceId$.value)?.id);
+            this.hoverCountryTag$.next(this.hoverStateId$.value === undefined ? undefined : worldMap.getStateById(this.hoverStateId$.value)?.owner);
             this.hoverStrategicRegionId$.next(this.hoverProvinceId$.value === undefined ? undefined : worldMap.getStrategicRegionByProvinceId(this.hoverProvinceId$.value)?.id);
             this.hoverSupplyAreaId$.next(this.hoverStateId$.value === undefined ? undefined : worldMap.getSupplyAreaByStateId(this.hoverStateId$.value)?.id);
         }));
@@ -580,6 +604,7 @@ export class TopBar extends Subscriber {
         this.addSubscription(fromEvent(canvas, 'mouseleave').subscribe(() => {
             this.hoverProvinceId$.next(undefined);
             this.hoverStateId$.next(undefined);
+            this.hoverCountryTag$.next(undefined);
             this.hoverStrategicRegionId$.next(undefined);
             this.hoverSupplyAreaId$.next(undefined);
             this.editModeHoverProvinceId$.next(undefined);
@@ -597,6 +622,9 @@ export class TopBar extends Subscriber {
                     break;
                 case 'state':
                     this.selectedStateId$.next(this.selectedStateId$.value === this.hoverStateId$.value ? undefined : this.hoverStateId$.value);
+                    break;
+                case 'country':
+                    this.selectedCountryTag$.next(this.selectedCountryTag$.value === this.hoverCountryTag$.value ? undefined : this.hoverCountryTag$.value);
                     break;
                 case 'strategicregion':
                     this.selectedStrategicRegionId$.next(this.selectedStrategicRegionId$.value === this.hoverStrategicRegionId$.value ? undefined : this.hoverStrategicRegionId$.value);
@@ -647,6 +675,20 @@ export class TopBar extends Subscriber {
     }
 
     private search(text: string) {
+        // The country view is searched by tag, not by number.
+        if (this.viewMode$.value === 'country') {
+            const tag = text.trim().toUpperCase();
+            if (tag === '') {
+                return;
+            }
+            const region = this.loader.worldMap.getCountryRegionByTag(tag);
+            if (region) {
+                this.selectedCountryTag$.next(tag);
+                this.viewPoint.centerZone(region.boundingBox);
+            }
+            return;
+        }
+
         const number = parseInt(text);
         if (isNaN(number)) {
             return;
@@ -679,6 +721,9 @@ export class TopBar extends Subscriber {
                 break;
             case 'state':
                 placeholder = worldMap.statesCount > 1 ? `1-${worldMap.statesCount - 1}` : '';
+                break;
+            case 'country':
+                placeholder = worldMap.countriesCount > 0 ? 'TAG' : '';
                 break;
             case 'strategicregion':
                 placeholder = worldMap.strategicRegionsCount > 1 ? `1-${worldMap.strategicRegionsCount - 1}` : '';

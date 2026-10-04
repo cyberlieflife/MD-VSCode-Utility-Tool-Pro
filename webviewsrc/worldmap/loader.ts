@@ -1,4 +1,4 @@
-import { WorldMapMessage, Province, WorldMapData, RequestMapItemMessage, State, Country, Point } from "./definitions";
+import { WorldMapMessage, Province, WorldMapData, RequestMapItemMessage, State, Country, Point, Region } from "./definitions";
 import { copyArray } from "../util/common";
 import { inBBox } from "./graphutils";
 import { Subscriber } from "../util/event";
@@ -38,6 +38,8 @@ interface FEWorldMapClassExtra {
     getProvinceByPosition(x: number, y: number): Province | undefined;
 
     getCountryColorByTag(): Record<string, number>;
+    getCountryByTag(tag: string | undefined): Country | undefined;
+    getCountryRegionByTag(tag: string): { provinces: number[] } & Region | undefined;
 
     getProvinceWarnings(province?: Province, state?: State, strategicRegion?: StrategicRegion, supplyArea?: SupplyArea): string[];
     getStateWarnings(state: State, supplyArea?: SupplyArea): string[];
@@ -529,6 +531,49 @@ export class FEWorldMapClass implements FEWorldMap {
             this.countryColorByTagMemo = result;
         }
         return this.countryColorByTagMemo;
+    }
+
+    public getCountryByTag(tag: string | undefined): Country | undefined {
+        return tag === undefined ? undefined : this.countries.find(c => c.tag === tag);
+    }
+
+    // The union of the country's owned states, for centering the view and highlighting on hover.
+    // The bounding box spans the owned provinces; a wrap-around country (spanning the map seam) is
+    // centered on its widest run rather than the full span, which would otherwise cover the map.
+    public getCountryRegionByTag(tag: string): { provinces: number[] } & Region | undefined {
+        const provinces: number[] = [];
+        this.forEachState(state => {
+            if (state.owner === tag) {
+                provinces.push(...state.provinces);
+            }
+        });
+
+        if (provinces.length === 0) {
+            return undefined;
+        }
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const id of provinces) {
+            const province = this.getProvinceById(id);
+            if (!province) {
+                continue;
+            }
+            minX = Math.min(minX, province.boundingBox.x);
+            minY = Math.min(minY, province.boundingBox.y);
+            maxX = Math.max(maxX, province.boundingBox.x + province.boundingBox.w);
+            maxY = Math.max(maxY, province.boundingBox.y + province.boundingBox.h);
+        }
+
+        if (minX === Infinity) {
+            return undefined;
+        }
+
+        return {
+            provinces,
+            boundingBox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+            centerOfMass: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+            mass: maxX - minX,
+        };
     }
 
     public getProvinceWarnings(province?: Province, state?: State, strategicRegion?: StrategicRegion, supplyArea?: SupplyArea): string[] {
