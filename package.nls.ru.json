@@ -78,5 +78,7 @@
     "hoi4modutilities.auditor.includeVanilla.desc": "Проверять также деревья фокусов из папки установки HOI4, не только рабочего мода.",
     "hoi4modutilities.selectmodfile.title": "Выбрать файл мода",
     "hoi4modutilities.enableSupplyArea.title": "Включить зону снабжения",
-    "hoi4modutilities.enableSupplyArea.desc": "Если вы разрабатываете мод для HOI4(version<=1.10). Проверьте этот параметр перед включением зоны снабжения."
+    "hoi4modutilities.enableSupplyArea.desc": "Если вы разрабатываете мод для HOI4(version<=1.10). Проверьте этот параметр перед включением зоны снабжения.",
+    "hoi4modutilities.previewLocalisation.title": "Локализация предпросмотра",
+    "hoi4modutilities.previewLocalisation.desc": "Язык содержимого в предпросмотре дерева событий."
 }
