@@ -433,6 +433,14 @@ function buildEventCard(node: EventGraphEventNode): HTMLDivElement {
     sub.className = "ev-sub";
     sub.textContent = textFor(node.title);
     text.appendChild(sub);
+    // The event's own `desc` text, one line per description block. It reads the same way the title
+    // does: the localisation toggle swaps between the key and the resolved text.
+    for (const description of node.descriptions) {
+        const descLine = document.createElement("div");
+        descLine.className = "ev-desc";
+        descLine.textContent = textFor(description);
+        text.appendChild(descLine);
+    }
     head.appendChild(text);
     card.appendChild(head);
 
@@ -517,6 +525,22 @@ function buildOptionCard(node: EventGraphOptionNode): HTMLDivElement {
 
     if (gated) {
         card.appendChild(conditionPanel(node.trigger, feLocalize("eventtree.optiontrigger", "Option trigger")));
+    }
+
+    // The option's `ai_chance` block decides how likely the AI is to pick it. It is shown verbatim,
+    // like the other script blocks, under the same "show effects" toggle that reveals script bodies.
+    if (showEffects && node.aiChance) {
+        const ai = document.createElement("div");
+        ai.className = "ev-ai-chance";
+        const aiHead = document.createElement("div");
+        aiHead.className = "ev-ai-chance-head";
+        aiHead.textContent = feLocalize("eventtree.aichance", "AI chance");
+        const aiBody = document.createElement("pre");
+        aiBody.className = "ev-ai-chance-body";
+        aiBody.textContent = node.aiChance;
+        ai.appendChild(aiHead);
+        ai.appendChild(aiBody);
+        card.appendChild(ai);
     }
 
     applyEffectsDot(card, node.effectsRef);

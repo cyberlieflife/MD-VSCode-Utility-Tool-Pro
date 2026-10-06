@@ -31,6 +31,8 @@ export interface EventGraphEventNode extends GraphNodeBase {
     eventType: HOIEventType;
     scope: string;
     title: LocText;
+    // 事件的 `desc` 文本（一条或多条），已解析成本地化键与文本；没有时缺省。
+    descriptions: LocText[];
     major: boolean;
     hidden: boolean;
     fireOnlyOnce: boolean;
@@ -49,6 +51,8 @@ export interface EventGraphOptionNode extends GraphNodeBase {
     kind: "option";
     name: LocText;
     trigger: ConditionComplexExpr;
+    // 选项的 `ai_chance` 块原文：AI 选这个选项的权重；未声明时缺省。
+    aiChance?: string;
     // 选项所做的事，作为 EventGraphPayload.effectBlocks 的下标；选项体只有名字与触发条件时缺省。
     effectsRef?: number;
 }

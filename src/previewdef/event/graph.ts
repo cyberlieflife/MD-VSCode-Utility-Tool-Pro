@@ -34,6 +34,8 @@ export interface EventNode {
 export interface OptionNode {
     optionName: string;
     trigger: ConditionComplexExpr;
+    // 选项的 `ai_chance` 块原文；没有时缺省。
+    aiChance: string | undefined;
     children: EventEdge[];
     file: string;
     token: Token | undefined;
@@ -160,6 +162,7 @@ function eventToNode(
         const optionNode: OptionNode = {
             optionName: option.name ?? ":" + source,
             trigger: option.trigger,
+            aiChance: option.aiChance,
             children: [],
             file: event.file,
             token: option.token,
@@ -476,6 +479,7 @@ async function makeEventGraphNode(
         eventType: event.type,
         scope: scopeContext.currentScopeName,
         title: await localise(event.title),
+        descriptions: await Promise.all(event.descriptions.map(d => localise(d))),
         major: event.major,
         hidden: event.hidden,
         fireOnlyOnce: event.fire_only_once,
@@ -517,6 +521,7 @@ async function makeOptionGraphNode(
         kind: "option",
         name: await localise(node.optionName),
         trigger: node.trigger,
+        aiChance: node.aiChance,
         effectsRef: internEffects(node.effects, context),
         nav: node.token
             ? { start: node.token.start, end: node.token.end, file: node.file }

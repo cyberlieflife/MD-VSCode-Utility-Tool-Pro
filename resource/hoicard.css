@@ -174,6 +174,14 @@ body.vscode-high-contrast-light {
 	overflow-wrap: anywhere;
 }
 
+.ev-desc {
+	margin-top: 1px;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--ev-fg-muted);
+	overflow-wrap: anywhere;
+}
+
 .ev-meta {
 	display: flex;
 	flex-wrap: wrap;
@@ -236,5 +244,31 @@ body.vscode-high-contrast-light {
 }
 
 .ev-cond li {
+	overflow-wrap: anywhere;
+}
+
+/* ---------- Option AI chance ---------- */
+
+.ev-ai-chance {
+	padding: 7px 11px 8px;
+	border-top: 1px solid var(--ev-border);
+	background: var(--ev-accent-bg);
+	font-size: 11px;
+	line-height: 1.65;
+	color: var(--ev-fg-muted);
+}
+
+.ev-ai-chance-head {
+	margin-bottom: 3px;
+	font-family: var(--vscode-font-family);
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--ev-fg-muted);
+}
+
+.ev-ai-chance-body {
+	margin: 0;
+	font-family: var(--vscode-editor-font-family, monospace);
+	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 }

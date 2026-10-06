@@ -26,6 +26,7 @@ function eventNode(id: string, overrides: Partial<EventGraphEventNode> = {}): Ev
         eventType: 'country',
         scope: '{event_target}',
         title: { key: id + '.t', text: id + ' title' },
+        descriptions: [],
         major: false,
         hidden: false,
         fireOnlyOnce: false,

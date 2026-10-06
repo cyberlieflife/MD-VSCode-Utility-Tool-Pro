@@ -21,12 +21,14 @@ function hashUpdate(update: unknown): number {
 interface StubOption {
     name?: string;
     trigger?: unknown;
+    aiChance?: string;
     childEvents?: unknown[];
     effects?: EffectTreeNode[];
 }
 
 interface StubEvent {
     id: string;
+    descriptions?: string[];
     options?: StubOption[];
     immediate?: StubOption;
     after?: StubOption;
@@ -41,6 +43,7 @@ function makeOption(option: StubOption | undefined): any {
     return {
         name: option?.name,
         trigger: option?.trigger ?? true,
+        aiChance: option?.aiChance,
         childEvents: option?.childEvents ?? [],
         token: undefined,
         effects: option?.effects ?? [],
@@ -54,6 +57,7 @@ function loaderFor(events: (string | StubEvent)[]): any {
             type: event.type ?? 'country',
             id: event.id,
             title: `${event.id}.t`,
+            descriptions: event.descriptions ?? [],
             namespace: 'test',
             immediate: makeOption(event.immediate),
             after: makeOption(event.after),
@@ -224,6 +228,31 @@ describe('previewdef/event renderEventFile in-place update', () => {
         const parsed = JSON.parse(script![1]!) as EventGraphPayload;
         const ids = parsed.nodes.filter(n => n.kind === 'event').map(n => (n as EventGraphEventNode).eventId);
         assert.ok(ids.includes('test.</script><img src=x>'), ids.join(','));
+    });
+
+    it('carries the event descriptions and the option AI chance into the payload', async () => {
+        const rendered = await renderEventFile(loaderFor([
+            {
+                id: 'test.1',
+                descriptions: ['test.1.desc'],
+                options: [{
+                    name: 'test.1.a',
+                    aiChance: 'base = 10',
+                }],
+            },
+        ]), uri, webview) as LoaderRenderResult;
+
+        const graph = payloadOf(rendered);
+
+        const event = graph.nodes.find(n => n.kind === 'event' && n.eventId === 'test.1') as EventGraphEventNode;
+        assert.ok(event, 'expected the event node');
+        // With the localisation index off the text falls back to the key, which is what a preview
+        // without the index draws; the payload still carries one entry per description block.
+        assert.deepStrictEqual(event.descriptions.map(d => d.key), ['test.1.desc']);
+
+        const option = graph.nodes.find(n => n.kind === 'option') as EventGraphOptionNode;
+        assert.ok(option, 'expected the option node');
+        assert.strictEqual(option.aiChance, 'base = 10');
     });
 
     it('carries the option trigger and the per-call condition into the payload', async () => {

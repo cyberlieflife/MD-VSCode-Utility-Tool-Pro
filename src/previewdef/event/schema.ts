@@ -1,5 +1,6 @@
 import { Node, Token } from "../../hoiformat/hoiparser";
 import { Raw, SchemaDef, convertNodeToJson, HOIPartial, isSymbolNode } from "../../hoiformat/schema";
+import { nodeToString } from "../../hoiformat/tostring";
 import { extractEffectValue, GuardedEffectItem, findGuardedEffectItems, projectEffects } from "../../hoiformat/effect";
 import { ConditionComplexExpr, ConditionItem, conditionToString, extractConditionValue, extractConditionalExprs } from "../../hoiformat/condition";
 import { Scope, ScopeType } from "../../hoiformat/scope";
@@ -19,6 +20,9 @@ export interface HOIEvent {
     type: HOIEventType;
     id: string;
     title: string;
+    // 事件的 `desc = { ... }` 文本：可以是本地化键、字面字符串，或带 `text = ...` 的块。事件可以有
+    // 多条（按国家等条件各写一条），这里保留全部，让卡片按原样列出。
+    descriptions: string[];
     namespace: string;
     picture?: string;
     immediate: HOIEventOption;
@@ -43,6 +47,8 @@ export interface HOIEventOption {
     token: Token | undefined;
     // 选项的 `trigger = { ... }` 门槛：选项出现的条件；未声明时为 true。
     trigger: ConditionComplexExpr;
+    // 选项的 `ai_chance = { ... }` 块原文；AI 选这个选项的权重。未声明时缺省。
+    aiChance: string | undefined;
     // 选项所做的全部内容，供预览悬停展示（与子事件取自同一棵效果树，见 projectEffects）。
     effects: EffectTreeNode[];
 }
@@ -82,7 +88,12 @@ interface EventDef {
     immediate: Raw;
     after: Raw;
     trigger: Raw;
+    desc: Raw[];
     _token: Token;
+}
+
+interface EventDescriptionDef {
+    text: string;
 }
 
 interface MeanTimeToHappen {
@@ -96,7 +107,7 @@ interface MeanTimeToHappen {
 interface EventOptionDef {
     name: string;
     trigger: Raw;
-    ai_chance: string;
+    ai_chance: Raw;
     original_recipient_only: boolean;
     _token: Token;
 }
@@ -113,8 +124,12 @@ interface EventEffectDef {
 const eventOptionDefSchema: SchemaDef<EventOptionDef> = {
     name: "string",
     trigger: "raw",
-    ai_chance: "string",
+    ai_chance: "raw",
     original_recipient_only: "boolean",
+};
+
+const eventDescriptionDefSchema: SchemaDef<EventDescriptionDef> = {
+    text: "string",
 };
 
 const eventDefSchema: SchemaDef<EventDef> = {
@@ -139,6 +154,10 @@ const eventDefSchema: SchemaDef<EventDef> = {
     immediate: "raw",
     after: "raw",
     trigger: "raw",
+    desc: {
+        _innerType: "raw",
+        _type: "array",
+    },
 };
 
 const eventFileSchema: SchemaDef<EventFile> = {
@@ -248,6 +267,11 @@ function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, fi
     const after = convertOption(eventDef.after, scope, conditionExprs);
     const options = eventDef.option.map(o => convertOption(o, scope, conditionExprs));
 
+    const descriptions = eventDef.desc
+        .filter((d): d is Raw => d !== undefined)
+        .map(convertDescription)
+        .filter((d): d is string => d !== undefined);
+
     const meanTimeToHappenBase = eventDef.mean_time_to_happen ?
         Math.floor(eventDef.mean_time_to_happen.factor ??
             eventDef.mean_time_to_happen.base ??
@@ -261,6 +285,7 @@ function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, fi
         type,
         id,
         title,
+        descriptions,
         namespace,
         picture,
         file,
@@ -277,9 +302,24 @@ function convertEvent<T extends HOIEventType>(eventDef: HOIPartial<EventDef>, fi
     };
 }
 
+// `desc` 写成三种形状之一：本地化键（符号）、字面字符串，或 `desc = { text = ... }` 块。三者
+// 都归到一个字符串上；认不出的形状返回 undefined 而不是空串，以免把空描述混进列表。
+function convertDescription(descriptionRaw: Raw): string | undefined {
+    const descriptionNode = descriptionRaw._raw;
+    if (isSymbolNode(descriptionNode.value)) {
+        return descriptionNode.value.name;
+    }
+    if (typeof descriptionNode.value === "string") {
+        return descriptionNode.value;
+    }
+
+    const descriptionDef = convertNodeToJson<EventDescriptionDef>(descriptionNode, eventDescriptionDefSchema);
+    return descriptionDef.text;
+}
+
 function convertOption(optionRaw: Raw | undefined, scope: Scope, conditionExprs: ConditionItem[]): HOIEventOption {
     if (optionRaw === undefined) {
-        return { childEvents: [], token: undefined, trigger: true, effects: [] };
+        return { childEvents: [], token: undefined, trigger: true, aiChance: undefined, effects: [] };
     }
 
     const optionDef = convertNodeToJson<EventOptionDef>(optionRaw._raw, eventOptionDefSchema);
@@ -322,6 +362,7 @@ function convertOption(optionRaw: Raw | undefined, scope: Scope, conditionExprs:
         childEvents: uniqueChildEvents,
         token: optionDef._token,
         trigger,
+        aiChance: optionDef.ai_chance ? nodeToString(optionDef.ai_chance._raw) : undefined,
         effects: projectEffects(effect.effect),
     };
 }
