@@ -116,7 +116,7 @@ export class SupplyNodeLoader extends FileLoader<SupplyNodeLoaderResult> {
 
 async function loadSupplyNodes(provinces: (Province | null | undefined)[], file: string, warnings: WorldMapWarning[]): Promise<SupplyNode[]> {
     const [supplyNodesBuffer] = await readFileFromModOrHOI4(file);
-    const supplyNodesRaw = supplyNodesBuffer.toString().split(/(?:\r\n|\n|\r)/).map(line => line.split(/\s+/).map(v => parseInt(v))).filter(v => v.length >= 2);
+    const supplyNodesRaw = supplyNodesBuffer.toString().split(/(?:\r\n|\n|\r)/).map(line => line.trimStart().split(/\s+/).map(v => parseInt(v))).filter(v => v.length >= 2);
     const supplyNodes = supplyNodesRaw.map((line, index) => {
         const provinceId = line[1];
         if (!provinces[provinceId]) {
