@@ -30,6 +30,29 @@ export function mergeDisplayMigration(display: readonly string[], migrated: bool
 
 export const topBarHeight = 40;
 
+// Which edit action a key press maps to, or undefined for a key the world map does not handle.
+// Modifier-held keys and keys aimed at a field are left to the browser, so typing a letter into the
+// search box never toggles a toolbar button.
+export function editShortcutFor(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'target'>): 'edit' | 'add' | 'link' | undefined {
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+        return undefined;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return undefined;
+    }
+    if (event.code === 'KeyE') {
+        return 'edit';
+    }
+    if (event.code === 'KeyA') {
+        return 'add';
+    }
+    if (event.code === 'KeyS') {
+        return 'link';
+    }
+    return undefined;
+}
+
 export class TopBar extends Subscriber {
     public viewMode$: BehaviorSubject<ViewMode>;
     public colorSet$: BehaviorSubject<ColorSet>;
@@ -352,10 +375,6 @@ export class TopBar extends Subscriber {
         this.addSubscription(this.linkStateStrategicRegion$.subscribe(on => {
             applyIconState(linkButton, 'linkStateStrategicRegion', on, feLocalize);
         }));
-        this.addSubscription(fromEvent(linkButton, 'click').subscribe(e => {
-            e.stopPropagation();
-            this.linkStateStrategicRegion$.next(!this.linkStateStrategicRegion$.value);
-        }));
 
         function enterEditMode() {
             that.editMode$.next(true);
@@ -368,6 +387,36 @@ export class TopBar extends Subscriber {
             editButton.classList.remove('active');
             that.canvas.style.cursor = 'crosshair';
         }
+
+        // The three actions behind the buttons, shared by the click handlers and the keyboard
+        // shortcuts. A shortcut does nothing while its button is disabled or hidden, so pressing A
+        // in a view with nothing to add is a no-op rather than a silent message.
+        const clickEdit = () => {
+            if (editButton.disabled) {
+                return;
+            }
+            if (!that.editMode$.value) {
+                sendEvent('worldmap.entereditmode.' + that.viewMode$.value);
+                enterEditMode();
+            } else {
+                exitEditMode();
+            }
+        };
+
+        const clickAdd = () => {
+            if (addButton.disabled || !that.loader.worldMap) {
+                return;
+            }
+            sendEvent('worldmap.add.' + that.viewMode$.value);
+            vscode.postMessage<WorldMapMessage>({ command: 'addmapitem', type: that.viewMode$.value as 'state' | 'strategicregion' });
+        };
+
+        const clickLinkStateStrategicRegion = () => {
+            if (linkButton.disabled) {
+                return;
+            }
+            that.linkStateStrategicRegion$.next(!that.linkStateStrategicRegion$.value);
+        };
 
         this.addSubscription(this.viewMode$.subscribe(() => {
             exitEditMode();
@@ -384,19 +433,33 @@ export class TopBar extends Subscriber {
 
         this.addSubscription(fromEvent(editButton, 'click').subscribe(e => {
             e.stopPropagation();
-            if (!this.editMode$.value) {
-                sendEvent('worldmap.entereditmode.' + this.viewMode$.value);
-                enterEditMode();
-            } else {
-                exitEditMode();
-            }
+            clickEdit();
         }));
 
         this.addSubscription(fromEvent(addButton, 'click').subscribe(e => {
             e.stopPropagation();
-            if (this.loader.worldMap) {
-                sendEvent('worldmap.add.' + this.viewMode$.value);
-                vscode.postMessage<WorldMapMessage>({ command: 'addmapitem', type: this.viewMode$.value as 'state' | 'strategicregion' });
+            clickAdd();
+        }));
+
+        this.addSubscription(fromEvent(linkButton, 'click').subscribe(e => {
+            e.stopPropagation();
+            clickLinkStateStrategicRegion();
+        }));
+
+        // A / E / S, the shortcut named in each button's tooltip. The mapping (and its guards
+        // against modifier keys and typing into a field) lives in editShortcutFor.
+        this.addSubscription(fromEvent<KeyboardEvent>(window, 'keydown').subscribe(e => {
+            const action = editShortcutFor(e);
+            if (action === undefined) {
+                return;
+            }
+            e.stopPropagation();
+            if (action === 'edit') {
+                clickEdit();
+            } else if (action === 'add') {
+                clickAdd();
+            } else {
+                clickLinkStateStrategicRegion();
             }
         }));
 
