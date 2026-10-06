@@ -39,6 +39,9 @@ export interface GuiTypes {
     // An icon outside any window: a template the game copies from code, like `range_bar` in
     // powerbalanceview.gui.
     icontype: IconType[];
+    // A scrollbar defined at the top level of a gui file, outside any window.
+    scrollbartype: ScrollbarType[];
+    extendedscrollbartype: ExtendedScrollbarType[];
 }
 
 /** A named point, like `focus_spacing` in nationalfocusview.gui, that the game reads by name. */
@@ -54,6 +57,9 @@ export interface ContainerWindowType {
     orientation: Orientation;
     origo: Orientation;
     position: Position;
+    // Where the window sits when the game shows it: a window anchored to the bottom of the screen
+    // carries both the anchor position and the shown one, and the shown one is what the player sees.
+    show_position: Position;
     size: ComplexSize;
     margin: Margin;
     background: Background;
@@ -66,6 +72,13 @@ export interface ContainerWindowType {
     buttontype: ButtonType[];
     checkboxtype: ButtonType[];
     guibuttontype: ButtonType[];
+    editboxtype: EditBoxType[];
+    overlappingelementsboxtype: OverlappingElementsBoxType[];
+    dropdownboxtype: DropdownBoxType[];
+    scrollbartype: ScrollbarType[];
+    extendedscrollbartype: ExtendedScrollbarType[];
+    smoothlistboxtype: SmoothListBoxType[];
+    listboxtype: ListBoxType[];
     _index: number;
     _token: Token;
 }
@@ -112,6 +125,8 @@ export interface InstantTextBoxType {
 
 export interface ButtonType {
     name: string;
+    // The name of another button in the same scrollbar this button is positioned relative to.
+    parent: string;
     orientation: Orientation;
     position: Position;
     spritetype: string;
@@ -122,6 +137,108 @@ export interface ButtonType {
     buttonfont: string;
     scale: number;
     centerposition: boolean;
+    _index: number;
+    _token: Token;
+}
+
+export interface EditBoxType {
+    name: string;
+    orientation: Orientation;
+    position: Position;
+    size: Size;
+    bordersize: Position;
+    font: string;
+    text: string;
+    format: Format;
+    _index: number;
+    _token: Token;
+}
+
+export interface OverlappingElementsBoxType {
+    name: string;
+    orientation: Orientation;
+    position: Position;
+    size: Size;
+    format: Format;
+    spacing: number;
+    first_on_top: boolean;
+    _index: number;
+    _token: Token;
+}
+
+export interface SmoothListBoxType {
+    name: string;
+    orientation: Orientation;
+    position: Position;
+    size: Size;
+    bordersize: Position;
+    spacing: number;
+    clipping: boolean;
+    scrollbartype: string;
+    _index: number;
+    _token: Token;
+}
+
+export interface ListBoxType {
+    name: string;
+    orientation: Orientation;
+    position: Position;
+    size: Size;
+    bordersize: Position;
+    background: string;
+    offset: Position;
+    format: Format;
+    spacing: number;
+    horizontal: boolean;
+    scrollbartype: string;
+    _index: number;
+    _token: Token;
+}
+
+export interface DropdownBoxType {
+    name: string;
+    orientation: Orientation;
+    position: Position;
+    size: Size;
+    containerwindowtype: ContainerWindowType[];
+    icontype: IconType[];
+    instanttextboxtype: InstantTextBoxType[];
+    buttontype: ButtonType[];
+    editboxtype: EditBoxType[];
+    expandbutton: ButtonType;
+    expandedwindow: ContainerWindowType;
+    _index: number;
+    _token: Token;
+}
+
+export interface ScrollbarType {
+    name: string;
+    orientation: Orientation;
+    position: Position;
+    size: Size;
+    // The game writes 0 or 1, not a boolean, to say whether the bar runs sideways.
+    horizontal: number;
+    guibuttontype: ButtonType[];
+    slider: string;
+    track: string;
+    leftbutton: string;
+    rightbutton: string;
+    _index: number;
+    _token: Token;
+}
+
+export interface ExtendedScrollbarType {
+    name: string;
+    orientation: Orientation;
+    origo: Orientation;
+    position: Position;
+    size: Size;
+    background: Background;
+    guibuttontype: ButtonType[];
+    slider: ButtonType;
+    track: ButtonType;
+    decreasebutton: ButtonType;
+    increasebutton: ButtonType;
     _index: number;
     _token: Token;
 }
@@ -192,6 +309,7 @@ const instantTextBoxTypeSchema: SchemaDef<InstantTextBoxType> = {
 
 const buttonTypeSchema: SchemaDef<ButtonType> = {
     name: "string",
+    parent: "string",
     spritetype: "string",
     quadtexturesprite: "string",
     position: positionSchema,
@@ -204,11 +322,120 @@ const buttonTypeSchema: SchemaDef<ButtonType> = {
     centerposition: 'boolean',
 };
 
+const editBoxTypeSchema: SchemaDef<EditBoxType> = {
+    name: "string",
+    orientation: "stringignorecase",
+    position: positionSchema,
+    size: sizeSchema,
+    bordersize: positionSchema,
+    font: "string",
+    text: "string",
+    format: "stringignorecase",
+};
+
+const overlappingElementsBoxTypeSchema: SchemaDef<OverlappingElementsBoxType> = {
+    name: "string",
+    orientation: "stringignorecase",
+    position: positionSchema,
+    size: sizeSchema,
+    format: "stringignorecase",
+    spacing: "number",
+    first_on_top: "boolean",
+};
+
+const smoothListBoxTypeSchema: SchemaDef<SmoothListBoxType> = {
+    name: "string",
+    orientation: "stringignorecase",
+    position: positionSchema,
+    size: sizeSchema,
+    bordersize: positionSchema,
+    spacing: "number",
+    clipping: "boolean",
+    scrollbartype: "string",
+};
+
+const listBoxTypeSchema: SchemaDef<ListBoxType> = {
+    name: "string",
+    orientation: "stringignorecase",
+    position: positionSchema,
+    size: sizeSchema,
+    bordersize: positionSchema,
+    background: "string",
+    offset: positionSchema,
+    format: "stringignorecase",
+    spacing: "number",
+    horizontal: "boolean",
+    scrollbartype: "string",
+};
+
+const dropdownBoxTypeSchema: SchemaDef<DropdownBoxType> = {
+    name: "string",
+    orientation: "stringignorecase",
+    position: positionSchema,
+    size: sizeSchema,
+    containerwindowtype: {
+        _innerType: undefined as any,
+        _type: "array",
+    },
+    icontype: {
+        _innerType: iconTypeSchema,
+        _type: "array",
+    },
+    instanttextboxtype: {
+        _innerType: instantTextBoxTypeSchema,
+        _type: "array",
+    },
+    buttontype: {
+        _innerType: buttonTypeSchema,
+        _type: "array",
+    },
+    editboxtype: {
+        _innerType: editBoxTypeSchema,
+        _type: "array",
+    },
+    expandbutton: buttonTypeSchema,
+    expandedwindow: undefined as any,
+};
+
+const scrollbarTypeSchema: SchemaDef<ScrollbarType> = {
+    name: "string",
+    orientation: "stringignorecase",
+    position: positionSchema,
+    size: sizeSchema,
+    horizontal: "number",
+    guibuttontype: {
+        _innerType: buttonTypeSchema,
+        _type: "array",
+    },
+    slider: "string",
+    track: "string",
+    leftbutton: "string",
+    rightbutton: "string",
+};
+
+const extendedScrollbarTypeSchema: SchemaDef<ExtendedScrollbarType> = {
+    name: "string",
+    orientation: "stringignorecase",
+    origo: "stringignorecase",
+    position: positionSchema,
+    size: sizeSchema,
+    background: backgroundSchema,
+    guibuttontype: {
+        _innerType: buttonTypeSchema,
+        _type: "array",
+    },
+    slider: buttonTypeSchema,
+    track: buttonTypeSchema,
+    decreasebutton: buttonTypeSchema,
+    increasebutton: buttonTypeSchema,
+};
+
 const containerWindowTypeSchema: SchemaDef<ContainerWindowType> = {
     name: "string",
     orientation: "stringignorecase",
     origo: "stringignorecase",
     position: positionSchema,
+    show_position: positionSchema,
     size: complexSizeSchema,
     margin: marginSchema,
     background: backgroundSchema,
@@ -248,10 +475,40 @@ const containerWindowTypeSchema: SchemaDef<ContainerWindowType> = {
         _innerType: buttonTypeSchema,
         _type: "array",
     },
+    editboxtype: {
+        _innerType: editBoxTypeSchema,
+        _type: "array",
+    },
+    overlappingelementsboxtype: {
+        _innerType: overlappingElementsBoxTypeSchema,
+        _type: "array",
+    },
+    dropdownboxtype: {
+        _innerType: dropdownBoxTypeSchema,
+        _type: "array",
+    },
+    scrollbartype: {
+        _innerType: scrollbarTypeSchema,
+        _type: "array",
+    },
+    extendedscrollbartype: {
+        _innerType: extendedScrollbarTypeSchema,
+        _type: "array",
+    },
+    smoothlistboxtype: {
+        _innerType: smoothListBoxTypeSchema,
+        _type: "array",
+    },
+    listboxtype: {
+        _innerType: listBoxTypeSchema,
+        _type: "array",
+    },
 };
 
 containerWindowTypeSchema.containerwindowtype._innerType = containerWindowTypeSchema;
 containerWindowTypeSchema.windowtype._innerType = containerWindowTypeSchema;
+dropdownBoxTypeSchema.containerwindowtype._innerType = containerWindowTypeSchema;
+dropdownBoxTypeSchema.expandedwindow = containerWindowTypeSchema;
 
 const positionTypeSchema: SchemaDef<PositionType> = {
     name: "string",
@@ -273,6 +530,14 @@ const guiTypesSchema: SchemaDef<GuiTypes> = {
     },
     icontype: {
         _innerType: iconTypeSchema,
+        _type: "array",
+    },
+    scrollbartype: {
+        _innerType: scrollbarTypeSchema,
+        _type: "array",
+    },
+    extendedscrollbartype: {
+        _innerType: extendedScrollbarTypeSchema,
         _type: "array",
     },
 };

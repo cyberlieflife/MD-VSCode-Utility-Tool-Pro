@@ -158,7 +158,10 @@ async function renderSingleContainerWindow(
         size.height = height._value;
     }
 
-    const position = containerWindow.position ? { ...containerWindow.position } : { x: undefined, y: undefined };
+    // A window anchored to the bottom of the screen carries a `show_position` as well; the game
+    // shows the window there, so the preview must too. Negative coordinates are clamped to 0.
+    const visiblePosition = containerWindow.show_position ?? containerWindow.position;
+    const position = visiblePosition ? { ...visiblePosition } : { x: undefined, y: undefined };
     if (position.x?._value !== undefined && position.x?._value < 0) {
         position.x = { ...position.x, _value: 0 };
     }
@@ -173,6 +176,7 @@ async function renderSingleContainerWindow(
                 ...commonOptions,
                 classNames: 'childcontainerwindow_' + normalizeForStyle(childContainerWindow.name ?? ''),
                 enableNavigator: true,
+                useShowPosition: true,
                 onRenderChild,
             });
         }

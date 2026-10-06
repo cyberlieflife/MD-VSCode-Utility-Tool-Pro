@@ -174,7 +174,9 @@ async function renderedGui(): Promise<string> {
         size: { width: toNumberLike(200), height: toNumberLike(100) },
         containerwindowtype: [], windowtype: [], gridboxtype: [], icontype: [],
         instanttextboxtype: [], textboxtype: [], buttontype: [], checkboxtype: [],
-        guibuttontype: [], _token: { start: 0, end: 10 }, _index: 0,
+        guibuttontype: [], editboxtype: [], overlappingelementsboxtype: [], dropdownboxtype: [],
+        scrollbartype: [], extendedscrollbartype: [], smoothlistboxtype: [], listboxtype: [],
+        _token: { start: 0, end: 10 }, _index: 0,
     };
     const loader: any = {
         load: async () => ({

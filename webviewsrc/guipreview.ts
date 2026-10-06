@@ -96,6 +96,23 @@ function setupContainerWindowToggles(folder: string) {
     }
 }
 
+// A dropdown's expand button toggles its expanded window. The window is drawn hidden next to the
+// button; clicking shows it, clicking again hides it.
+function setupDropdownBoxes() {
+    const buttons = document.getElementsByClassName('gui-dropdown-button');
+    for (let i = 0; i < buttons.length; i++) {
+        const button = buttons.item(i) as HTMLElement;
+        button.addEventListener('click', event => {
+            event.stopPropagation();
+            const dropdown = button.closest('.gui-dropdown');
+            const expanded = dropdown?.querySelector<HTMLElement>(':scope > .gui-dropdown-expanded');
+            if (expanded) {
+                expanded.hidden = !expanded.hidden;
+            }
+        });
+    }
+}
+
 function refreshToggleVisibilityContent() {
     const mainContent = document.getElementById('mainContent') as HTMLDivElement;
     const toggleVisibilityContent = document.getElementById('toggleVisibilityContent') as HTMLDivElement;
@@ -118,6 +135,7 @@ window.addEventListener('load', tryRun(function() {
     });
 
     refreshToggleVisibilityContent();
+    setupDropdownBoxes();
     const toggleVisibility = document.getElementById('toggleVisibility') as HTMLButtonElement;
     toggleVisibility.addEventListener('click', () => {
         toggleVisibilityContentVisible = !toggleVisibilityContentVisible;
