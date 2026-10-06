@@ -75,6 +75,13 @@ jobs:
         VERSION="${{ steps.version.outputs.version }}"
         VSIX="${{ steps.find_vsix.outputs.vsix }}"
 
+        # Release 已存在时跳过：工作流重跑（如 OpenVSX 步骤失败后重试）时
+        # gh release create 无法重复创建，保持上游步骤可重入。
+        if gh release view "$TAG" >/dev/null 2>&1; then
+          echo "Release $TAG 已存在，跳过 GitHub Release 创建。"
+          exit 0
+        fi
+
         # 提取 CHANGELOG 中当前版本的小节；兼容 ## [vX.Y.Z]（新格式）与 vX.Y.Z 行（历史格式）。
         # 标题判定用 index() 字面子串（部分 awk 对正则 \[ 的转义处理不一致），sub(/\r$/, "")
         # 剔除 Windows 行尾，避免精确比较失败。
@@ -100,3 +107,12 @@ jobs:
           printf '%s\n' "$auto_body" > "$body_file"
         fi
         gh release edit "$TAG" --notes-file "$body_file"
+
+    # 上传到 OpenVSX 市场：与 GitHub Release 共用同一个 vsix。失败时 job 标红，
+    # 重跑工作流即可重试；OpenVSX 同一版本不可重复上传。
+    - name: Publish to OpenVSX
+      env:
+        OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      run: |
+        set -euo pipefail
+        npx --yes ovsx@1.2.0 publish "${{ steps.find_vsix.outputs.vsix }}" --pat "$OVSX_PAT"
