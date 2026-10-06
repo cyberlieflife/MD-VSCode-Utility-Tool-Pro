@@ -81,7 +81,7 @@ export class CorneredTileSprite extends Sprite {
 	}
 
 	public getTiles(frameId: number = 0): Image[] {
-		if (frameId > this.noOfFrames) {
+		if (frameId >= this.noOfFrames) {
 			frameId = 0;
 		}
 
