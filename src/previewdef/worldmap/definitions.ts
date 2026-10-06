@@ -331,6 +331,17 @@ export interface MoveProvinceMessage {
     from: number | undefined,
     toFile: string,
     fromFile: string | undefined,
+    // A state move carries the province's strategic-region move too, so both files stay in step.
+    // The host performs it in the same pass: two separate messages would each copy files and could
+    // prompt for a folder twice.
+    alsoMoveStrategicRegion?: StrategicRegionMove,
+}
+
+export interface StrategicRegionMove {
+    to: number,
+    from: number | undefined,
+    toFile: string,
+    fromFile: string | undefined,
 }
 
 export interface AddMapItemMessage {

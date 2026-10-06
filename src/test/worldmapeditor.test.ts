@@ -256,21 +256,21 @@ describe('previewdef/worldmap/editor moveProvince orchestration', () => {
         };
     }
 
-    function makeWorldMap(states: unknown[]) {
+    function makeWorldMap(states: unknown[], strategicRegions: unknown[] = []) {
         return {
             width: 0,
             height: 0,
             provinces: [],
             states,
             countries: [],
-            strategicRegions: [],
+            strategicRegions,
             supplyAreas: [],
             railways: [],
             supplyNodes: [],
             provincesCount: 0,
             statesCount: states.length,
             countriesCount: 0,
-            strategicRegionsCount: 0,
+            strategicRegionsCount: strategicRegions.length,
             supplyAreasCount: 0,
             railwaysCount: 0,
             supplyNodesCount: 0,
@@ -355,5 +355,75 @@ describe('previewdef/worldmap/editor moveProvince orchestration', () => {
         assert.strictEqual(msgs.length, 2, 'both sides must produce webview messages');
         assert.deepStrictEqual(states[1]!.provinces, [], 'source region must lose the province');
         assert.deepStrictEqual(states[2]!.provinces, [10, 20], 'target region must gain the province (sorted by id)');
+    });
+
+    it('moves the strategic region too when the state move asks for it', async () => {
+        const states = [
+            undefined,
+            { id: 1, provinces: [10], victoryPoints: {}, file: 'history/states/1.txt', token: null },
+            { id: 2, provinces: [20], victoryPoints: {}, file: 'history/states/2.txt', token: null },
+        ];
+        const strategicRegions = [
+            undefined,
+            { id: 1, provinces: [10], file: 'map/strategicregions/1.txt', token: null },
+            { id: 2, provinces: [20], file: 'map/strategicregions/2.txt', token: null },
+        ];
+        const worldMap = makeWorldMap(states, strategicRegions);
+        const stateSource = (id: number, province: number) => `state = {\n\tid = ${id}\n\tprovinces = {\n\t\t${province}\n\t}\n}\n`;
+        const regionSource = (id: number, province: number) => `strategic_region = {\n\tid = ${id}\n\tprovinces = {\n\t\t${province}\n\t}\n}\n`;
+        (vscode.workspace as any).openTextDocument = async (uri: any) => {
+            const s = String(uri);
+            if (s.includes('states/2')) { return makeDocument(stateSource(2, 20)); }
+            if (s.includes('states/1')) { return makeDocument(stateSource(1, 10)); }
+            if (s.includes('strategicregions/2')) { return makeDocument(regionSource(2, 20)); }
+            return makeDocument(regionSource(1, 10));
+        };
+        (vscode.workspace as any).applyEdit = async () => true;
+
+        const msgs = await moveProvince({
+            command: 'moveprovince',
+            type: 'state',
+            province: 10,
+            to: 2,
+            from: 1,
+            toFile: 'history/states/2.txt',
+            fromFile: 'history/states/1.txt',
+            alsoMoveStrategicRegion: { to: 2, from: 1, toFile: 'map/strategicregions/2.txt', fromFile: 'map/strategicregions/1.txt' },
+        }, worldMap as any);
+
+        assert.deepStrictEqual(states[1]!.provinces, []);
+        assert.deepStrictEqual(states[2]!.provinces, [10, 20]);
+        assert.deepStrictEqual(strategicRegions[1]!.provinces, [], 'the source strategic region must lose the province');
+        assert.deepStrictEqual(strategicRegions[2]!.provinces, [10, 20], 'the target strategic region must gain it');
+        const stateMsgs = msgs.filter(m => m.command === 'states');
+        const regionMsgs = msgs.filter(m => m.command === 'strategicregions');
+        assert.ok(stateMsgs.length > 0 && regionMsgs.length > 0, 'both the state and the region update the webview');
+    });
+
+    it('does not move the strategic region when the state move is rejected', async () => {
+        const states = [{ id: 1, provinces: [10], victoryPoints: {}, file: 'history/states/1.txt', token: null }];
+        const strategicRegions = [
+            undefined,
+            { id: 1, provinces: [10], file: 'map/strategicregions/1.txt', token: null },
+            { id: 2, provinces: [99], file: 'map/strategicregions/2.txt', token: null },
+        ];
+        const worldMap = makeWorldMap(states, strategicRegions);
+        (vscode.workspace as any).applyEdit = async () => true;
+
+        // The state target (99) is not in the cache, so the state move is rejected; the linked
+        // region move must not run on its own.
+        const msgs = await moveProvince({
+            command: 'moveprovince',
+            type: 'state',
+            province: 10,
+            to: 99,
+            from: 1,
+            toFile: 'history/states/1.txt',
+            fromFile: 'history/states/1.txt',
+            alsoMoveStrategicRegion: { to: 2, from: 1, toFile: 'map/strategicregions/2.txt', fromFile: 'map/strategicregions/1.txt' },
+        }, worldMap as any);
+
+        assert.strictEqual(msgs.length, 0);
+        assert.deepStrictEqual(strategicRegions[1]!.provinces, [10], 'the region must be untouched');
     });
 });

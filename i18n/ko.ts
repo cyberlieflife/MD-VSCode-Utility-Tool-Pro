@@ -429,6 +429,7 @@ const table: Partial<typeof __table> = {
     "worldmap.selectafolder.create": "{0} 파일을 만들 폴더를 선택하세요",
     "worldmap.topbar.add.title": "추가",
     "worldmap.topbar.edit.title": "편집",
+    "worldmap.topbar.linkstatestrategicregion.title": "편집 시 주 경계가 전략 지역을 따름",
     "worldmap.topbar.selectedregion": "선택됨: ",
     "worldmap.topbar.selectedregion.none": "없음",
     "worldmap.topbar.selectedregion.title": "선택 영역으로 이동",

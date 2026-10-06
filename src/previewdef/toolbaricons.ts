@@ -161,6 +161,15 @@ export const iconActions = {
 		surfaces: ["worldmap"],
 		shownWhen: "the view mode is state or strategic region",
 	},
+	linkStateStrategicRegion: {
+		icon: "link",
+		state: "aria-pressed",
+		stateStyle: "pressed",
+		tooltipKey: "worldmap.topbar.linkstatestrategicregion.title",
+		tooltip: "Edit with state borders following strategic regions",
+		surfaces: ["worldmap"],
+		shownWhen: "the view mode is state or strategic region",
+	},
 	clearTrace: {
 		icon: "close",
 		tooltipKey: "toolbar.cleartrace",
@@ -223,6 +232,7 @@ export const actionGroupOrder: readonly IconActionId[] = [
 	"openFile",
 	"editRegion",
 	"addRegion",
+	"linkStateStrategicRegion",
 	"clearTrace",
 ];
 

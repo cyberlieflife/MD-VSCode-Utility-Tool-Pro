@@ -3,7 +3,7 @@ import { Loader, FEWorldMap } from "./loader";
 import { ViewPoint } from "./viewpoint";
 import { vscode } from "../util/vscode";
 import { setState, getState } from "../util/common";
-import { WorldMapMessage, WorldMapWarning } from "../../src/previewdef/worldmap/definitions";
+import { WorldMapMessage, WorldMapWarning, StrategicRegionMove } from "../../src/previewdef/worldmap/definitions";
 import { feLocalize } from "../util/i18n";
 import { DivDropdown } from "../util/dropdown";
 import { BehaviorSubject, combineLatest, fromEvent } from 'rxjs';
@@ -56,6 +56,10 @@ export class TopBar extends Subscriber {
     public editMode$ = new BehaviorSubject<boolean>(false);
     public editModeHoverProvinceId$ = new BehaviorSubject<number | undefined>(undefined);
 
+    // Edit mode: when on, moving a province into a state also moves it into the state's strategic
+    // region, so the two files stay in step. On by default, and remembered across sessions.
+    public linkStateStrategicRegion$ = new BehaviorSubject<boolean>(true);
+
     public get editMode(): boolean {
         return this.editMode$.value;
     }
@@ -81,6 +85,7 @@ export class TopBar extends Subscriber {
         this.selectedStrategicRegionId$ = new BehaviorSubject<number | undefined>(state.selectedStrategicRegionId ?? undefined);
         this.hoverSupplyAreaId$ = new BehaviorSubject<number | undefined>(undefined);
         this.selectedSupplyAreaId$ = new BehaviorSubject<number | undefined>(state.selectedSupplyAreaId ?? undefined);
+        this.linkStateStrategicRegion$.next(state.linkStateStrategicRegion ?? true);
         if (state.warningFilter) {
             this.warningFilter.selectedValues$.next(state.warningFilter);
         } else {
@@ -335,11 +340,22 @@ export class TopBar extends Subscriber {
     private loadEditButton() {
         const editButton = document.getElementById('edit') as HTMLButtonElement;
         const addButton = document.getElementById('add') as HTMLButtonElement;
+        const linkButton = document.getElementById('link-state-strategicregion') as HTMLButtonElement;
         editButton.disabled = true;
         addButton.disabled = true;
         const pencilUri: string | undefined = (window as any).__pencilUri;
 
         const that = this;
+
+        // The link button is a pressed-state toggle: it starts in step with the saved setting.
+        applyIconState(linkButton, 'linkStateStrategicRegion', this.linkStateStrategicRegion$.value, feLocalize);
+        this.addSubscription(this.linkStateStrategicRegion$.subscribe(on => {
+            applyIconState(linkButton, 'linkStateStrategicRegion', on, feLocalize);
+        }));
+        this.addSubscription(fromEvent(linkButton, 'click').subscribe(e => {
+            e.stopPropagation();
+            this.linkStateStrategicRegion$.next(!this.linkStateStrategicRegion$.value);
+        }));
 
         function enterEditMode() {
             that.editMode$.next(true);
@@ -506,6 +522,29 @@ export class TopBar extends Subscriber {
                 return;
             }
             const hoverState = worldMap.getStateByProvinceId(hoverProvince.id);
+
+            // With the link on, the province follows its new state into that state's strategic
+            // region as well. The target region is the one the state's own provinces already
+            // belong to; a state whose provinces span no region yet leaves the move alone. The
+            // region move travels with the state move so the host does both in one pass.
+            let alsoMoveStrategicRegion: StrategicRegionMove | undefined = undefined;
+            if (this.linkStateStrategicRegion$.value && hoverState?.id !== selectedState.id) {
+                const targetRegion = selectedState.provinces
+                    .map(id => worldMap.getStrategicRegionByProvinceId(id))
+                    .find(region => region !== undefined);
+                if (targetRegion) {
+                    const hoverRegion = worldMap.getStrategicRegionByProvinceId(hoverProvince.id);
+                    if (hoverRegion?.id !== targetRegion.id) {
+                        alsoMoveStrategicRegion = {
+                            to: targetRegion.id,
+                            from: hoverRegion?.id,
+                            toFile: targetRegion.file,
+                            fromFile: hoverRegion?.file,
+                        };
+                    }
+                }
+            }
+
             vscode.postMessage<WorldMapMessage>({
                 command: 'moveprovince',
                 type: 'state',
@@ -514,6 +553,7 @@ export class TopBar extends Subscriber {
                 from: hoverState?.id,
                 toFile: selectedState.file,
                 fromFile: hoverState?.file,
+                alsoMoveStrategicRegion,
             });
         } else if (viewMode === 'strategicregion') {
             const selectedStrategicRegion = worldMap.getStrategicRegionById(this.selectedStrategicRegionId$.value);

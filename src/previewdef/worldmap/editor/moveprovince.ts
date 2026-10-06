@@ -6,6 +6,35 @@ import { parseHoi4File, Token } from '../../../hoiformat/hoiparser';
 import { convertNodeToJson, Enum, SchemaDef } from '../../../hoiformat/schema';
 
 export async function moveProvince(msg: MoveProvinceMessage, cachedWorldMap: WorldMapData): Promise<WorldMapMessage[]> {
+    const result = await moveProvinceOnce(msg, cachedWorldMap);
+    if (result === undefined) {
+        // The state move failed and already surfaced its reason; the linked region move must not
+        // run, or the two files would disagree about which region the province belongs to.
+        return [];
+    }
+
+    if (msg.alsoMoveStrategicRegion) {
+        const regionResult = await moveProvinceOnce({
+            command: 'moveprovince',
+            type: 'strategicregion',
+            province: msg.province,
+            to: msg.alsoMoveStrategicRegion.to,
+            from: msg.alsoMoveStrategicRegion.from,
+            toFile: msg.alsoMoveStrategicRegion.toFile,
+            fromFile: msg.alsoMoveStrategicRegion.fromFile,
+        }, cachedWorldMap);
+        if (regionResult !== undefined) {
+            result.push(...regionResult);
+        }
+    }
+
+    return result;
+}
+
+// One region's move, both sides built before anything is committed. Returns undefined when the move
+// was rejected (a missing target, a victory point that cannot be removed, or a failed apply), so the
+// caller can tell a completed move from one that surfaced an error.
+async function moveProvinceOnce(msg: MoveProvinceMessage, cachedWorldMap: WorldMapData): Promise<WorldMapMessage[] | undefined> {
     const result: WorldMapMessage[] = [];
     const { type, province, to, from, toFile, fromFile } = msg;
     const typeName = localize('worldmap.openfiletype.' + type as any, type);
@@ -15,11 +44,11 @@ export async function moveProvince(msg: MoveProvinceMessage, cachedWorldMap: Wor
     if (!toRegion) {
         // No target region in the cached data: move would silently drop the province otherwise.
         await vscode.window.showErrorMessage(localize('worldmap.edit.failed.notarget', 'The target {0} does not exist in the world map data. Please reload the world map and try again.', typeName));
-        return result;
+        return undefined;
     }
     if (from === to && fromRegion && 'victoryPoints' in fromRegion && province in fromRegion.victoryPoints) {
         await vscode.window.showErrorMessage(localize('worldmap.edit.failed.cannotremovevp', 'You cannot remove a province with victory point.'));
-        return result;
+        return undefined;
     }
 
     const files = [toFile];
@@ -33,7 +62,7 @@ export async function moveProvince(msg: MoveProvinceMessage, cachedWorldMap: Wor
         failedToOpenMessage: (errorMessage) => localize('worldmap.failedtoopenstate', 'Failed to open {0} file: {1}.', typeName, errorMessage),
     });
     if (filePathsInMod.some(v => v === undefined)) {
-        return result;
+        return undefined;
     }
 
     const toDocumentUri = filePathsInMod[0]!;
@@ -68,7 +97,7 @@ export async function moveProvince(msg: MoveProvinceMessage, cachedWorldMap: Wor
                     fromProvincesUpdated = fromProvinces;
                     fromApplied = true;
                 } else {
-                    return result;
+                    return undefined;
                 }
             }
         }
@@ -85,7 +114,7 @@ export async function moveProvince(msg: MoveProvinceMessage, cachedWorldMap: Wor
                 toProvincesUpdated = nextToProvinces;
                 toApplied = true;
             } else {
-                return result;
+                return undefined;
             }
         }
     } else if (toRegion) {
@@ -99,7 +128,7 @@ export async function moveProvince(msg: MoveProvinceMessage, cachedWorldMap: Wor
             toProvincesUpdated = nextToProvinces;
             toApplied = true;
         } else {
-            return result;
+            return undefined;
         }
     }
 
@@ -108,7 +137,7 @@ export async function moveProvince(msg: MoveProvinceMessage, cachedWorldMap: Wor
     const applied = await vscode.workspace.applyEdit(workspaceEdit);
     if (applied === false) {
         await vscode.window.showErrorMessage(localize('worldmap.edit.failed.apply', 'The change could not be applied. The file may have changed on disk. Please try again.'));
-        return result;
+        return undefined;
     }
 
     if (fromApplied && fromProvincesUpdated !== undefined && fromRegion && from !== undefined) {

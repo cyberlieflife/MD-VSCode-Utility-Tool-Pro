@@ -429,6 +429,7 @@ const table: Partial<typeof __table> = {
     "worldmap.selectafolder.create": "选择创建{0}的目标文件夹",
     "worldmap.topbar.add.title": "添加",
     "worldmap.topbar.edit.title": "编辑",
+    "worldmap.topbar.linkstatestrategicregion.title": "编辑时省份边界跟随战略区域",
     "worldmap.topbar.selectedregion": "已选择：",
     "worldmap.topbar.selectedregion.none": "无",
     "worldmap.topbar.selectedregion.title": "导航到已选区域",

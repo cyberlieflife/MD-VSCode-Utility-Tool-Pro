@@ -429,6 +429,7 @@ const table: Partial<typeof __table> = {
     "worldmap.selectafolder.create": "Выберите папку для создания {0} файла",
     "worldmap.topbar.add.title": "Добавить",
     "worldmap.topbar.edit.title": "Редактировать",
+    "worldmap.topbar.linkstatestrategicregion.title": "Редактировать с границами штатов по стратегическим регионам",
     "worldmap.topbar.selectedregion": "Выбрано: ",
     "worldmap.topbar.selectedregion.none": "Нет",
     "worldmap.topbar.selectedregion.title": "К выбранной области",

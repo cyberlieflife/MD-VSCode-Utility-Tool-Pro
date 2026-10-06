@@ -23,6 +23,11 @@ function toolbarSlots(localize: Localizer): Record<string, string> {
 				domId: "add",
 				attributes: 'viewmode="state strategicregion"',
 			}),
+			linkStateStrategicRegion: iconButtonHtml("linkStateStrategicRegion", localize, {
+				domId: "link-state-strategicregion",
+				on: true,
+				attributes: 'viewmode="state strategicregion"',
+			}),
 		}),
 	};
 }

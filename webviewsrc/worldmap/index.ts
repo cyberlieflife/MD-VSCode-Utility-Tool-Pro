@@ -28,6 +28,7 @@ fromEvent(window, 'load').subscribe(function() {
     topBar.warningFilter.selectedValues$.subscribe(setStateForKey('warningFilter'));
     topBar.display.selectedValues$.subscribe(setStateForKey('display'));
     topBar.conditions.selectedValues$.subscribe(setStateForKey('selectedConditions'));
+    topBar.linkStateStrategicRegion$.subscribe(setStateForKey('linkStateStrategicRegion'));
 });
 
 function setStateForKey<T>(key: string): (newValue: T) => void {

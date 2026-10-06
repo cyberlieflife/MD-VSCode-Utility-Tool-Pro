@@ -347,6 +347,7 @@ const table: Partial<typeof __table> = {
     "worldmap.selectafolder.create": "Select a folder to create {0} file",
     "worldmap.topbar.add.title": "Add",
     "worldmap.topbar.edit.title": "Edit",
+    "worldmap.topbar.linkstatestrategicregion.title": "Edit with state borders following strategic regions",
     "worldmap.topbar.selectedregion": "Selected: ",
     "worldmap.topbar.selectedregion.none": "None",
     "worldmap.topbar.selectedregion.title": "Navigate to selected",
