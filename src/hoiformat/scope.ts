@@ -2,7 +2,7 @@ import { arrayToMap } from "../util/common";
 import { Node } from "./hoiparser";
 import { variableRegexForScope } from "./schema";
 
-export type ScopeType = 'country' | 'state' | 'leader' | 'operative' | 'division' | 'character' | 'mio' | 'purchaseContract' | 'unknown';
+export type ScopeType = 'country' | 'state' | 'leader' | 'operative' | 'division' | 'character' | 'mio' | 'purchaseContract' | 'specialProject' | 'unknown';
 
 export interface Scope {
     scopeName: string;
@@ -49,6 +49,14 @@ export function tryMoveScope(node: Node, scopeStack: Scope[], type: 'condition' 
         scopeStack.push({
             scopeName: nodeName.substring(4),
             scopeType: 'mio',
+        });
+        return true;
+    }
+
+    if (nodeName.match(/^sp:/)) {
+        scopeStack.push({
+            scopeName: nodeName.substring(3),
+            scopeType: 'specialProject',
         });
         return true;
     }
@@ -173,6 +181,7 @@ export const scopeDefs = arrayToMap([
     scopeDef("all_country", true, false, '*', 'country'),
     scopeDef("all_country_with_original_tag", true, false, '*', 'country'),
     scopeDef("all_allied_country", true, false, 'country', 'country'),
+    scopeDef("all_other_country", true, false, 'country', 'country'),
     scopeDef("all_guaranteed_country", true, false, 'country', 'country'),
     scopeDef("all_enemy_country", true, false, 'country', 'country'),
     scopeDef("all_occupied_country", true, false, 'country', 'country'),
@@ -202,6 +211,7 @@ export const scopeDefs = arrayToMap([
     scopeDef("every_occupied_country", false, true, 'country', 'country'),
     scopeDef("random_country", false, true, '*', 'country'),
     scopeDef("random_country_with_original_tag", false, true, '*', 'country'),
+    scopeDef("random_other_country", false, true, 'country', 'country'),
     scopeDef("random_neighbor_country", false, true, 'country', 'country'),
     scopeDef("random_enemy_country", false, true, 'country', 'country'),
     scopeDef("random_occupied_country", false, true, 'country', 'country'),
@@ -215,8 +225,8 @@ export const scopeDefs = arrayToMap([
     scopeDef("every_owned_state", false, true, 'country', 'state'),
     scopeDef("every_neighbor_state", false, true, 'state', 'state'),
     scopeDef("capital_scope", true, true, 'country', 'state'),
-    scopeDef("owner", false, true, 'state', 'country'),
-    scopeDef("controller", false, true, 'state', 'country'),
+    scopeDef("owner", true, true, 'state', 'country'),
+    scopeDef("controller", true, true, 'state', 'country'),
     scopeDef("all_operative_leader", true, false, 'country', 'operative'),
     scopeDef("any_operative_leader", true, false, 'country', 'operative'),
     scopeDef("every_operative", false, true, 'country', 'operative'),
@@ -236,8 +246,25 @@ export const scopeDefs = arrayToMap([
     scopeDef("any_military_industrial_organization", true, false, 'country', 'mio'),
     scopeDef("every_military_industrial_organization", false, true, 'country', 'mio'),
     scopeDef("random_military_industrial_organization", false, true, 'country', 'mio'),
-    scopeDef("all_military_purchase_contract", true, false, 'country', 'purchaseContract'),
-    scopeDef("any_military_purchase_contract", true, false, 'country', 'purchaseContract'),
-    scopeDef("every_military_purchase_contract", false, true, 'country', 'purchaseContract'),
-    scopeDef("random_military_purchase_contract", false, true, 'country', 'purchaseContract'),
+    scopeDef("all_purchase_contract", true, false, 'country', 'purchaseContract'),
+    scopeDef("any_purchase_contract", true, false, 'country', 'purchaseContract'),
+    scopeDef("every_purchase_contract", false, true, 'country', 'purchaseContract'),
+    scopeDef("random_purchase_contract", false, true, 'country', 'purchaseContract'),
+    scopeDef("any_state_in", true, false, '*', 'state'),
+    scopeDef("all_scientists", true, false, 'country', 'character'),
+    scopeDef("any_scientist", true, false, 'country', 'character'),
+    scopeDef("every_scientist", false, true, 'country', 'character'),
+    scopeDef("random_scientist", false, true, 'country', 'character'),
+    scopeDef("all_active_scientist", true, false, 'country', 'character'),
+    scopeDef("any_active_scientist", true, false, 'country', 'character'),
+    scopeDef("every_active_scientist", false, true, 'country', 'character'),
+    scopeDef("random_active_scientist", false, true, 'country', 'character'),
+    scopeDef("all_country_of", true, false, '*', 'country'),
+    scopeDef("any_country_of", true, false, '*', 'country'),
+    scopeDef("any_state_of", true, false, '*', 'state'),
+    scopeDef("every_allied_country", false, true, 'country', 'country'),
+    scopeDef("random_allied_country", false, true, 'country', 'country'),
+    scopeDef("party_leader", false, true, 'country', 'character'),
+    scopeDef("every_faction_member", false, true, 'country', 'country'),
+    scopeDef("every_collection_element", false, true, '*', 'unknown'),
 ], 'name');
