@@ -1,3 +1,22 @@
+## [v1.2.1] - 2026-10-07
+
+### Functionality
+
+- [GUI Preview] The GUI preview parses and draws the generic controls a complex window is built from: edit boxes, dropdown boxes, overlapping-elements boxes, smooth list boxes, list boxes, and both the standard and extended scrollbars. Previously these nodes were dropped at parse time and the preview showed a hole where a control should be, which made a window such as the political panel come out mostly empty. A dropdown draws its expand button and a hidden expanded window that a click opens; a standard scrollbar places its buttons relative to the one each names in `parent` and swaps the axes when the game writes `horizontal = 1`. A window anchored to the bottom of the screen now draws at its `show_position`, so it lands where the game shows it.
+- [Event Preview] Event cards show the event's own `desc` text and option cards show the option's `ai_chance` block. `desc` is read in the three shapes mods write it — a bare localisation key, a quoted string, and a `text = ...` block — and each line follows the localisation toggle the way the title does. The AI chance is shown verbatim, like the other script blocks, under the same "Show effects" toggle.
+- [World Map] Editing in the state view can keep the province's strategic region in step with its new state, through a new toolbar toggle that is on by default and remembered across sessions. The province follows its new state into the strategic region that state already belongs to, and the two moves are applied in one pass, so a state move that is rejected leaves the region untouched.
+- [World Map] The edit, add and link buttons take keyboard shortcuts: E toggles edit mode, A adds a region, and S toggles the state/strategic-region link, each named in its button tooltip. A shortcut whose button is disabled or hidden does nothing, a chord such as Ctrl+E is left to the browser, and a key aimed at the search box or another field is ignored.
+- [Previews] Every preview draws a refresh button in its toolbar, next to the GUI and world map previews that already had one, so a file can be re-read without closing and reopening the preview.
+- [Script] The scope table a condition or effect walk reads recognises the names the game gained since HOI4 1.15: the special-project scope and its `sp:` prefix, the scientist, purchase-contract, allied-country and collection-element families, the `country_of`/`state_of`/`state_in` readers, `party_leader`, `every_faction_member`, and the other-country variants. `owner` and `controller` now read as conditions too. A script that used one of these names previously dropped the scope move, and the extracted tree lost every branch below it.
+- [Mod tools] A mod can ship its own tools as a pack under `src/modtools/packs/`, run through the new "Run Mod Tool" command. The master switch `modTools.enabled` is off by default, a pack's tools appear only while its mod is open, and each pack names a maintainer: a failing tool's error names that maintainer and links to their issue tracker, since mod tools are maintained by their mods rather than by this extension. The host is imported by `extension.ts` alone and registered last, and every call into a pack is guarded, so a pack that breaks costs only its own tools.
+
+### Bugfixes
+
+- [World Map] Supply-node rows that start with spaces or tabs now load at the correct province and level. Splitting an indented row without trimming first left an empty leading field, which `parseInt` turned into `NaN` and shifted every column.
+- [GFX] A cornered-tile sprite whose frame index equals its frame count now falls back to frame 0 instead of reading past the end of the frame list and throwing. Frame indices run from 0 to `noOfFrames - 1`, so an index equal to the count is not a valid frame.
+- [Previews] A preview panel now follows its file's tab rather than its text document. The document closes as soon as its editor loses focus while the tab stays, so clicking away from a file whose preview was open used to close the preview; a file still open in another group keeps its preview.
+- [World Map] The new-strategic-region template writes `provinces = {` with a blank line between blocks, matching the state template and the game's own files.
+
 ## [v1.2.0] - 2026-10-04
 
 ### Functionality
