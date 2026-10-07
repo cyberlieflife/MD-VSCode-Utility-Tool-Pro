@@ -9,7 +9,7 @@ import { debounceByInput } from '../util/common';
 import { debug, error } from '../util/debug';
 import { PreviewBase } from './previewbase';
 import { contextContainer, setVscodeContext } from '../context';
-import { basename, getDocumentByUri } from '../util/vsccommon';
+import { basename, getDocumentByUri, openedTabsContains } from '../util/vsccommon';
 import { onGfxIndexBuilt } from '../util/gfxindex';
 import { invalidateFileDiscoveryCache } from '../util/fileloader';
 import { worldMapPreviewDef } from './worldmap';
@@ -72,7 +72,10 @@ export class PreviewManager implements vscode.WebviewPanelSerializer {
     public register(): vscode.Disposable {
         const disposables: vscode.Disposable[] = [];
         disposables.push(vscode.commands.registerCommand(Commands.Preview, this.showPreview, this));
-        disposables.push(vscode.workspace.onDidCloseTextDocument(this.onCloseTextDocument, this));
+        // A preview's lifetime follows its file's tab, not its text document: the document closes as
+        // soon as its editor loses focus, while the tab stays. Watching the tabs is what keeps a
+        // preview open when the reader clicks away from it.
+        disposables.push(vscode.window.tabGroups.onDidChangeTabs(this.onDidChangeTabs, this));
         disposables.push(vscode.workspace.onDidChangeTextDocument(this.onChangeTextDocument, this));
         // A file appearing or disappearing moves the dependency lists of every open preview that
         // scans a folder (a new national_focus file is a new dependency of the focus tree preview),
@@ -125,14 +128,23 @@ export class PreviewManager implements vscode.WebviewPanelSerializer {
         return this.showPreviewImpl(uri);
     }
 
-    private onCloseTextDocument(document: vscode.TextDocument): void {
-        if (!vscode.window.visibleTextEditors.some(e => e.document.uri.toString() === document.uri.toString())) {
-            const key = document.uri.toString();
-            this._previews[key]?.panel.dispose();
-            debug(`dispose panel ${key} because text document closed`);
-        }
+    private onDidChangeTabs(event: vscode.TabChangeEvent): void {
+        for (const closedTab of event.closed) {
+            const input = closedTab.input;
+            if (!(input instanceof vscode.TabInputText)) {
+                continue;
+            }
 
-        this.updatePreviewItemsInSubscription(document.uri);
+            const key = input.uri.toString();
+            if (openedTabsContains(input.uri)) {
+                // The tab is still open elsewhere (a split, say): the preview stays with it.
+                continue;
+            }
+
+            this._previews[key]?.panel.dispose();
+            debug(`dispose panel ${key} because its tab closed`);
+            this.updatePreviewItemsInSubscription(input.uri);
+        }
     }
     
     private onChangeTextDocument(e: vscode.TextDocumentChangeEvent): void {

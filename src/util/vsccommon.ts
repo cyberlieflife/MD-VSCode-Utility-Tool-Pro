@@ -105,6 +105,21 @@ export function basename(uri: vscode.Uri, ext?: string): string {
     return path.basename(uri.path, ext);
 }
 
+// Whether a text tab for this uri is still open in any group. A preview panel's lifetime follows its
+// file's tab, not its text document: the document closes as soon as its editor loses focus, while
+// the tab (and the preview beside it) stays. Comparing against the open tabs is what tells the two
+// apart.
+export function openedTabsContains(uri: vscode.Uri): boolean {
+    for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+            if (tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri.toString()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 export function fileOrUriStringToUri(path: string): vscode.Uri | undefined {
     const normalizedPath = normalizeFileOrUriString(path);
 

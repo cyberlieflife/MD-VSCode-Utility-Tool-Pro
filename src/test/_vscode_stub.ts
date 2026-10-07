@@ -113,6 +113,12 @@ function buildStub() {
         activeTextEditor: undefined,
         onDidChangeActiveTextEditor: disposable,
         registerWebviewPanelSerializer: () => disposable(),
+        // The preview manager follows its file's tab rather than its text document, so the tab
+        // group API has to exist. `all` is empty by default: no tab is open, so nothing is disposed.
+        tabGroups: {
+            all: [] as any[],
+            onDidChangeTabs: disposable,
+        },
     };
 
     const commands = {
@@ -133,6 +139,12 @@ function buildStub() {
 
     function Position(this: any, line: number, character: number) { this.line = line; this.character = character; }
     function Range(this: any, s: any, e: any) { this.start = s; this.end = e; }
+
+    // The preview manager tests a closed tab's input with `instanceof vscode.TabInputText`, so the
+    // stub needs the class itself. A plain class carrying a uri is enough to be recognised.
+    class TabInputText {
+        constructor(public readonly uri: any) {}
+    }
 
     // Real VS Code's Disposable only wraps a cleanup function; code that builds one directly (the
     // parent-mods listener set does) needs the constructor here.
@@ -170,6 +182,7 @@ function buildStub() {
         Position,
         Range,
         InlayHint,
+        TabInputText,
         InlayHintKind: { Type: 1, Parameter: 2 },
         ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
         WorkspaceEdit: class {
