@@ -40,6 +40,7 @@ const settings = [
     'mdHoi4Utilities.imageDecodeWorkers',
     'mdHoi4Utilities.auditor.reportFolder',
     'mdHoi4Utilities.auditor.includeVanilla',
+    'mdHoi4Utilities.modTools.enabled',
 ];
 
 describe('package.json settings sections', () => {

@@ -21,6 +21,7 @@ import { registerModifierInlayHint } from "./inlayhint/modifierInlayHint";
 import { registerAuditFocusTreesCommand } from "./previewdef/focustree/warningreport";
 import { registerIndexStatusCommand } from "./util/indexBuild";
 import { disposeImageDecodeWorkers } from "./util/image/imagedecoder";
+import { registerModTools } from "./modtools/host";
 
 export function activate(context: vscode.ExtensionContext) {
     let locale = (context as any).extension?.packageJSON.locale;
@@ -60,6 +61,9 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(registerIdeaPictureHover());
     context.subscriptions.push(registerIdeaSwapIndex());
     context.subscriptions.push(registerModifierInlayHint());
+    // Registered last, on purpose: the mod tool host is the one part that runs code shipped by a
+    // mod, and nothing before it should depend on it. It guards every call into a pack.
+    context.subscriptions.push(registerModTools());
 
     setVscodeContext(ContextName.Hoi4MULoaded, true);
 }

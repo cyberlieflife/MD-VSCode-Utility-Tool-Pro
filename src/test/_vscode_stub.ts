@@ -58,6 +58,8 @@ function buildStub() {
         onDidChangeTextDocument: disposable,
         onDidCloseTextDocument: disposable,
         onDidChangeWorkspaceFolders: disposable,
+        onDidGrantWorkspaceTrust: disposable,
+        isTrusted: true,
         onDidCreateFiles: disposable,
         onDidDeleteFiles: disposable,
         onDidRenameFiles: disposable,
@@ -160,7 +162,7 @@ function buildStub() {
         window,
         commands,
         languages,
-        env: {},
+        env: { openExternal: async () => true },
         FileType,
         ConfigurationTarget,
         StatusBarAlignment,
@@ -194,6 +196,8 @@ function buildStub() {
         TreeItem: class { label: any; constructor(label: any) { this.label = label; } },
         TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
         ThemeIcon: class { id: any; constructor(id: any) { this.id = id; } },
+        // Real VS Code's QuickPickItemKind: a separator is not selectable and carries only a label.
+        QuickPickItemKind: { Separator: -1, Default: 0 },
     };
 }
 
@@ -247,6 +251,9 @@ const pristine = {
     workspaceFolders: (stub.workspace as any).workspaceFolders,
     onDidChangeConfiguration: (stub.workspace as any).onDidChangeConfiguration,
     onDidChangeWorkspaceFolders: (stub.workspace as any).onDidChangeWorkspaceFolders,
+    onDidGrantWorkspaceTrust: (stub.workspace as any).onDidGrantWorkspaceTrust,
+    isTrusted: (stub.workspace as any).isTrusted,
+    openExternal: (stub.env as any).openExternal,
     onDidChangeTextDocument: (stub.workspace as any).onDidChangeTextDocument,
     createFileSystemWatcher: (stub.workspace as any).createFileSystemWatcher,
     getWorkspaceFolder: (stub.workspace as any).getWorkspaceFolder,
@@ -274,6 +281,9 @@ export interface VscodeStubOverrides {
     getWorkspaceFolder?: (...args: any[]) => any;
     onDidChangeConfiguration?: (...args: any[]) => any;
     onDidChangeWorkspaceFolders?: (...args: any[]) => any;
+    onDidGrantWorkspaceTrust?: (...args: any[]) => any;
+    isTrusted?: boolean;
+    openExternal?: (...args: any[]) => any;
     onDidChangeTextDocument?: (...args: any[]) => any;
     createFileSystemWatcher?: (...args: any[]) => any;
     stat?: (...args: any[]) => any;
@@ -324,6 +334,15 @@ export function stubVscode(overrides: VscodeStubOverrides): void {
     }
     if (overrides.onDidChangeWorkspaceFolders !== undefined) {
         workspace.onDidChangeWorkspaceFolders = overrides.onDidChangeWorkspaceFolders;
+    }
+    if (overrides.onDidGrantWorkspaceTrust !== undefined) {
+        workspace.onDidGrantWorkspaceTrust = overrides.onDidGrantWorkspaceTrust;
+    }
+    if (overrides.isTrusted !== undefined) {
+        workspace.isTrusted = overrides.isTrusted;
+    }
+    if (overrides.openExternal !== undefined) {
+        (stub.env as any).openExternal = overrides.openExternal;
     }
     if (overrides.onDidChangeTextDocument !== undefined) {
         workspace.onDidChangeTextDocument = overrides.onDidChangeTextDocument;
@@ -382,6 +401,9 @@ export function restoreVscodeStubs(): void {
     workspace.workspaceFolders = pristine.workspaceFolders;
     workspace.onDidChangeConfiguration = pristine.onDidChangeConfiguration;
     workspace.onDidChangeWorkspaceFolders = pristine.onDidChangeWorkspaceFolders;
+    workspace.onDidGrantWorkspaceTrust = pristine.onDidGrantWorkspaceTrust;
+    workspace.isTrusted = pristine.isTrusted;
+    (stub.env as any).openExternal = pristine.openExternal;
     workspace.onDidChangeTextDocument = pristine.onDidChangeTextDocument;
     workspace.createFileSystemWatcher = pristine.createFileSystemWatcher;
     workspace.getWorkspaceFolder = pristine.getWorkspaceFolder;

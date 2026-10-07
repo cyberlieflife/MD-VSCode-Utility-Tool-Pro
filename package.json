@@ -335,6 +335,18 @@
 						"description": "%hoi4modutilities.auditor.includeVanilla.desc%"
 					}
 				}
+			},
+			{
+				"title": "%hoi4modutilities.section.modTools%",
+				"order": 6,
+				"properties": {
+					"mdHoi4Utilities.modTools.enabled": {
+						"title": "%hoi4modutilities.modTools.enabled.title%",
+						"type": "boolean",
+						"default": false,
+						"markdownDescription": "%hoi4modutilities.modTools.enabled.desc%"
+					}
+				}
 			}
 		],
 		"commands": [
@@ -376,6 +388,11 @@
 			{
 				"command": "mdhoi4utilities.auditfocustrees",
 				"title": "%hoi4modutilities.auditfocustrees.title%",
+				"category": "%hoi4modutilities.category%"
+			},
+			{
+				"command": "mdhoi4utilities.runmodtool",
+				"title": "%hoi4modutilities.runmodtool.title%",
 				"category": "%hoi4modutilities.category%"
 			}
 		],
@@ -435,6 +452,10 @@
 				},
 				{
 					"command": "mdhoi4utilities.auditfocustrees"
+				},
+				{
+					"command": "mdhoi4utilities.runmodtool",
+					"when": "mdHoi4ModToolsAvailable"
 				}
 			]
 		}
