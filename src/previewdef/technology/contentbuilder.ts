@@ -21,6 +21,7 @@ import { RenderNodeCommonOptions } from '../../util/hoi4gui/nodecommon';
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
 import { localisationIndex, technologyCountryIcons, gfxIndex } from "../../util/featureflags";
 import { LoaderRender } from '../loaderpreview';
+import { actionGroupHtml, iconButtonHtml } from '../toolbaricons';
 import { getPreviewOptions } from '../../util/previewoptions';
 import { technologyCountryOption } from './countryicons';
 
@@ -249,6 +250,7 @@ async function renderFolderSelector(folderOptionsHtml: string, styleTable: Style
             >⚠ ${localize('techtree.showlocnoindex', 'Localisation index is off — raw ids are shown. Enable the localisation index setting to see localised names.')}</span>
         </div>
         ${renderCountrySelector(styleTable)}
+        ${actionGroupHtml({ refresh: iconButtonHtml('refresh', localize, { domId: 'refresh' }) })}
     </div>`;
 }
 

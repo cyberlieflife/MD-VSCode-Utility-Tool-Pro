@@ -394,9 +394,17 @@ function navigateText(start: number | undefined, end: number | undefined, file: 
     });
 };
 
+// The refresh button, when the page has one. Idempotent per element: initCommon binds it for every
+// preview and a page that also binds it itself (GUI, tech tree) must not end up reloading twice per
+// click. Marking the element rather than a module flag keeps a re-render that replaces the button
+// able to bind the new one.
 export function subscribeRefreshButton() {
-    const button = document.getElementById('refresh') as HTMLButtonElement;
-    button?.addEventListener('click', function() {
+    const button = document.getElementById('refresh') as HTMLButtonElement | null;
+    if (!button || button.dataset.refreshBound === 'true') {
+        return;
+    }
+    button.dataset.refreshBound = 'true';
+    button.addEventListener('click', function() {
         vscode.postMessage({ command: 'reload' });
         button.disabled = true;
     });
@@ -463,6 +471,10 @@ export function initCommon(): void {
 
         enableDropdowns();
         enableCheckboxes();
+
+        // Every preview draws a refresh button in its toolbar; binding here saves each entry point
+        // from doing it, and the idempotent guard keeps a page that also binds it from double-firing.
+        subscribeRefreshButton();
 
         numDropDownOpened$.subscribe(num => {
             shouldDisableZoom = num > 0;

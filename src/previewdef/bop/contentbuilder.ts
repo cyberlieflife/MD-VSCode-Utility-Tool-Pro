@@ -8,6 +8,7 @@ import { StyleTable } from "../../util/styletable";
 import { jsonForScript } from "../../util/common";
 import { buildBopPreviewPayload } from "./build";
 import { LoaderRender, RenderContentOptions } from "../loaderpreview";
+import { actionGroupHtml, iconButtonHtml } from "../toolbaricons";
 
 // Height of the fixed toolbar strip, as the MIO preview's: room for the dropdown and the strip's
 // own thin scrollbar. The window is offset by it so it never renders underneath.
@@ -104,6 +105,7 @@ function renderToolBar(styleTable: StyleTable): string {
             </div>
             <label for="show-localisation" class="${labelStyle}">${localize("boppreview.showlocalisation", "Show localisation")}</label>
             <input type="checkbox" id="show-localisation">
+            ${actionGroupHtml({ refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }) })}
         </div>
     </div>`;
 }

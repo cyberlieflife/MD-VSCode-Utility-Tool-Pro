@@ -8,6 +8,7 @@ import { StyleTable } from "../../util/styletable";
 import { jsonForScript } from "../../util/common";
 import { buildDecisionGraphPayload } from "./graph";
 import { LoaderRender, RenderContentOptions } from "../loaderpreview";
+import { actionGroupHtml, iconButtonHtml } from "../toolbaricons";
 
 // Height of the fixed toolbar strip. The content is offset by it and enableZoom is told about it,
 // so the graph never renders underneath the toolbar.
@@ -184,6 +185,7 @@ function renderToolBar(styleTable: StyleTable): string {
 	)}">
         <div class="toolbar">
             ${search}${filters}${toggles}${collapseButtons}
+            ${actionGroupHtml({ refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }) })}
         </div>
     </div>`;
 }

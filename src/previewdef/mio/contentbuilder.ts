@@ -13,6 +13,7 @@ import { Mio, MioTrait, TraitEffect } from './schema';
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
 import { localisationIndex } from "../../util/featureflags";
 import { LoaderRender } from '../loaderpreview';
+import { actionGroupHtml, iconButtonHtml } from '../toolbaricons';
 
 const defaultTraitIcon = 'gfx/interface/goals/goal_unknown.dds';
 const traitEffectIconMap: Record<TraitEffect, string> = {
@@ -182,6 +183,7 @@ async function renderToolBar(mios: Mio[], styleTable: StyleTable, mioOptionsHtml
             ${mioSelect}
             ${conditions}
             ${toggles}
+            ${actionGroupHtml({ refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }) })}
         </div>
     </div>`;
 }

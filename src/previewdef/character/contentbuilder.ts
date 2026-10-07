@@ -8,6 +8,7 @@ import { StyleTable } from "../../util/styletable";
 import { jsonForScript } from "../../util/common";
 import { buildCharacterPreviewPayload } from "./build";
 import { LoaderRender, RenderContentOptions } from "../loaderpreview";
+import { actionGroupHtml, iconButtonHtml } from "../toolbaricons";
 
 // Height of the fixed toolbar strip. The roster is offset by it so it never renders underneath.
 // webviewsrc/characterpreview.ts and resource/characterpreview.css carry the same constant -- the
@@ -153,6 +154,7 @@ function renderToolBar(styleTable: StyleTable): string {
 	)}">
         <div class="toolbar">
             ${search}${filters}${toggles}
+            ${actionGroupHtml({ refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }) })}
         </div>
     </div>`;
 }

@@ -7,6 +7,7 @@ import { html, htmlEscape, previewedFileUriScript } from "../../util/html";
 import { StyleTable } from "../../util/styletable";
 import { forceError } from "../../util/common";
 import { LoaderRenderResult } from "../updateablepreview";
+import { actionGroupHtml, iconButtonHtml } from "../toolbaricons";
 
 // Renders the .gfx preview as a full html doc plus an in-place update payload. The update carries the
 // sprite list markup (contentHtml) and the accumulated CSS (styleCss); the webview swaps only the
@@ -73,6 +74,7 @@ function renderFilterBar(styleTable: StyleTable): string {
             id="filter"
             type="text"
         />
+        ${actionGroupHtml({ refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }) })}
     </div>`;
 }
 

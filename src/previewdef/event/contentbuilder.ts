@@ -11,6 +11,7 @@ import { arrayToMap, jsonForScript } from "../../util/common";
 import { buildEventGraphPayload, eventsToGraph } from "./graph";
 import { EventGraphPayload } from "./payload";
 import { LoaderRender, RenderContentOptions } from "../updateablepreview";
+import { actionGroupHtml, iconButtonHtml } from "../toolbaricons";
 
 // 固定工具栏条的高度。内容按它下移，enableZoom 也被告知它，图永远不会渲染到工具栏下面。
 //
@@ -175,6 +176,7 @@ function renderToolBar(styleTable: StyleTable): string {
     )}">
         <div class="toolbar">
             ${search}${filters}${toggles}
+            ${actionGroupHtml({ refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }) })}
         </div>
     </div>`;
 }

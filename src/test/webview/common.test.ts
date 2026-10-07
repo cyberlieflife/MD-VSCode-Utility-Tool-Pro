@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { takeRuntimeErrors } from './setup';
+import { takeRuntimeErrors, takePostedMessages } from './setup';
 import { copyArray, tryRun, getState, setState, enableZoom, scrollToState, subscribeNavigators, subscribeRefreshButton, initCommon } from '../../../webviewsrc/util/common';
 
 describe('webview/util/common', function () {
@@ -113,6 +113,38 @@ describe('webview/util/common', function () {
             subscribeRefreshButton();
             // Does not throw when clicked
             btn.dispatchEvent(new Event('click'));
+        });
+
+        it('posts a reload and disables the button when clicked', function () {
+            const btn = document.createElement('button');
+            btn.id = 'refresh';
+            document.body.appendChild(btn);
+
+            subscribeRefreshButton();
+            takePostedMessages();
+            btn.dispatchEvent(new Event('click'));
+
+            const posts = takePostedMessages();
+            assert.deepStrictEqual(posts, [{ command: 'reload' }]);
+            assert.strictEqual(btn.disabled, true, 'the button disables itself after a reload request');
+        });
+
+        it('binds the same button only once, so a click never reloads twice', function () {
+            const btn = document.createElement('button');
+            btn.id = 'refresh';
+            document.body.appendChild(btn);
+
+            // initCommon binds it, and a preview that also binds it must not add a second handler.
+            subscribeRefreshButton();
+            subscribeRefreshButton();
+            takePostedMessages();
+            btn.dispatchEvent(new Event('click'));
+
+            assert.strictEqual(takePostedMessages().length, 1, 'one click must post exactly one reload');
+        });
+
+        it('does nothing when the page has no refresh button', function () {
+            assert.doesNotThrow(() => subscribeRefreshButton());
         });
     });
 

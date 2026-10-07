@@ -21,7 +21,14 @@ export type IconSurface =
 	| "checkbox"
 	| "errorpage"
 	| "statusbar"
-	| "editortitle";
+	| "editortitle"
+	| "eventtree"
+	| "gfx"
+	| "mio"
+	| "technology"
+	| "idea"
+	| "character"
+	| "bop";
 
 export interface IconAction {
 	// A toggle with two looks names both; `on` is the icon while the thing it controls is shown.
@@ -73,7 +80,7 @@ export const iconActions = {
 		icon: "refresh",
 		tooltipKey: "common.topbar.refresh.title",
 		tooltip: "Refresh",
-		surfaces: ["gui", "worldmap", "errorpage"],
+		surfaces: ["gui", "worldmap", "errorpage", "eventtree", "focustree", "gfx", "mio", "technology", "decisiontree", "idea", "character", "bop"],
 	},
 	resetCheckboxes: {
 		icon: "discard",

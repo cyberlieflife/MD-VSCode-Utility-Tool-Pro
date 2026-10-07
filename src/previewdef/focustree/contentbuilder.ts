@@ -482,6 +482,8 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
     // file does not define itself.
     const editContinuousButton = iconButtonHtml('editContinuous', localize, { domId: 'edit-continuous-focus' });
 
+    const refreshButton = iconButtonHtml('refresh', localize, { domId: 'refresh' });
+
     // Shown by the webview only while a prerequisite trace is active, so there is always a visible
     // way out of the dimmed view. Hidden through an inline display rather than the `hidden`
     // attribute: the class below sets a display of its own, which would win over `[hidden]`.
@@ -533,6 +535,7 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
                 ${warningsButton}
                 ${editContinuousButton}
                 ${resetCheckboxesButton}
+                ${refreshButton}
                 ${traceStatus}
             </div>
             <div class="toolbar-row">
