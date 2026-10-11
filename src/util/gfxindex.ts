@@ -83,6 +83,37 @@ export function ensureGfxIndex(): Promise<void> {
     return builder.ensureBuilt();
 }
 
+// Sprite names carry whatever case their .gfx author used, and a picture or icon may reference
+// one in another case (the vanilla `GFX_idea_MEX` written as `mex`). The exact name is tried
+// first; this lowercase map is the fallback. The index keys themselves stay untouched, because
+// getIndexedGfxNames feeds a tag-prefix scan that reads their original case.
+let lowerGfxIndexVersion = -1;
+let lowerGfxIndex: Map<string, GfxIndexItem> = new Map();
+
+function getLowerGfxIndex(): Map<string, GfxIndexItem> {
+    const version = getGfxIndexVersion();
+    if (version !== lowerGfxIndexVersion) {
+        const lower = new Map<string, GfxIndexItem>();
+        const add = (index: Record<string, GfxIndexItem | undefined>): void => {
+            for (const key in index) {
+                const item = index[key];
+                // First wins, so the halves keep the precedence of the exact lookup below.
+                if (item && !lower.has(key.toLowerCase())) {
+                    lower.set(key.toLowerCase(), item);
+                }
+            }
+        };
+        add(workspaceGfxIndex);
+        for (const index of parentGfxIndexes) {
+            add(index);
+        }
+        add(globalGfxIndex);
+        lowerGfxIndex = lower;
+        lowerGfxIndexVersion = version;
+    }
+    return lowerGfxIndex;
+}
+
 /** The game's order: the working mod, then the mods it extends, then vanilla. */
 export async function getGfxContainerFile(gfxName: string | undefined): Promise<string | undefined> {
     if (!gfxIndex || !gfxName) {
@@ -93,7 +124,8 @@ export async function getGfxContainerFile(gfxName: string | undefined): Promise<
     return (
         workspaceGfxIndex[gfxName] ??
         parentGfxIndexes.map(index => index[gfxName]).find(item => item !== undefined) ??
-        globalGfxIndex[gfxName]
+        globalGfxIndex[gfxName] ??
+        getLowerGfxIndex().get(gfxName.toLowerCase())
     )?.file;
 }
 

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Node, parseHoi4File, resolveScriptVariables, SymbolNode } from '../hoiformat/hoiparser';
-import { getSpriteByGfxName, Sprite } from '../util/image/imagecache';
+import { Sprite } from '../util/image/imagecache';
+import { ideaPictureSpriteNames, resolveIdeaSprite } from '../util/ideaPicture';
 import { Hoi4FsSchema } from '../constants';
 import { localize } from '../util/i18n';
 
@@ -65,13 +66,9 @@ export function extractPictureName(node: Node): string | undefined {
 }
 
 export function buildGfxCandidates(pictureName: string): string[] {
-    // Ideas reference their icon by bare name and the sprite is conventionally named
-    // GFX_idea_<picture>; the bare GFX_<picture> spelling exists in the wild too. A value
-    // that already carries the GFX_ prefix is used as-is.
-    if (/^gfx_/i.test(pictureName)) {
-        return [pictureName];
-    }
-    return ['GFX_idea_' + pictureName, 'GFX_' + pictureName];
+    // Shared with the idea preview, which used to add the GFX_idea_ prefix to a picture that
+    // already carried it and then drew the placeholder for a sprite the hover could find.
+    return ideaPictureSpriteNames(pictureName);
 }
 
 // Plain-data payload so the content composition stays unit-testable without dragging
@@ -105,13 +102,7 @@ export function buildHoverMissMessage(candidates: string[]): string {
 }
 
 export async function resolveSprite(candidates: string[]): Promise<Sprite | undefined> {
-    for (const candidate of candidates) {
-        const sprite = await getSpriteByGfxName(candidate, IDEAS_GFX_FALLBACK);
-        if (sprite) {
-            return sprite;
-        }
-    }
-    return undefined;
+    return resolveIdeaSprite(candidates, IDEAS_GFX_FALLBACK);
 }
 
 // Parsed trees are memoized per document version: a hover fires on every small mouse move,

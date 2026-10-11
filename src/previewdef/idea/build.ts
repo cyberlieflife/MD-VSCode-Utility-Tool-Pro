@@ -1,11 +1,12 @@
 import { localise } from "../localise";
 import { navOf } from "../sharedpayload";
-import { getImageByPath, getSpriteByGfxName } from "../../util/image/imagecache";
+import { getImageByPath } from "../../util/image/imagecache";
+import { ideaPictureSpriteNames, resolveIdeaSprite } from "../../util/ideaPicture";
 import { StyleTable, normalizeForStyle } from "../../util/styletable";
 import { localize } from "../../util/i18n";
 import { IdeaSwap } from "../../util/ideaSwapIndex";
 import { HOIIdea } from "./schema";
-import { IdeasLoaderResult, ideaSpriteName } from "./loader";
+import { IdeasLoaderResult } from "./loader";
 import { formatModifiers, formatResearchBonuses } from "../../util/modifiers";
 import {
 	IdeaCard,
@@ -118,10 +119,7 @@ async function buildIcon(
 		return undefined;
 	}
 
-	const sprite = await getSpriteByGfxName(
-		ideaSpriteName(idea.picture),
-		loadResult.gfxFiles,
-	);
+	const sprite = await resolveIdeaSprite(ideaPictureSpriteNames(idea.picture), loadResult.gfxFiles);
 	const image = sprite?.image ??
 		(loadResult.placeholderIcon ? await getImageByPath(loadResult.placeholderIcon) : undefined);
 	if (!image) {

@@ -11,6 +11,7 @@ import { localize } from "../../util/i18n";
 import uniq from "lodash/uniq";
 import flatten from "lodash/flatten";
 import { getGfxContainerFiles } from "../../util/gfxindex";
+import { ideaPictureSpriteNames } from "../../util/ideaPicture";
 import { getConfiguration, getLanguageIdInYml } from "../../util/vsccommon";
 import { getDescriptorIdeaPlaceholderIcon, getFilePathFromModOrHOI4 } from "../../util/fileloader";
 import { Logger } from "../../util/logger";
@@ -62,11 +63,6 @@ export async function getIdeaPlaceholderIcon(): Promise<string | undefined> {
 		Logger.warn(`${source}: "${entry}" is not in the mod or the game install -- check the path`);
 	}
 	return await getFilePathFromModOrHOI4(vanillaIdeaPlaceholderIcon) ? vanillaIdeaPlaceholderIcon : undefined;
-}
-
-// `picture = shell_idea` is drawn from the sprite `GFX_idea_shell_idea`.
-export function ideaSpriteName(picture: string): string {
-	return `GFX_idea_${picture}`;
 }
 
 export class IdeasLoader extends ContentLoader<IdeasLoaderResult> {
@@ -123,7 +119,7 @@ export class IdeasLoader extends ContentLoader<IdeasLoaderResult> {
 				.flatMap((c) => c.ideas)
 				.map((i) => i.picture)
 				.filter((p): p is string => p !== undefined)
-				.map(ideaSpriteName),
+				.flatMap(ideaPictureSpriteNames),
 		);
 
 		const gfxDependencies = [

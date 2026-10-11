@@ -134,7 +134,10 @@ function getSpriteByKey(key: string): Promise<Sprite | undefined> {
 
 async function getSpriteByGfxNameImpl(name: string, gfxFilePath: string): Promise<Sprite | undefined> {
     const gfxMap = await gfxMapCache.get(gfxFilePath);
-    const sprite = gfxMap[name];
+    // Exact name first: one .gfx file may define two sprites differing only in case, and the exact
+    // spelling is the one the game would pick. The lowercase map is the fallback for a picture or
+    // icon written in a different case than its sprite (e.g. `mex` for `GFX_idea_MEX`).
+    const sprite = gfxMap.byName[name] ?? gfxMap.byLowerName.get(name.toLowerCase());
 
     if (sprite === undefined) {
         return undefined;
@@ -236,8 +239,17 @@ async function getImage(relativePath: string): Promise<Image | undefined> {
     }
 }
 
-async function loadGfxMap(path: string): Promise<Record<string, (SpriteType | CorneredTileSpriteType)>> {
-    const gfxMap: Record<string, SpriteType> = {};
+interface GfxMap {
+    // Sprites keyed by their name as written in the .gfx file.
+    byName: Record<string, SpriteType | CorneredTileSpriteType>;
+    // The same sprites keyed by lowercase name, so a picture or icon that differs only in case
+    // still resolves. Last definition wins, matching byName.
+    byLowerName: Map<string, SpriteType | CorneredTileSpriteType>;
+}
+
+async function loadGfxMap(path: string): Promise<GfxMap> {
+    const byName: Record<string, SpriteType | CorneredTileSpriteType> = {};
+    const byLowerName = new Map<string, SpriteType | CorneredTileSpriteType>();
     try {
         iconResolveStats.gfxMapParses++;
         const [buffer, realPath] = await readFileFromModOrHOI4(path);
@@ -245,11 +257,14 @@ async function loadGfxMap(path: string): Promise<Record<string, (SpriteType | Co
         const node = parseHoi4FileToleratingUnclosedTail(gfx, localize('infile', 'In file {0}:\n', realPath));
         const spriteTypes = getSpriteTypes(node);
 
-        spriteTypes.forEach(st => gfxMap[st.name] = st);
+        for (const st of spriteTypes) {
+            byName[st.name] = st;
+            byLowerName.set(st.name.toLowerCase(), st);
+        }
 
     } catch (e) {
         error(e);
     }
 
-    return gfxMap;
+    return { byName, byLowerName };
 }

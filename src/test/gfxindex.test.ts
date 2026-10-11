@@ -134,6 +134,14 @@ describe('util/gfxindex', () => {
             );
         });
 
+        // A picture or icon may name its sprite in a different case than the .gfx file wrote it.
+        it('resolves a name written in a different case than the sprite', async () => {
+            assert.strictEqual(
+                await gfxindex.getGfxContainerFile('gfx_focus_test_sprite'),
+                'interface/goals_test.gfx',
+            );
+        });
+
         // The technology country-icon list reads the whole namespace rather than probing names, so it
         // needs the sprite names themselves -- and a version counter for a derived cache to compose
         // into its expiry token.
