@@ -6,6 +6,7 @@ import { wireUpdateBody } from "./util/updatebody";
 import { vscode } from "./util/vscode";
 import { buildGuiFrame } from "./util/guiframe";
 import { normalizeForStyle } from "../src/util/styletable";
+import { localisationToHtml, localisationToText } from "../src/util/localisationMarkup";
 import {
 	BopCard,
 	BopPreviewPayload,
@@ -46,6 +47,17 @@ export function clampValue(value: number): number {
 
 function textFor(loc: LocText): string {
 	return showLocalisation ? loc.text : loc.key;
+}
+
+// The same string with the game's colour codes rendered, for the places that show HTML. With the
+// toggle on the keys the text is drawn from carry no codes, so this is the plain text either way.
+function textForHtml(loc: LocText): string {
+	return localisationToHtml(textFor(loc));
+}
+
+// Where HTML cannot go -- a `title` attribute, a `<select>` option -- the codes are dropped instead.
+function textForPlain(loc: LocText): string {
+	return localisationToText(textFor(loc));
 }
 
 function formatValue(value: number): string {
@@ -105,6 +117,24 @@ function slotsOf(frame: HTMLElement, card: BopCard, window: BopWindowView): Wind
 		}
 	}
 
+	// A hover area per range, over the stretch of the bar it covers: the game prints a range's
+	// modifiers when the pointer rests on it. Built under the ticks, so a tick keeps its own click.
+	const hoverLayer = frame.querySelector<HTMLElement>(".bop-slot-hover");
+	if (hoverLayer) {
+		for (const range of card.ranges) {
+			const area = document.createElement("div");
+			area.className = "bop-slot-range";
+			const left = barX(window, range.min);
+			const right = barX(window, range.max);
+			area.style.left = `${left}px`;
+			area.style.top = `${window.bar.y}px`;
+			area.style.width = `${right - left}px`;
+			area.style.height = `${window.bar.height}px`;
+			wireRangeTooltip(area, range);
+			hoverLayer.appendChild(area);
+		}
+	}
+
 	return {
 		window,
 		title: frame.querySelector<HTMLElement>(".bop-slot-title") ?? undefined,
@@ -113,6 +143,81 @@ function slotsOf(frame: HTMLElement, card: BopCard, window: BopWindowView): Wind
 		fills,
 		marks,
 	};
+}
+
+// How long the pointer must rest on a range before its panel opens, long enough that sliding across
+// the bar does not flash a panel per range.
+const rangeHoverDelay = 150;
+
+// The panel a range opens: its name, the modifiers it applies, and the custom tooltip lines under
+// them. A range that carries none of those opens nothing.
+function wireRangeTooltip(area: HTMLElement, range: BopRangeView): void {
+	if (range.modifiers.length === 0 && range.customTooltips.length === 0) {
+		return;
+	}
+
+	let panel: HTMLElement | undefined;
+	let timer: number | undefined;
+
+	area.addEventListener("mouseenter", () => {
+		timer = window.setTimeout(() => {
+			timer = undefined;
+			if (!area.isConnected) {
+				return;
+			}
+			panel = buildRangePanel(range);
+			document.body.append(panel);
+			const box = area.getBoundingClientRect();
+			// Centred on the range and above the bar, so it does not cover the bar it describes.
+			panel.style.left = `${Math.max(4, box.left + box.width / 2 - panel.offsetWidth / 2)}px`;
+			panel.style.top = `${Math.max(4, box.top - panel.offsetHeight - 6)}px`;
+		}, rangeHoverDelay);
+	});
+	area.addEventListener("mouseleave", () => {
+		if (timer !== undefined) {
+			window.clearTimeout(timer);
+			timer = undefined;
+		}
+		panel?.remove();
+		panel = undefined;
+	});
+}
+
+function buildRangePanel(range: BopRangeView): HTMLElement {
+	const panel = document.createElement("div");
+	panel.className = "bop-range-tip";
+
+	const head = document.createElement("div");
+	head.className = "bop-range-tip-head";
+	head.innerHTML = textForHtml(range.name);
+	panel.appendChild(head);
+
+	for (const line of range.modifiers) {
+		const row = document.createElement("div");
+		row.className = "bop-range-tip-mod";
+
+		const name = document.createElement("span");
+		name.className = "bop-range-tip-name";
+		name.textContent = line.name;
+		name.title = line.key;
+		row.appendChild(name);
+
+		const value = document.createElement("span");
+		value.className = "bop-range-tip-value bop-range-tip-" + line.tone;
+		value.textContent = line.value;
+		row.appendChild(value);
+
+		panel.appendChild(row);
+	}
+
+	for (const tooltip of range.customTooltips) {
+		const row = document.createElement("div");
+		row.className = "bop-range-tip-text";
+		row.innerHTML = textForHtml(tooltip);
+		panel.appendChild(row);
+	}
+
+	return panel;
 }
 
 // The range a tick at `value` opens: of the two it separates, the one further from the centre,
@@ -139,7 +244,7 @@ function barX(window: BopWindowView, value: number): number {
 
 function rangeText(range: BopRangeView | undefined, value: number): string {
 	return range
-		? textFor(range.name)
+		? textForPlain(range.name)
 		: feLocalize("boppreview.norange", "No range covers {0}.", formatValue(value));
 }
 
@@ -176,7 +281,10 @@ function drawValue(
 	}
 
 	if (slots.activeRange) {
-		slots.activeRange.textContent = rangeText(range, value);
+		// innerHTML, not textContent: the range name is a localisation value and may carry the game's
+		// colour codes, which localisationToHtml renders and escapes everything else -- the
+		// no-range fallback is a translated string with no codes, and is escaped by the same call.
+		slots.activeRange.innerHTML = range ? textForHtml(range.name) : localisationToHtml(rangeText(range, value));
 		linkRange(slots.activeRange, range);
 	}
 }
@@ -238,7 +346,8 @@ function syncToolbar(card: BopCard | undefined): void {
 			...payload.cards.map((c) => {
 				const option = document.createElement("option");
 				option.value = c.key;
-				const title = textFor(c.title);
+				// A `<select>` option is plain text, so the colour codes are dropped rather than drawn.
+				const title = textForPlain(c.title);
 				option.textContent = title === c.id ? c.id : `(${c.id}) ${title}`;
 				return option;
 			}),
@@ -299,12 +408,12 @@ function buildContent(): void {
 		});
 		shown.slots = slotsOf(frame, card, card.window);
 		if (shown.slots.title) {
-			shown.slots.title.textContent = textFor(card.title);
+			shown.slots.title.innerHTML = textForHtml(card.title);
 		}
 		for (const { id, text } of card.window.texts) {
 			const element = frame.querySelector<HTMLElement>(".bop-slot-text-" + normalizeForStyle(id));
 			if (element) {
-				element.textContent = textFor(text);
+				element.innerHTML = textForHtml(text);
 			}
 		}
 		fillDecisions(frame, card);
@@ -335,7 +444,7 @@ function fillDecisions(frame: HTMLElement, card: BopCard): void {
 		}
 		const name = row.querySelector<HTMLElement>(".bop-decision-name");
 		if (name) {
-			name.textContent = textFor(decision.name);
+			name.innerHTML = textForHtml(decision.name);
 		}
 		row.title = decision.id;
 		applyNav(row, decision.nav, true);
@@ -349,7 +458,7 @@ function decisionList(card: BopCard): HTMLElement {
 	for (const decision of card.decisions) {
 		const row = document.createElement("div");
 		row.className = "bop-decision";
-		row.textContent = textFor(decision.name);
+		row.innerHTML = textForHtml(decision.name);
 		row.title = decision.id;
 		applyNav(row, decision.nav, true);
 		list.appendChild(row);

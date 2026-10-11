@@ -19,6 +19,11 @@ import { describeParseFailure } from "../../util/debug";
 import { HOIDecision } from "../decision/schema";
 import { decisionSpriteName, getDecisionGfxFiles } from "../decision/loader";
 import { decisionItemWindowName, decisionsFolder, loadCategoryDecisions } from "./decisions";
+import {
+	ModifierDefinitions,
+	listModifierDefinitionFiles,
+	loadModifierDefinitions,
+} from "../../util/modifiers";
 
 export interface BopWindowTemplates {
 	// The tick the game puts at every range boundary.
@@ -37,6 +42,8 @@ export interface BopLoaderResult {
 	decisions: Record<string, HOIDecision[]>;
 	// The row the game draws each of those decisions with.
 	decisionItem?: ResolvedGuiWindow;
+	// How a range's modifier block reads, the same definitions the idea and decision previews use.
+	modifierDefinitions: ModifierDefinitions;
 }
 
 export const bopWindowName = "powerbalanceview";
@@ -92,6 +99,11 @@ export class BopLoader extends ContentLoader<BopLoaderResult> {
 		const decisionItem = categories.length > 0 ? windows[decisionItemWindowName] : undefined;
 		const templates = window ? await loadTemplates(window.file) : {};
 
+		const [modifierDefinitions, definitionFiles] = await Promise.all([
+			loadModifierDefinitions(),
+			listModifierDefinitionFiles(),
+		]);
+
 		const sprites = [
 			...bops.bops.flatMap((b) => b.sides).map((s) => s.icon),
 			...(window ? spritesOf(window.window) : []),
@@ -113,7 +125,7 @@ export class BopLoader extends ContentLoader<BopLoaderResult> {
 		]);
 
 		return {
-			result: { bops, gfxFiles, window, templates, decisions, decisionItem },
+			result: { bops, gfxFiles, window, templates, decisions, decisionItem, modifierDefinitions },
 			// The window's .gui and the .gfx files its sprites and the side icons come from, and the
 			// decisions folder the listed decisions are read from. Reporting them subscribes the
 			// preview to them; renderBopFile then forces the session on a dependency change, since
@@ -124,6 +136,7 @@ export class BopLoader extends ContentLoader<BopLoaderResult> {
 				...(decisionItem ? [decisionItem.file] : []),
 				...(categories.length > 0 ? [`${decisionsFolder}/*`] : []),
 				...gfxFiles,
+				...definitionFiles,
 			]),
 		};
 	}

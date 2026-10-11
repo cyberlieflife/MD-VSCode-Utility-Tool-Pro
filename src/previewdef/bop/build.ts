@@ -2,6 +2,7 @@ import { localise } from "../localise";
 import { navOf } from "../sharedpayload";
 import { getSpriteByGfxName } from "../../util/image/imagecache";
 import { StyleTable } from "../../util/styletable";
+import { ModifierDefinitions, formatModifiers } from "../../util/modifiers";
 import { localize } from "../../util/i18n";
 import { HOIBop, HOIBopRange } from "./schema";
 import { BopLoaderResult, bopWindowName } from "./loader";
@@ -27,6 +28,7 @@ export async function buildBopPreviewPayload(
 			(c) =>
 				c.title.text !== c.title.key ||
 				c.ranges.some((r) => r.name.text !== r.name.key) ||
+				c.ranges.some((r) => r.customTooltips.some((t) => t.text !== t.key)) ||
 				c.decisions.some((d) => d.name.text !== d.name.key) ||
 				(c.window?.texts ?? []).some((t) => t.text.text !== t.text.key),
 		),
@@ -57,7 +59,7 @@ async function buildCard(
 			...(bop.centreRange ? [bop.centreRange] : []),
 			...(leftSide?.ranges ?? []),
 			...(rightSide?.ranges ?? []),
-		].map((r) => buildRange(r, bop.file)),
+		].map((r) => buildRange(r, bop.file, loadResult.modifierDefinitions)),
 	);
 	ranges.sort((a, b) => a.min - b.min || a.max - b.max);
 
@@ -125,13 +127,20 @@ async function buildCard(
 	};
 }
 
-async function buildRange(range: HOIBopRange, file: string): Promise<BopRangeView> {
+async function buildRange(
+	range: HOIBopRange,
+	file: string,
+	definitions: ModifierDefinitions,
+): Promise<BopRangeView> {
 	return {
 		id: range.id,
 		name: await localise(range.id),
 		// A range written max-first still covers the same stretch of the bar.
 		min: Math.min(range.min, range.max),
 		max: Math.max(range.min, range.max),
+		// What the game lists while the pointer rests on the range.
+		modifiers: await formatModifiers(range.modifiers, definitions),
+		customTooltips: await Promise.all(range.customTooltips.map(localise)),
 		nav: navOf(range.token, file),
 	};
 }

@@ -71,7 +71,7 @@ export async function renderBopWindow(
 	const absolute = styleTable.style("positionAbsolute", () => `position: absolute;`);
 	const origin = styleTable.style("bop-slot-origin", () => `left: 0; top: 0;`);
 
-	let bar = { x: 0, y: 0, width: defaultBarWidth };
+	let bar = { x: 0, y: 0, width: defaultBarWidth, height: defaultBarHeight };
 	const texts: BopWindowText[] = [];
 
 	// Where the game slides the window in on screen says nothing about the window itself, and would
@@ -256,7 +256,7 @@ async function renderValueSlot(
 	options: RenderNodeCommonOptions,
 	absolute: string,
 	origin: string,
-): Promise<{ html: string; bar: { x: number; y: number; width: number } }> {
+): Promise<{ html: string; bar: { x: number; y: number; width: number; height: number } }> {
 	const [x, y] = calculateBBox(icon, parentInfo);
 	const variants = [
 		["left", bopFillSprites.left],
@@ -292,7 +292,9 @@ async function renderValueSlot(
 	);
 
 	return {
-		html: `<div class="bop-slot-value ${absolute} ${slot}">${fills}</div><div class="bop-slot-marks ${absolute} ${origin}"></div>`,
-		bar: { x, y, width },
+		// The hover layer sits between the fill and the ticks, so a range's hover area is under the
+		// tick that opens it and never swallows the click.
+		html: `<div class="bop-slot-value ${absolute} ${slot}">${fills}</div><div class="bop-slot-hover ${absolute} ${origin}"></div><div class="bop-slot-marks ${absolute} ${origin}"></div>`,
+		bar: { x, y, width, height },
 	};
 }

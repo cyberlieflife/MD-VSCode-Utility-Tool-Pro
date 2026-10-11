@@ -5,14 +5,18 @@
 // And the payload must be deterministic: LoaderPreview hashes it to decide whether an edit changed
 // anything, so a stable order is what makes an unchanged edit skip the re-render.
 
-export { LocText, NavTarget } from "../sharedpayload";
-import { LocText, NavTarget } from "../sharedpayload";
+export { LocText, NavTarget, ModifierLine } from "../sharedpayload";
+import { LocText, ModifierLine, NavTarget } from "../sharedpayload";
 
 export interface BopRangeView {
 	id: string;
 	name: LocText;
 	min: number;
 	max: number;
+	// What the range applies while the value is in it, as the game prints it when the pointer rests
+	// on the range: the `modifier` block, formatted, and the `custom_modifier_tooltip` lines in it.
+	modifiers: ModifierLine[];
+	customTooltips: LocText[];
 	nav?: NavTarget;
 }
 
@@ -25,8 +29,8 @@ export interface BopWindowView {
 	width: number;
 	height: number;
 	// The bar the value moves along, in the window's own coordinates: value -1 at `x`, 1 at
-	// `x + width`.
-	bar: { x: number; y: number; width: number };
+	// `x + width`. The height is the bar sprite's, which is how tall a range's hover area is.
+	bar: { x: number; y: number; width: number; height: number };
 	// The window's own texts, each drawn empty in `.bop-slot-text-<id>` for the webview to fill with
 	// the key or its localisation, whichever the toggle asks for.
 	texts: BopWindowText[];

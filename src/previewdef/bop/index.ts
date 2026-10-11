@@ -51,9 +51,10 @@ class BopPreview extends LoaderPreview<BopLoader> {
 	}
 
 	// previewLocalisation changes the text in the payload; localisationIndex changes whether there
-	// is any text to show; gfxIndex changes which side icons resolve.
+	// is any text to show; gfxIndex changes which side icons resolve; modifierFormatFiles changes
+	// how a range's modifier values read.
 	protected override get reloadOnConfigurationChange(): readonly string[] {
-		return ["previewLocalisation", "localisationIndex", "gfxIndex"];
+		return ["previewLocalisation", "localisationIndex", "gfxIndex", "modifierFormatFiles"];
 	}
 }
 

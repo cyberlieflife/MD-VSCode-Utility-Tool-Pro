@@ -54,6 +54,73 @@
 	top: 0;
 }
 
+/* The hover areas sit between the fill and the ticks: pointer events reach them, but the ticks are
+   drawn after and keep their own click. */
+.bop-slot-hover {
+	pointer-events: none;
+}
+
+.bop-slot-range {
+	position: absolute;
+	pointer-events: auto;
+}
+
+/* ---------- Range tooltip ---------- */
+
+/* A range's modifiers, printed on hover the way the game prints them. It is appended to <body>,
+   outside the window's `overflow: hidden`, so it is placed in viewport coordinates. */
+.bop-range-tip {
+	position: fixed;
+	z-index: 100;
+	max-width: 260px;
+	padding: 6px 8px;
+	border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+	border-radius: 3px;
+	background: var(--vscode-editorHoverWidget-background, #252526);
+	color: var(--vscode-editorHoverWidget-foreground, #cccccc);
+	font-size: 11px;
+	line-height: 1.5;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.36);
+}
+
+.bop-range-tip-head {
+	margin-bottom: 3px;
+	font-weight: 600;
+}
+
+.bop-range-tip-mod {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.bop-range-tip-name {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.bop-range-tip-value {
+	flex: none;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-variant-numeric: tabular-nums;
+}
+
+.bop-range-tip-good {
+	color: var(--ev-good);
+}
+
+.bop-range-tip-bad {
+	color: var(--ev-bad);
+}
+
+.bop-range-tip-neutral {
+	color: var(--ev-fg);
+}
+
+.bop-range-tip-text {
+	margin-top: 3px;
+}
+
 .bop-mark-indicator {
 	display: none;
 }
