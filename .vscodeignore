@@ -5,6 +5,7 @@
 .mimosa/**
 .zcode/**
 .zcodeignore
+.codeindex.json
 out/**
 out-test/**
 out-test-webview/**
