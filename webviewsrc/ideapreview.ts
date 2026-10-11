@@ -3,6 +3,9 @@ import { SearchBox } from "./util/searchbox";
 import { applyNav, badge } from "./util/card";
 import { FilterControl, gateToggle, readFilterList, toggleBinder } from "./util/toolbar";
 import { feLocalize } from "./util/i18n";
+import { closeContextMenu, sharedContextMenuEl, showContextMenu } from "./util/contextmenu";
+import { handleIconPickerMessage } from "./util/iconpicker";
+import { handleIdeaEditorMessage, openCreateIdeaDialog, openIdeaEditDialog } from "./ideaeditdialog";
 import { wireUpdateBody } from "./util/updatebody";
 import { ConditionComplexExpr } from "../src/hoiformat/condition";
 import {
@@ -272,12 +275,32 @@ function appendGroups(card: HTMLDivElement, groups: ModifierGroup[]): void {
 	}
 }
 
+function openCardMenu(x: number, y: number, card: IdeaCard): void {
+	showContextMenu("idea-contextmenu", x, y, [
+		{
+			label: feLocalize("ideapreview.edit.menu", "Edit idea"),
+			onClick: () => openIdeaEditDialog(card),
+		},
+		{
+			label: feLocalize("ideapreview.edit.new", "New idea"),
+			onClick: () => openCreateIdeaDialog(payload.groups.map((group) => group.category)),
+		},
+	]);
+}
+
 function buildCard(card: IdeaCard): HTMLDivElement {
 	const element = document.createElement("div");
 	element.className =
 		"ev-card idea-card" + (card.isDefault ? " idea-card-default" : "");
 	element.tabIndex = 0;
 	applyNav(element, card.nav);
+	// Right-click opens the edit menu; the card is the idea the dialog writes back to. The event
+	// stops here so nothing above the card opens a menu of its own for the same right-click.
+	element.addEventListener("contextmenu", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		openCardMenu(event.clientX, event.clientY, card);
+	});
 
 	const head = document.createElement("div");
 	head.className = "ev-head";
@@ -752,6 +775,23 @@ window.addEventListener(
 		buildContent();
 	}),
 );
+
+// A press anywhere outside the context menu dismisses it, the way the focus tree's menu behaves.
+document.addEventListener("pointerdown", (event) => {
+	const menu = sharedContextMenuEl();
+	if (menu && !menu.contains(event.target as Node)) {
+		closeContextMenu();
+	}
+});
+
+// The icon picker's streamed names/images and the editor's results arrive as page messages; each
+// module answers for its own message types, and anything else is left to the update handler.
+window.addEventListener("message", (event) => {
+	if (handleIconPickerMessage(event.data)) {
+		return;
+	}
+	handleIdeaEditorMessage(event.data);
+});
 
 // Exported for the tests, which drive the roster without a load event.
 export { buildContent };

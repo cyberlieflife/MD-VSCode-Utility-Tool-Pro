@@ -605,4 +605,33 @@ describe("webview/ideapreview rendering", () => {
 			}),
 		);
 	});
+
+	it("offers editing and creating from a card's context menu", () => {
+		window.dispatchEvent(
+			new (window as any).MessageEvent("message", {
+				data: { type: "updateBody", data: { ideaPreview: integrationPayload } },
+			}),
+		);
+
+		const cardEl = content().querySelector(".idea-card") as HTMLElement;
+		assert.ok(cardEl, "the roster should render at least one card");
+		cardEl.dispatchEvent(new (window as any).MouseEvent("contextmenu", {
+			clientX: 10, clientY: 10, bubbles: true, cancelable: true,
+		}));
+
+		const menu = document.querySelector(".idea-contextmenu");
+		assert.ok(menu, "right-click should open the edit menu");
+		const editItem = [...menu!.querySelectorAll("div")].find((d) => d.textContent === "Edit idea");
+		assert.ok(editItem, "the menu should offer Edit idea, got: " + menu!.textContent);
+		assert.ok(
+			[...menu!.querySelectorAll("div")].some((d) => d.textContent === "New idea"),
+			"the menu should offer New idea",
+		);
+
+		editItem!.dispatchEvent(new (window as any).MouseEvent("click", { bubbles: true }));
+		assert.ok(document.querySelector(".idea-edit"), "the edit dialog should open");
+
+		document.querySelector(".idea-edit")?.remove();
+		document.querySelector(".idea-contextmenu")?.remove();
+	});
 });

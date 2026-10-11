@@ -104,7 +104,19 @@ async function buildCard(
 		available: idea.available,
 		hasEffects: idea.hasOnAdd || idea.hasOnRemove,
 		nav: navOf(idea.token, idea.file),
+		edit: {
+			picture: idea.picture,
+			modifiers: idea.modifiers.map(({ key, value }) => ({ key, value: modifierValueText(value) })),
+		},
 	};
+}
+
+// 写回文件时的取值：布尔量按 HOI4 的 yes/no 写，其余按字面量。
+function modifierValueText(value: number | string | boolean): string {
+	if (typeof value === "boolean") {
+		return value ? "yes" : "no";
+	}
+	return String(value);
 }
 
 async function buildIcon(

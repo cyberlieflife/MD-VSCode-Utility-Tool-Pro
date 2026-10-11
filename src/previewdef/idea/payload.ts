@@ -27,6 +27,14 @@ export interface IdeaIcon {
 	height: number;
 }
 
+// What the edit dialog needs to write back: the picture's bare name and the modifier block's raw
+// key/value pairs in file order. Kept separate from the rendered fields because the display text is
+// formatted (signs, percentages) and cannot be turned back into a value the file would accept.
+export interface IdeaEditData {
+	picture?: string;
+	modifiers: { key: string; value: string }[];
+}
+
 export interface IdeaCard {
 	id: string;
 	category: string;
@@ -53,6 +61,9 @@ export interface IdeaCard {
 	available: ConditionComplexExpr;
 	hasEffects: boolean;
 	nav?: NavTarget;
+	// The raw values the edit dialog starts from and writes back. Optional so a cached page built
+	// before this field existed still renders; the dialog falls back to empty values.
+	edit?: IdeaEditData;
 }
 
 export interface IdeaGroup {
