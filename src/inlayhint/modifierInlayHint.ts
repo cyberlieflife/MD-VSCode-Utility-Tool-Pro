@@ -46,18 +46,38 @@ export function isModifierScriptFile(uri: vscode.Uri): boolean {
     return modifierScriptSchemes.includes(uri.scheme) && /\.txt$/i.test(uri.path);
 }
 
+// Modifiers whose display name the game stores under a key other than the modifier's own name. The
+// mapping lives inside the executable and cannot be read from the game files, so it is written out
+// here; every entry is the single MODIFIER_* key the install carries that modifier's text under.
+// Paradox abbreviated the key (`military_industrial_organization_*` is filed under `MODIFIER_MIO_*`)
+// or added a qualifier to it (`refit_ic_cost` under `MODIFIER_INDUSTRIAL_REFIT_IC_COST_FACTOR`).
+const modifierLocalisationAliases: Record<string, string> = {
+    refit_ic_cost: 'MODIFIER_INDUSTRIAL_REFIT_IC_COST_FACTOR',
+    critical_receive_chance: 'MODIFIER_NAVAL_CRITICAL_RECEIVE_CHANCE_FACTOR',
+    fighter_sortie_efficiency: 'MODIFIER_CARRIER_FIGHTER_SORTIE_EFFICIENCY_FACTOR',
+    generate_wargoal_tension: 'MODIFIER_GENERATE_WARGOAL_TENSION_LIMIT',
+    request_lease_tension: 'MODIFIER_REQUEST_LEASE_TENSION_LIMIT',
+    military_industrial_organization_design_team_assign_cost: 'MODIFIER_MIO_DESIGN_TEAM_ASSIGN_COST',
+    military_industrial_organization_design_team_change_cost: 'MODIFIER_MIO_DESIGN_TEAM_CHANGE_COST',
+    military_industrial_organization_industrial_manufacturer_assign_cost: 'MODIFIER_MIO_INDUSTRIAL_MANUFACTURER_ASSIGN_COST',
+    military_industrial_organization_size_up_requirement: 'MODIFIER_MIO_FUNDS_SIZE_UP_REQUIREMENT',
+};
+
 /**
- * Returns the localisation keys to try for a modifier name, most specific first. Vanilla localisation
- * is inconsistent about the key shape, so an upper-cased MODIFIERS_/MODIFIER_ prefix and the
- * lower-case `modifier_` prefix are all tried; `MODIFIERS_` wins because the game tooltips reference
- * that form when both exist for the same name. The `<name>_tt` tooltip key is tried last: several
- * modifiers (monthly_population, experience_gain_army_factor) have no key of their own and are only
- * mapped through it.
+ * Returns the localisation keys to try for a modifier name, most specific first. A modifier the game
+ * filed under another key is looked up there first. Vanilla localisation is inconsistent about the
+ * key shape otherwise, so an upper-cased MODIFIERS_/MODIFIER_ prefix and the lower-case `modifier_`
+ * prefix are all tried; `MODIFIERS_` wins because the game tooltips reference that form when both
+ * exist for the same name. The `<name>_tt` tooltip key is tried last: several modifiers
+ * (monthly_population, experience_gain_army_factor) have no key of their own and are only mapped
+ * through it.
  */
 export function buildModifierLocalisationKeys(name: string): string[] {
     const upperName = name.toUpperCase();
     const excluded = excludedModifierNames.has(name.toLowerCase()) || excludedModifierNameSuffixes.test(name);
-    const keys: string[] = [`MODIFIERS_${upperName}`];
+    const alias = modifierLocalisationAliases[name.toLowerCase()];
+    const keys: string[] = alias ? [alias] : [];
+    keys.push(`MODIFIERS_${upperName}`);
     if (!excluded) {
         keys.push(`MODIFIER_${upperName}`);
     }
@@ -163,15 +183,24 @@ function extractTooltipName(raw: string, lookup: (key: string) => string | undef
  * Returns the text to show for a modifier name, or undefined when no candidate key resolves. A
  * `<name>_tt` tooltip value is used only when it binds a value: the referenced name is then shown
  * instead of the whole tooltip. Any other key is formatted as a plain value.
+ *
+ * The previews resolve their modifier names through this too, so a modifier reads the same on a card
+ * as it does in a hint.
  */
-function resolveModifierHintText(name: string, lookup: (key: string) => string | undefined): string | undefined {
+export function resolveModifierLocalisedName(name: string, lookup: (key: string) => string | undefined): string | undefined {
     for (const key of buildModifierLocalisationKeys(name)) {
         const text = lookup(key);
         if (text === undefined) {
             continue;
         }
         if (key !== `${name}_tt`) {
-            return formatInlayText(text, lookup);
+            // A value that is nothing but icon tokens (`MODIFIER_TECH_PREFIX: " £tech_mod "`) names no
+            // modifier, so it keeps the search going instead of ending it with an empty name.
+            const formatted = formatInlayText(text, lookup);
+            if (formatted !== '') {
+                return formatted;
+            }
+            continue;
         }
         if (!hasValueBinding(text)) {
             return undefined;
@@ -203,7 +232,7 @@ export function collectModifierHints(root: Node, lookup: (key: string) => string
     while (stack.length > 0) {
         const node = stack.pop()!;
         if (node.name !== null && node.nameToken !== null && modifierNameRegex.test(node.name)) {
-            const text = resolveModifierHintText(node.name, lookup);
+            const text = resolveModifierLocalisedName(node.name, lookup);
             if (text !== undefined && text !== '') {
                 hints.push({ offset: node.nameToken.end, text });
             }

@@ -1,13 +1,16 @@
 import * as assert from "assert";
 import { parseHoi4File } from "../hoiformat/hoiparser";
+import { buildModifierLocalisationKeys } from "../inlayhint/modifierInlayHint";
 import {
 	ModifierDefinitions,
 	formatModifierValue,
 	formatResearchBonuses,
 	humaniseKey,
+	modifierKeysFromLocalisationKeys,
 	readModifierDefinitions,
 	readModifierFormats,
 	resolveDefinition,
+	resolvePreviewModifierName,
 	toneFor,
 } from "../util/modifiers";
 
@@ -106,6 +109,128 @@ describe("previewdef/idea/modifiers resolution", () => {
 		const definitions = definitionsOf(`conscription = { value_type = number precision = 3 }`);
 		assert.strictEqual(resolveDefinition("conscription", definitions).valueType, "number");
 		assert.strictEqual(resolveDefinition("conscription", definitions).precision, 3);
+	});
+});
+
+// What a modifier is called on a card. Vanilla spells the key shapes inconsistently: most modifiers
+// are localised under MODIFIER_<KEY IN CAPITALS>, building and production modifiers under
+// modifier_<key>, a few are named only by a <key>_tt tooltip, and a modifier defined in
+// common/modifier_definitions is localised under its own bare token. Missing any one of them shows
+// the key spaced out in capitals, which reads as an untranslated card.
+describe("previewdef/idea/modifiers localised names", () => {
+	function lookupOf(entries: Record<string, string>): (key: string) => string | undefined {
+		return (key) => entries[key];
+	}
+
+	it("resolves every key shape vanilla writes", () => {
+		const lookup = lookupOf({
+			MODIFIER_STABILITY_FACTOR: "Stability",
+			modifier_production_speed_industrial_complex_factor: "Civilian Factory construction speed",
+			monthly_population_tt: " $MODIFIER_GLOBAL_MONTHLY_POPULATION$: $RIGHT|+=%1$",
+			MODIFIER_GLOBAL_MONTHLY_POPULATION: "Monthly Population",
+			operation_cost: "Operation cost",
+		});
+
+		assert.strictEqual(resolvePreviewModifierName("stability_factor", lookup), "Stability");
+		assert.strictEqual(
+			resolvePreviewModifierName("production_speed_industrial_complex_factor", lookup),
+			"Civilian Factory construction speed",
+		);
+		// Only the tooltip names this one, and it names the key that carries the text.
+		assert.strictEqual(resolvePreviewModifierName("monthly_population", lookup), "Monthly Population");
+		// A modifier a mod defines is localised under its own token.
+		assert.strictEqual(resolvePreviewModifierName("operation_cost", lookup), "Operation cost");
+	});
+
+	it("prefers the MODIFIERS_ shape the game's tooltips reference", () => {
+		const lookup = lookupOf({
+			MODIFIERS_WAR_SUPPORT_FACTOR: "War Support",
+			MODIFIER_WAR_SUPPORT_FACTOR: "War support, singular",
+		});
+		assert.strictEqual(resolvePreviewModifierName("war_support_factor", lookup), "War Support");
+	});
+
+	// A localisation value carries the game's colour codes and icon tokens; a card shows neither.
+	it("cleans the value it shows", () => {
+		const lookup = lookupOf({
+			modifier_production_speed_industrial_complex_factor: "§Y民用工厂§!建设速度",
+			MODIFIER_PRODUCTION_FACTORY_EFFICIENCY_GAIN_FACTOR: "£prod_eff 生产效率增长",
+		});
+
+		assert.strictEqual(
+			resolvePreviewModifierName("production_speed_industrial_complex_factor", lookup),
+			"民用工厂建设速度",
+		);
+		assert.strictEqual(
+			resolvePreviewModifierName("production_factory_efficiency_gain_factor", lookup),
+			"生产效率增长",
+		);
+	});
+
+	it("reports a modifier nothing localises, so the caller humanises the key", () => {
+		assert.strictEqual(resolvePreviewModifierName("nothing_localises_this", lookupOf({})), undefined);
+	});
+
+	// A few modifiers the game files under a key that is not their own name — Paradox abbreviated it
+	// for the military-industrial-organization costs and added a qualifier to the refit one. The
+	// mapping sits in the executable, so the shapes list carries it.
+	it("looks a modifier up under the key the game files it under", () => {
+		const lookup = lookupOf({
+			MODIFIER_INDUSTRIAL_REFIT_IC_COST_FACTOR: "舰艇改装花费",
+			MODIFIER_MIO_DESIGN_TEAM_ASSIGN_COST: "Design Team Assign Cost",
+		});
+
+		assert.strictEqual(buildModifierLocalisationKeys("refit_ic_cost")[0], "MODIFIER_INDUSTRIAL_REFIT_IC_COST_FACTOR");
+		assert.strictEqual(resolvePreviewModifierName("refit_ic_cost", lookup), "舰艇改装花费");
+		assert.strictEqual(
+			resolvePreviewModifierName("military_industrial_organization_design_team_assign_cost", lookup),
+			"Design Team Assign Cost",
+		);
+	});
+
+	// `" £icon_token "` is an icon and nothing else, so it names no modifier: ending the search there
+	// would put an empty name on the card, and the next shape has to get its turn.
+	it("keeps looking past a value that is only an icon", () => {
+		const lookup = lookupOf({
+			MODIFIERS_ICON_ONLY_FACTOR: " £icon_token ",
+			modifier_icon_only_factor: "Icon Only",
+		});
+
+		assert.strictEqual(resolvePreviewModifierName("icon_only_factor", lookup), "Icon Only");
+		assert.strictEqual(
+			resolvePreviewModifierName("icon_only_factor", lookupOf({ MODIFIERS_ICON_ONLY_FACTOR: " £icon_token " })),
+			undefined,
+		);
+	});
+});
+
+// The picker offers the keys the localisation entries spell out. Vanilla names most modifiers
+// MODIFIER_<KEY> and the building and production ones modifier_<key>; taking only the upper-case
+// shape left the lower-case keys out of the list, which is what made the edit dialog show a raw key
+// such as production_speed_arms_factory_factor instead of its name.
+describe("previewdef/idea/modifiers pickable keys", () => {
+	it("takes both the upper-case and the lower-case key shapes", () => {
+		const keys = modifierKeysFromLocalisationKeys([
+			"MODIFIER_STABILITY_FACTOR",
+			"MODIFIERS_WAR_SUPPORT_FACTOR",
+			"modifier_production_speed_arms_factory_factor",
+			"modifier_production_speed_arms_factory_factor_desc",
+			"UNRELATED_KEY",
+		]);
+
+		assert.deepStrictEqual(keys.sort(), [
+			"production_speed_arms_factory_factor",
+			"production_speed_arms_factory_factor_desc",
+			"stability_factor",
+			"war_support_factor",
+		]);
+	});
+
+	it("counts one key once when several shapes spell it", () => {
+		assert.deepStrictEqual(
+			modifierKeysFromLocalisationKeys(["MODIFIER_STABILITY_FACTOR", "modifier_stability_factor"]),
+			["stability_factor"],
+		);
 	});
 });
 

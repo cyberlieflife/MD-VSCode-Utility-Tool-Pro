@@ -215,6 +215,32 @@ export function getLocalisedTextQuick(localisationKey: string | undefined): stri
     return getLocalisedText(localisationKey, vscode.env.language);
 }
 
+/**
+ * Every localisation key the index holds, across languages. A caller that needs a set of known keys
+ * (the modifier picker reads the MODIFIER_* ones) takes them from here instead of scanning the
+ * localisation files a second time. Empty when the feature flag is off or no build has run yet.
+ */
+export function listLocalisationKeys(): string[] {
+    if (!localisationIndex) {
+        return [];
+    }
+
+    const keys = new Set<string>();
+    const collect = (index: LocalisationData): void => {
+        for (const langKey in index) {
+            for (const key in index[langKey]) {
+                keys.add(key);
+            }
+        }
+    };
+    collect(globalLocalisationIndex);
+    collect(workspaceLocalisationIndex);
+    for (const index of parentLocalisationIndexes) {
+        collect(index);
+    }
+    return [...keys];
+}
+
 // Shared lookup: editor-language first, then l_english fallback. `getLocalisedText` gates this on
 // the localisationIndex feature flag (its index is not built without it); the unchecked variant
 // is for callers that have built the index on demand (e.g. the focus-tree name toggle).

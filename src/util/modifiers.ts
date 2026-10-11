@@ -6,9 +6,10 @@ import {
 	listFilesFromModOrHOI4,
 	parseHoi4FileCached,
 } from "./fileloader";
-import { getLocalisedTextQuick } from "./localisationIndex";
+import { getLocalisedTextQuick, listLocalisationKeys } from "./localisationIndex";
 import { localisationIndex } from "./featureflags";
 import { isSymbolNode } from "../hoiformat/schema";
+import { resolveModifierLocalisedName } from "../inlayhint/modifierInlayHint";
 import { debug } from "./debug";
 import { Logger } from "./logger";
 import { getConfiguration } from "./vsccommon";
@@ -20,10 +21,14 @@ import { ModifierPair, ModifierLine, ModifierTone } from "../previewdef/sharedpa
  * Two things have to be worked out: what the modifier is called, and how its number reads. Neither
  * is written down in one place.
  *
- * The name has two conventions living side by side. A modifier the game itself defines is localised
- * under MODIFIER_<KEY IN CAPITALS> -- MODIFIER_STABILITY_FACTOR is "Stability". A modifier a mod
- * defines in common/modifier_definitions is localised under its own token, so
- * productivity_growth_modifier is "Monthly Productivity Growth". Both are tried, in that order.
+ * The name has several conventions living side by side. A modifier the game itself defines is
+ * localised under MODIFIERS_<KEY IN CAPITALS>, MODIFIER_<KEY IN CAPITALS> or modifier_<key> --
+ * MODIFIER_STABILITY_FACTOR is "Stability", modifier_production_speed_industrial_complex_factor is
+ * the civilian factory's construction speed. A few name their key differently altogether and are
+ * reachable only through a <key>_tt tooltip -- monthly_population is "Monthly Population". A
+ * modifier a mod defines in common/modifier_definitions is localised under its own bare token, so
+ * productivity_growth_modifier is "Monthly Productivity Growth". All of them are tried, in that
+ * order, by the same resolver the inlay hint uses.
  *
  * The number is the harder half. common/modifier_definitions gives value_type, precision, postfix
  * and color_type for every modifier a mod defines, and those are used exactly as written. The
@@ -439,26 +444,111 @@ export function resolveDefinition(
 }
 
 /**
- * The two localisation conventions, tried in order. Falls back to the key made readable, so a
- * modifier nothing localises still says something rather than showing a raw token.
+ * The name a modifier shows under in the previews. Falls back to the key made readable, so a modifier
+ * nothing localises still says something rather than showing a raw token.
  */
 export async function localiseModifierName(key: string): Promise<string> {
 	if (!localisationIndex) {
 		return key;
 	}
 
-	const upper = `MODIFIER_${key.toUpperCase()}`;
-	const fromUpper = await getLocalisedTextQuick(upper);
-	if (fromUpper !== undefined && fromUpper !== upper) {
-		return fromUpper;
+	return resolvePreviewModifierName(key, quickLocalisationLookup) ?? key;
+}
+
+export interface ModifierKeyOption {
+	key: string;
+	name: string;
+}
+
+// Names that localise to a UI string or a placeholder rather than the modifier itself: offering
+// them in a picker would let the reader write a key the game does not accept as a modifier.
+const nonModifierKeys = new Set([
+	"none",
+	"base_value",
+	"base_value_percentage",
+	"base_value_str",
+	"not_supported",
+	"scaled_by",
+]);
+
+/**
+ * The modifier keys a list of localisation keys spells out: the upper-case MODIFIERS_<KEY> and
+ * MODIFIER_<KEY> entries, and the lower-case `modifier_<key>` that most building and production
+ * modifiers are named under. Exported so the tests can pin the shapes without standing up a
+ * localisation index.
+ */
+export function modifierKeysFromLocalisationKeys(localisationKeys: string[]): string[] {
+	const keys = new Set<string>();
+	for (const localisationKey of localisationKeys) {
+		const match = /^(?:MODIFIERS|MODIFIER|modifier)_([A-Za-z0-9_]+)$/i.exec(localisationKey);
+		if (match) {
+			keys.add(match[1].toLowerCase());
+		}
+	}
+	return [...keys];
+}
+
+/**
+ * Every modifier key the editor can offer, each with the name to show for it. The game keeps its own
+ * modifier list inside the executable, so it cannot be read from the game files; the localisation
+ * files are the one place the keys appear as an enumerable list, which is why they are the source
+ * here. Keys a mod defined in common/modifier_definitions and the built-in override table are merged
+ * in. Sorted by the name shown, so the picker reads alphabetically in the reader's language.
+ *
+ * With the index built, a key no entry gives a name to is left out: the entries that carry nothing
+ * but an icon (`MODIFIER_TECH_PREFIX`) or a trait tooltip describe no modifier the game accepts, so
+ * offering them only fills the picker. Without the index those keys are all there is, and the
+ * readable form of a key beats an empty picker.
+ */
+export async function listModifierKeysWithNames(): Promise<ModifierKeyOption[]> {
+	const localisationKeys = listLocalisationKeys();
+	const indexBuilt = localisationKeys.length > 0;
+	const keys = new Set<string>(modifierKeysFromLocalisationKeys(localisationKeys));
+
+	for (const key of Object.keys(builtinOverrides)) {
+		keys.add(key);
+	}
+	for (const key of Object.keys(await loadModifierDefinitions())) {
+		keys.add(key);
 	}
 
-	const fromKey = await getLocalisedTextQuick(key);
-	if (fromKey !== undefined && fromKey !== key) {
-		return fromKey;
+	const options: ModifierKeyOption[] = [];
+	for (const key of keys) {
+		if (nonModifierKeys.has(key) || key.endsWith("_desc") || key.endsWith("_tt")) {
+			continue;
+		}
+		const localised = await localiseModifierName(key);
+		if (localised === key) {
+			if (indexBuilt) {
+				continue;
+			}
+			options.push({ key, name: humaniseKey(key) });
+			continue;
+		}
+		options.push({ key, name: localised });
 	}
+	options.sort((a, b) => a.name.localeCompare(b.name));
+	return options;
+}
 
-	return key;
+/**
+ * The shapes a preview resolves a modifier name through: those the shared resolver knows
+ * (MODIFIERS_<KEY>, MODIFIER_<KEY>, modifier_<key>, a <key>_tt tooltip), then the bare token a
+ * modifier defined in common/modifier_definitions is localised under. Exported so the tests can pin
+ * the order on a fake lookup, without standing up a localisation index.
+ */
+export function resolvePreviewModifierName(
+	key: string,
+	lookup: (key: string) => string | undefined,
+): string | undefined {
+	return resolveModifierLocalisedName(key, lookup) ?? lookup(key);
+}
+
+// getLocalisedTextQuick echoes the key back when nothing localises it; the shared resolver reads an
+// explicit undefined as "not found", so the echo is turned back into one here.
+function quickLocalisationLookup(key: string): string | undefined {
+	const text = getLocalisedTextQuick(key);
+	return text === undefined || text === key ? undefined : text;
 }
 
 export function humaniseKey(key: string): string {
