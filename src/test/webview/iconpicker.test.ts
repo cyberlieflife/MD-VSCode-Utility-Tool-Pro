@@ -1,6 +1,7 @@
 import './setup';
 import * as assert from 'assert';
 import { JSDOM } from 'jsdom';
+import { handleIconPickerMessage } from '../../../webviewsrc/util/iconpicker';
 
 // Drives the real focus-tree webview icon picker (focustree.ts openIconPicker) in jsdom to verify
 // the two-stage loading protocol: names render immediately with placeholders, image batches fill
@@ -41,6 +42,9 @@ describe('webview/focustree icon picker', function () {
 
         delete require.cache[require.resolve('../../../webviewsrc/util/vscode')];
         delete require.cache[require.resolve('../../../webviewsrc/util/common')];
+        // The picker lives in its own module now and keeps the vscode util it was first loaded with,
+        // so its cache has to be dropped along with focustree's for the fresh window to take effect.
+        delete require.cache[require.resolve('../../../webviewsrc/util/iconpicker')];
         // focustree.ts binds its load listener and reads the globals at module-execution time, so a
         // cached copy from an earlier test (which used a different jsdom window) must be dropped and
         // re-executed against this file's window.
@@ -268,5 +272,15 @@ describe('webview/focustree icon picker', function () {
         } finally {
             closeAll();
         }
+    });
+
+    // The idea preview reuses this grid through its own channel; the message router must accept
+    // both and leave anything else for the caller.
+    it('routes the idea channel and leaves unrelated messages alone', function () {
+        assert.strictEqual(handleIconPickerMessage({ type: 'ideaIconNames', names: ['GFX_idea_a'] }), true);
+        assert.strictEqual(handleIconPickerMessage({ type: 'ideaIconImages', images: [] }), true);
+        assert.strictEqual(handleIconPickerMessage({ type: 'focusIconNames', names: [] }), true);
+        assert.strictEqual(handleIconPickerMessage({ type: 'updateBody' }), false);
+        assert.strictEqual(handleIconPickerMessage(undefined), false);
     });
 });
