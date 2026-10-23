@@ -12,7 +12,7 @@
 import * as path from 'path';
 import { PNG } from 'pngjs';
 import { DDS } from './dds';
-import { ddsToPng, tgaToPng } from './converter';
+import { ddsToPng, isPngBuffer, pngToPng, tgaToPng } from './converter';
 import { UserError } from '../common';
 import { debug, error } from '../debug';
 import { getConfiguration } from '../vsccommon';
@@ -51,7 +51,10 @@ interface WorkerState {
 export function decodeImageToPngSync(buffer: Buffer, kind: 'dds' | 'tga'): DecodedImage {
     let png: PNG;
     if (kind === 'dds') {
-        png = ddsToPng(DDS.parse(buffer.buffer as ArrayBuffer, buffer.byteOffset));
+        // A .dds asset may hold PNG data instead of a DDS header.
+        png = isPngBuffer(buffer)
+            ? pngToPng(buffer)
+            : ddsToPng(DDS.parse(buffer.buffer as ArrayBuffer, buffer.byteOffset));
     } else {
         png = tgaToPng(buffer);
     }

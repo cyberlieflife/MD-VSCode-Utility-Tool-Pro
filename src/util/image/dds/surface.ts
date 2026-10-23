@@ -68,7 +68,7 @@ export class Surface {
         const channelLength = pixelFormat.channelLengthInPixel;
         const channelLengthByOrder = channelOrder.map(channel => channelLength[channel]);
         const channelStartByOrder = channelOrder.map(channel => pixelFormat.channelStartInPixel[channel]);
-        const channelValueRange = channelLength.map(l => l === 32 ? 4294967295 : ((1 << l) - 1) & 0xFFFFFFFF);
+        const channelValueRange = channelLength.map(l => 2 ** l - 1);
         
         // It makes sense only when bitPerPixel <= 32.
         const channelMaskByOrder = channelOrder.map(channel => ((1 << channelLength[channel]) - 1) << pixelFormat.channelStartInPixel[channel]);
@@ -81,7 +81,7 @@ export class Surface {
 
         for (let i = 0; i < length; i += pitch) {
             for (let pb = 0; pb < bitsPerRow; pb += bitsPerPixel, resultOffset += 4) {
-                reader(readerState, i + (pb >> 3), pb & 3, channelStartByOrder, channelLengthByOrder, channelMaskByOrder, rawPixel);
+                reader(readerState, i + (pb >> 3), pb & 7, channelStartByOrder, channelLengthByOrder, channelMaskByOrder, rawPixel);
 
                 for (let j = 0; j < channelCount; j++) {
                     const channel = channelOrder[j];
@@ -207,10 +207,12 @@ function decompressDXT5(buffer: Uint8Array, offset: number, block: Uint8Array): 
         alphas[6] = Math.floor((2 * alphas[0] + 5 * alphas[1]) / 7);
         alphas[7] = Math.floor((1 * alphas[0] + 6 * alphas[1]) / 7);
     } else {
-        alphas[2] = Math.floor((4 * alphas[0] + 1 * alphas[1]) / 7);
-        alphas[3] = Math.floor((3 * alphas[0] + 2 * alphas[1]) / 7);
-        alphas[4] = Math.floor((2 * alphas[0] + 3 * alphas[1]) / 7);
-        alphas[5] = Math.floor((1 * alphas[0] + 4 * alphas[1]) / 7);
+        // The six-value block steps in fifths, not sevenths: dividing by 7 leaves half-transparent
+        // pixels beside a fully clear or solid one more transparent than the game draws them.
+        alphas[2] = Math.floor((4 * alphas[0] + 1 * alphas[1]) / 5);
+        alphas[3] = Math.floor((3 * alphas[0] + 2 * alphas[1]) / 5);
+        alphas[4] = Math.floor((2 * alphas[0] + 3 * alphas[1]) / 5);
+        alphas[5] = Math.floor((1 * alphas[0] + 4 * alphas[1]) / 5);
         alphas[6] = 0;
         alphas[7] = 255;
     }
@@ -332,7 +334,6 @@ type PixelNormalizer = (value: number, max: number) => number;
 const pixelNormalizers: Partial<Record<PixelValueType, PixelNormalizer>> = {
     [PixelValueType.uint]: uintNormalizer,
     [PixelValueType.unorm]: uintNormalizer,
-    [PixelValueType.unorm_srgb]: unormSrgbNormalizer,
     [PixelValueType.sint]: sintNormalizer,
     [PixelValueType.snorm]: sintNormalizer,
     [PixelValueType.float]: floatNormalizer,
@@ -350,10 +351,6 @@ function sintNormalizer(value: number, max: number): number {
 
 function floatNormalizer(value: number, _max: number): number {
     return value;
-}
-
-function unormSrgbNormalizer(value: number, max: number): number {
-    return Math.pow(value / max, 2.2);
 }
 
 // Don't use js clossure for better performance
@@ -374,7 +371,10 @@ function getChannelReader(inputBuffer: ArrayBuffer, inputBufferOffset: number, l
     }
 
     if (pixelFormat.bitsPerPixel % 32 === 0) {
-        if (pixelFormat.channelLengthInPixel.every(p => p === 32)) {
+        // A channel that starts part-way into a 32-bit unit has to go through a reader that honours
+        // its offset, so only whole-unit channels take the contiguous fast path.
+        if (pixelFormat.channelLengthInPixel.every(p => p === 32)
+            && pixelFormat.channelStartInPixel.every(s => s % 32 === 0)) {
             return {
                 reader: all32Reader,
                 readerState: new Uint32Array(inputBuffer, inputBufferOffset, length >> 2),
@@ -383,7 +383,8 @@ function getChannelReader(inputBuffer: ArrayBuffer, inputBufferOffset: number, l
     }
 
     if (pixelFormat.bitsPerPixel % 16 === 0) {
-        if (pixelFormat.channelLengthInPixel.every(p => p === 16)) {
+        if (pixelFormat.channelLengthInPixel.every(p => p === 16)
+            && pixelFormat.channelStartInPixel.every(s => s % 16 === 0)) {
             return {
                 reader: all16Reader,
                 readerState: new Uint16Array(inputBuffer, inputBufferOffset, length >> 1),
@@ -392,7 +393,8 @@ function getChannelReader(inputBuffer: ArrayBuffer, inputBufferOffset: number, l
     }
 
     if (pixelFormat.bitsPerPixel % 8 === 0) {
-        if (pixelFormat.channelLengthInPixel.every(p => p === 8)) {
+        if (pixelFormat.channelLengthInPixel.every(p => p === 8)
+            && pixelFormat.channelStartInPixel.every(s => s % 8 === 0)) {
             return {
                 reader: all8Reader,
                 readerState: new Uint8Array(inputBuffer, inputBufferOffset, length),
@@ -437,10 +439,10 @@ function defaultUint8Reader(
     rawPixel: Float64Array
 ): void {
     for (let i = 0; i < channelLength.length; i++) {
-        const bitCount = channelLength[i];
-        rawPixel[i] = readUnsignedBitsFromBuffer(buffer, offset, bitOffset, bitCount);
-        offset += (bitOffset + bitCount) >> 3;
-        bitOffset = (bitOffset + bitCount) & 7;
+        // Channel starts are absolute within the pixel. Stepping from the previous channel assumed a
+        // layout that is contiguous from bit 0, which a padded or reordered one is not.
+        const start = bitOffset + channelStart[i];
+        rawPixel[i] = readUnsignedBitsFromBuffer(buffer, offset + (start >> 3), start & 7, channelLength[i]);
     }
 }
 
@@ -454,7 +456,7 @@ function all8Reader(
     rawPixel: Float64Array
 ): void {
     for (let i = 0; i < channelLength.length; i++) {
-        rawPixel[i] = buffer[offset + i];
+        rawPixel[i] = buffer[offset + (channelStart[i] >> 3)];
     }
 }
 
@@ -468,7 +470,7 @@ function all16Reader(
     rawPixel: Float64Array
 ): void {
     for (let i = 0; i < channelLength.length; i++) {
-        rawPixel[i] = buffer[(offset >> 1) + i];
+        rawPixel[i] = buffer[(offset >> 1) + (channelStart[i] >> 4)];
     }
 }
 
@@ -482,7 +484,7 @@ function all32Reader(
     rawPixel: Float64Array
 ): void {
     for (let i = 0; i < channelLength.length; i++) {
-        rawPixel[i] = buffer[(offset >> 2) + i];
+        rawPixel[i] = buffer[(offset >> 2) + (channelStart[i] >> 5)];
     }
 }
 

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { PNG } from "pngjs";
 import { NumberPosition } from "../common";
+import { pngToPng } from "./converter";
 
 export class Image {
 	private cachedUri: string | undefined = undefined;
@@ -148,7 +149,8 @@ function extractImageFromPng(
 }
 
 function pngRead(buffer: Buffer): PNG {
-	const result = PNG.sync.read(buffer);
+	// Sliced sprite frames inherit the same decode limits as a full texture.
+	const result = pngToPng(buffer);
 	Object.setPrototypeOf(result, PNG.prototype);
 	return result;
 }
