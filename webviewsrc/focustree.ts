@@ -29,7 +29,6 @@ import {
     setWarningMarkersVisible,
 } from "./util/warnings";
 import { Tracing, subscribeTracing } from "./util/trace";
-import { applyIconState } from "../src/previewdef/toolbaricons";
 
 initCommon();
 
