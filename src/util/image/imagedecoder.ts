@@ -348,9 +348,9 @@ export async function decodeImageToPng(buffer: Buffer, kind: 'dds' | 'tga'): Pro
             try {
                 return await postJob(buffer, kind);
             } catch (e) {
-                // A decode that did not finish on a worker would freeze the extension host if it were
-                // retried synchronously here; let the caller treat the image as missing instead.
-                if (e instanceof Error && e.name === TIMEOUT_ERROR_NAME) {
+                // Bad input and a decode that did not finish on a worker must not be retried on the
+                // extension host: the same bytes fail here too, and the second attempt can freeze it.
+                if (e instanceof UserError || (e instanceof Error && e.name === TIMEOUT_ERROR_NAME)) {
                     throw e;
                 }
                 // `new Worker` reports a missing entry file asynchronously, so a pool that can never

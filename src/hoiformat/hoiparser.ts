@@ -104,7 +104,9 @@ const tokenRegexStrings: Record<HOITokenType, [string, number]> = {
     comment: ['#.*(?:[\\r\\n]|$)', 0],
     symbol: ['(?:\\d+\\.)?[a-zA-Z_@\\[\\]][\\w:\\._@\\[\\]\\-\\?\\^\\/\\u00A0-\\u024F|]*', 40],
     operator: ['[={}<>;,]|>=|<=|!=', 10],
-    string: ['"(?:\\\\"|\\\\\\\\|[^"])*"', 10],
+    // Backslashes belong only to the escape branch, so a missing quote cannot backtrack over pairs.
+    // A final backslash is also valid before the closing quote (common in Windows paths).
+    string: ['"(?:\\\\[\\s\\S]|[^"\\\\])*\\\\?"', 10],
     number: ['-?\\d*\\.\\d+|-?\\d+|0x\\d+', 50],
     unitnumber: ['(?:-?\\d*\\.\\d+|-?\\d+)(?:%%?)', 49],
     eof: ['$', 1000],

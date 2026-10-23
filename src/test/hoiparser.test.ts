@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { parseHoi4File, resolveScriptVariables, Node } from '../hoiformat/hoiparser';
 
 function child(node: Node, name: string): Node {
@@ -63,6 +65,45 @@ describe('parseHoi4File', () => {
         // The parser un-escapes \" to " and \\ to \.
         const root = parseHoi4File('name = "he said \\"hi\\""');
         assert.strictEqual(child(root, 'name').value, 'he said "hi"');
+    });
+
+    it('keeps a backslash that does not start a recognised escape', () => {
+        const root = parseHoi4File('name = "unknown \\q escape"');
+        assert.strictEqual(child(root, 'name').value, 'unknown \\q escape');
+    });
+
+    it('closes a string whose final backslash sits before the closing quote', () => {
+        // Windows paths in .mod files commonly end with a backslash.
+        assert.strictEqual(
+            child(parseHoi4File('path = "C:\\mods\\my mod\\"'), 'path').value,
+            'C:\\mods\\my mod\\',
+        );
+        assert.strictEqual(
+            child(parseHoi4File('path = "C:\\mods\\new"'), 'path').value,
+            'C:\\mods\\new',
+        );
+    });
+
+    it('rejects an unterminated run of backslashes without hanging', async function () {
+        // A synchronous regex cannot be interrupted, so the parse runs in a child that the test
+        // kills on timeout: the old pattern backtracked over pairs of backslashes exponentially.
+        this.timeout(10000);
+        const script = [
+            "const { parseHoi4File } = require(process.argv[1]);",
+            "try {",
+            "    parseHoi4File('a = \"' + '\\\\\\\\'.repeat(120));",
+            "    process.exitCode = 1;",
+            "} catch (e) {",
+            "    if (e.name !== 'UserError' || !e.message.includes('Invalid token')) throw e;",
+            "    process.stdout.write(e.name);",
+            "}",
+        ].join('\n');
+        const { stdout } = await promisify(execFile)(
+            process.execPath,
+            ['-e', script, require.resolve('../hoiformat/hoiparser')],
+            { timeout: 5000 },
+        );
+        assert.strictEqual(stdout, 'UserError');
     });
 
     it('parses symbol values (bare identifiers)', () => {
