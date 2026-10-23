@@ -9,6 +9,9 @@ import { GridBoxType } from "../src/hoiformat/gui";
 import { toNumberLike } from "../src/hoiformat/schema";
 import { vscode } from "./util/vscode";
 import { Mio, MioTrait } from "../src/previewdef/mio/schema";
+import { applyWarningMarkers, bindWarningPanelButton, renderWarningList, setWarningMarkersVisible } from "./util/warnings";
+import { Tracing, subscribeTracing } from "./util/trace";
+import { feLocalize } from "./util/i18n";
 
 let mios: Mio[] = (window as any).mios;
 
@@ -18,6 +21,12 @@ let showIncludedTraits: boolean = getState().showIncludedTraits ?? true;
 let showGrid: boolean = getState().showGrid ?? false;
 let showOverlaps: boolean = getState().showOverlaps ?? true;
 let conditions: DivDropdown | undefined = undefined;
+// Shift+点击一个特质隔离它的前置连线。外壳加载完毕后接一次。
+let tracing: Tracing | undefined;
+
+function showWarningMarkers(): boolean {
+    return getState().showMioWarningMarkers ?? true;
+}
 
 initCommon();
 
@@ -84,6 +93,10 @@ async function buildContent() {
     miopreviewplaceholder.innerHTML = traitPreviewContent + headerLayer + gridGuideLayer + overlapLayer + styleTable.toStyleElement((window as any).styleNonce);
 
     subscribeNavigators();
+    applyWarningMarkers(mio, traitGrixBoxItems, 'trait_', showWarningMarkers());
+    renderWarningList(mio, 'trait_');
+    // 连线 div 每次重建都是新的，仍然激活的追踪要重新画上。
+    tracing?.reapply();
 }
 
 // Column grid overlay. Draws a faint vertical line at every column boundary (k = 0..10) anchored to
@@ -466,6 +479,38 @@ window.addEventListener('load', tryRun(async function() {
     // Zoom
     const contentElement = document.getElementById('miopreviewcontent') as HTMLDivElement;
     enableZoom(contentElement, 0, 40);
+
+    tracing = subscribeTracing({
+        contentId: 'miopreviewcontent',
+        placeholderId: 'miopreviewplaceholder',
+        statusText: id => feLocalize('miopreview.tracing', 'Tracing: {0}', id),
+    });
+
+    bindWarningPanelButton();
+
+    // 翻转既有标记而不是重建树；开关状态存在面板状态里，和焦点树一致。
+    const toggleWarningMarkers = document.getElementById('toggle-warning-markers');
+    if (toggleWarningMarkers) {
+        setWarningMarkersVisible(showWarningMarkers());
+        toggleWarningMarkers.addEventListener('click', () => {
+            const visible = !showWarningMarkers();
+            setState({ showMioWarningMarkers: visible });
+            setWarningMarkersVisible(visible);
+        });
+    }
+
+    // 复制当前组织的警告：宿主负责格式化并写入剪贴板。
+    document.getElementById('copy-warnings')?.addEventListener('click', () => {
+        const mio = mios[selectedMioIndex];
+        if (mio === undefined) {
+            return;
+        }
+        vscode.postMessage({
+            command: 'copyWarnings',
+            treeId: mio.id,
+            warnings: mio.warnings.map(w => ({ source: w.source, text: w.text })),
+        });
+    });
 
     // Toggle inherited traits
     const showIncludedTraitsCheckbox = document.getElementById('show-included-traits') as HTMLInputElement | null;

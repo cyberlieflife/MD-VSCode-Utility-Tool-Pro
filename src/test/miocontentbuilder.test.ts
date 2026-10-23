@@ -59,4 +59,21 @@ describe('previewdef/mio renderMioFile shell class stability', () => {
             assert.ok(styleCss.includes(`.${content} {`));
         }
     });
+
+    it('carries the warning panel, its buttons and the trace status in the shell', async () => {
+        const rendered = await renderMioFile(loaderFor(1), uri, webview) as LoaderRenderResult;
+        const html = renderedHtml(rendered);
+
+        assert.ok(html.includes('id="warnings-container"'), 'the warnings panel is part of the shell');
+        assert.ok(html.includes('id="warnings"'));
+        assert.ok(html.includes('id="show-warnings"'));
+        assert.ok(html.includes('id="toggle-warning-markers"'));
+        assert.ok(html.includes('id="copy-warnings"'));
+        assert.ok(html.includes('id="trace-status"'));
+        assert.ok(html.includes('id="clear-trace"'));
+
+        // 追踪规则按 MIO 的占位元素限定作用域，网页端重建后挂上的类才有样式。
+        const styleCss = rendered.update!.styleCss!;
+        assert.ok(styleCss.includes('#miopreviewplaceholder .st-ft-trace-line'), 'trace rules are scoped to the MIO placeholder');
+    });
 });

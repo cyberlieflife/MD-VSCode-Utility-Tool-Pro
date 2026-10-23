@@ -214,15 +214,16 @@ function isWarningList(value: unknown): value is { source: string; text: string 
 /**
  * 应答预览的复制按钮：`msg` 是网页端为屏幕上那棵树发来的内容，`file` 是被预览的文件。
  * 剪贴板拿到的是审计报告里同格式的一段，段标题固定是预览文件——读的人正看着它；报告则按
- * 警告来源焦点所在文件归集，共享焦点的条目因而可能出现在报告的另一段落里。
+ * 警告来源焦点所在文件归集，共享焦点的条目因而可能出现在报告的另一段落里。MIO 预览为屏幕上
+ * 的组织发同一种消息，并传入自己的 `noWarningsMessage`。
  */
-export async function copyTreeWarnings(msg: unknown, file: string): Promise<void> {
+export async function copyTreeWarnings(msg: unknown, file: string, noWarningsMessage?: string): Promise<void> {
 	if (!isRecord(msg) || typeof msg.treeId !== "string" || !isWarningList(msg.warnings)) {
 		return;
 	}
 	if (msg.warnings.length === 0) {
 		void vscode.window.showInformationMessage(
-			localize("focustree.copywarnings.none", "This focus tree has no warnings."),
+			noWarningsMessage ?? localize("focustree.copywarnings.none", "This focus tree has no warnings."),
 		);
 		return;
 	}

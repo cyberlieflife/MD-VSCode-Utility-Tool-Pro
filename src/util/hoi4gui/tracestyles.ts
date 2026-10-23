@@ -14,7 +14,9 @@ import { StyleTable } from '../../util/styletable';
 export const traceLineClass = 'st-ft-trace-line';
 export const traceDimClass = 'st-ft-trace-dim';
 
-export function registerTraceStyles(styleTable: StyleTable): void {
+// `placeholderId` 是树渲染进去的元素，所有规则都以它限定作用域（焦点树与 MIO 特质树共用）。
+export function registerTraceStyles(styleTable: StyleTable, placeholderId: string): void {
+    const scope = '#' + placeholderId;
     // Emitted with an id prefix rather than as plain classes, because the line's border class
     // (`.st-gridbox-connection-...`, carrying `border-top: 1px solid #88aaff`) is serialized into
     // the body *after* the shell stylesheet and would win a same-specificity tie on document order.
@@ -25,21 +27,21 @@ export function registerTraceStyles(styleTable: StyleTable): void {
     // The z-index is not optional: connections are emitted before the item divs, and a focus node's
     // own layers go up to z-index 3, so without it the traced line stays hidden behind the nodes it
     // connects. 5 keeps it below the warning marker box at 6.
-    styleTable.raw(`#focustreeplaceholder .st-ft-trace-line`, `
+    styleTable.raw(`${scope} .st-ft-trace-line`, `
         border-color: #ffcc44;
         z-index: 5;
     `);
 
     // A prerequisite line is drawn as tiles: a texture, which no border colour reaches, or a plain
     // line on their pseudo elements, which the rule above does not select.
-    styleTable.raw(`#focustreeplaceholder .st-ft-trace-line::before, #focustreeplaceholder .st-ft-trace-line::after`, `
+    styleTable.raw(`${scope} .st-ft-trace-line::before, ${scope} .st-ft-trace-line::after`, `
         border-color: #ffcc44;
     `);
-    styleTable.raw(`#focustreeplaceholder .st-ft-trace-line[class*="st-focus-link-"]`, `
+    styleTable.raw(`${scope} .st-ft-trace-line[class*="st-focus-link-"]`, `
         filter: drop-shadow(0 0 2px #ffcc44) brightness(1.4);
     `);
 
-    styleTable.raw(`#focustreeplaceholder .st-ft-trace-dim`, `
+    styleTable.raw(`${scope} .st-ft-trace-dim`, `
         opacity: 0.1;
     `);
 }

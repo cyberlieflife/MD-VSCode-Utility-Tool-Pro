@@ -573,7 +573,7 @@ describe('webview/focustree interactions', function () {
 
         it('puts a box and a badge on every focus the warning involves', async () => {
             const mod: any = await import('../../../webviewsrc/focustree');
-            const { warningBoxClass, warningBadgeClass } = await import('../../../src/previewdef/focustree/warningstyles');
+            const { warningBoxClass, warningBadgeClass } = await import('../../../src/util/hoi4gui/warningstyles');
 
             // 与 before 里已渲染的真实焦点（id a/b）区分开，getElementById 才命中本测试的元素。
             const host = document.createElement('div');
@@ -602,7 +602,7 @@ describe('webview/focustree interactions', function () {
 
         it('leaves a focus without a warning alone', async () => {
             const mod: any = await import('../../../webviewsrc/focustree');
-            const { warningBoxClass } = await import('../../../src/previewdef/focustree/warningstyles');
+            const { warningBoxClass } = await import('../../../src/util/hoi4gui/warningstyles');
 
             const host = document.createElement('div');
             host.innerHTML = '<div id="focus_warn_clean"><div class="navigator"></div></div>';
@@ -620,7 +620,7 @@ describe('webview/focustree interactions', function () {
         // 否则被标记过的格子每次都判为变化、整格重建。
         it('clears the markers and restores the navigator title', async () => {
             const mod: any = await import('../../../webviewsrc/focustree');
-            const { warningBoxClass } = await import('../../../src/previewdef/focustree/warningstyles');
+            const { warningBoxClass } = await import('../../../src/util/hoi4gui/warningstyles');
 
             const host = document.createElement('div');
             host.innerHTML = '<div id="focus_warn_a"><div class="navigator" title="warn_a (1, 1)"></div></div>';

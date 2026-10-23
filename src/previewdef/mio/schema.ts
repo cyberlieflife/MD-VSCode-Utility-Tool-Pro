@@ -19,6 +19,8 @@ export interface MioTextHeader {
 
 export interface MioWarning extends Warning<string> {
     navigations?: { file: string, start: number, end: number }[];
+    // 一条警告涉及的其他特质，预览会把它们与来源一起标出来。
+    relatedSources?: string[];
 }
 
 export type TraitEffect = 'equiment' | 'production' | 'organization';
@@ -221,6 +223,7 @@ function getMio(mioDefItem: { _key: string, _value: HOIPartial<MioDef> }, depend
     }
 
     validateRelativePositionId(traits, warnings);
+    validateTraitLinks(traits, id, warnings);
 
     return {
         id,
@@ -269,6 +272,150 @@ function validateRelativePositionId(traits: Record<string, MioTrait>, warnings: 
                 break;
             }
             currentTrait = nextFocus;
+        }
+    }
+}
+
+// 特质被画在哪里：沿 relative_position_id 解析，方式和预览一致。环按预览的方式切断——第二次
+// 到达的特质按 0,0 计且不缓存，于是环的起点保留自己的偏移。环本身由 validateRelativePositionId 报告。
+function resolveTraitPosition(
+    trait: MioTrait | undefined,
+    traits: Record<string, MioTrait>,
+    cache: Map<string, { x: number, y: number }>,
+    stack: Set<string> = new Set(),
+): { x: number, y: number } {
+    if (trait === undefined) {
+        return { x: 0, y: 0 };
+    }
+
+    const cached = cache.get(trait.id);
+    if (cached) {
+        return cached;
+    }
+
+    if (stack.has(trait.id)) {
+        return { x: 0, y: 0 };
+    }
+
+    const position = { x: trait.x, y: trait.y };
+    if (trait.relativePositionId !== undefined) {
+        stack.add(trait.id);
+        const relativePosition = resolveTraitPosition(traits[trait.relativePositionId], traits, cache, stack);
+        stack.delete(trait.id);
+        position.x += relativePosition.x;
+        position.y += relativePosition.y;
+    }
+
+    cache.set(trait.id, position);
+    return position;
+}
+
+// 这个组织是否决定特质画在哪：它定义或覆盖了该特质，或覆盖了相对定位链上的任一锚点。继承来的
+// 特质挂在被覆盖的锚点上时会随之移动，因此它的连线与它自己的特质一样要由本组织检查。
+function placedBy(trait: MioTrait, traits: Record<string, MioTrait>, mioId: string): boolean {
+    const seen = new Set<string>();
+    for (let current: MioTrait | undefined = trait; current && !seen.has(current.id);
+        current = current.relativePositionId !== undefined ? traits[current.relativePositionId] : undefined) {
+        if (current.sourceMioId === mioId) {
+            return true;
+        }
+        seen.add(current.id);
+    }
+    return false;
+}
+
+function isRemoved(trait: MioTrait): boolean {
+    return trait.hasVisible && trait.visible === false;
+}
+
+// 每个特质的前置与互斥连线：指向不存在的特质、前置没有被排在解锁它的特质上方、前置块要求的
+// 数量多于它列出的数量、互斥替代项不在同一行。两个特质之间的连线若都原样继承自被 include 的
+// 组织且仍画在它放的位置，就由那个组织报告，因此派生组织只检查自己特质参与的、以及覆盖锚点后
+// 移动过的连线。
+function validateTraitLinks(traits: Record<string, MioTrait>, mioId: string, warnings: MioWarning[]) {
+    // 先按预览的绘制顺序解析一遍，决定环在哪里被切断。
+    const positions = new Map<string, { x: number, y: number }>();
+    for (const trait of Object.values(traits)) {
+        resolveTraitPosition(trait, traits, positions);
+    }
+    const yOf = (trait: MioTrait) => resolveTraitPosition(trait, traits, positions).y;
+    const checked = (trait: MioTrait) => placedBy(trait, traits, mioId);
+    const reportedPairs = new Set<string>();
+
+    for (const trait of Object.values(traits)) {
+        if (isRemoved(trait)) {
+            continue;
+        }
+
+        const ownTrait = trait.sourceMioId === mioId;
+        const y = yOf(trait);
+        const parentGroups: { parents: string[], numNeeded: number }[] = [
+            ...trait.allParents.map(p => ({ parents: [p], numNeeded: 1 })),
+            ...(trait.anyParent.length > 0 ? [{ parents: trait.anyParent, numNeeded: 1 }] : []),
+            ...(trait.parent ? [{ parents: trait.parent.traits, numNeeded: trait.parent.numNeeded }] : []),
+        ];
+
+        for (const parentId of [...trait.allParents, ...trait.anyParent, ...(trait.parent?.traits ?? [])]) {
+            if (ownTrait && !(parentId in traits)) {
+                warnings.push({
+                    text: localize('miopreview.warnings.parentnotexist', 'Parent {0} of trait {1} does not exist.', parentId, trait.id),
+                    source: trait.id,
+                });
+            }
+        }
+
+        if (ownTrait && trait.parent && trait.parent.numNeeded > trait.parent.traits.length) {
+            warnings.push({
+                text: localize('miopreview.warnings.numparentsneeded', 'Trait {0} needs {1} parents but lists only {2}, so it can never be unlocked.', trait.id, trait.parent.numNeeded, trait.parent.traits.length),
+                source: trait.id,
+            });
+        }
+
+        for (const group of parentGroups) {
+            const known = group.parents
+                .filter(p => p !== trait.id)
+                .map(p => traits[p])
+                .filter((p): p is MioTrait => p !== undefined);
+            if (known.length === 0 || !(checked(trait) || known.some(checked))) {
+                continue;
+            }
+            const notAbove = known.filter(p => yOf(p) >= y).map(p => p.id);
+            const above = known.length - notAbove.length;
+            if (notAbove.length > 0 && above < Math.min(group.numNeeded, known.length)) {
+                warnings.push({
+                    text: localize('miopreview.warnings.parentnotabove', 'Parent {0} of trait {1} is not positioned above it.', notAbove.join(', '), trait.id),
+                    source: trait.id,
+                    relatedSources: notAbove,
+                });
+            }
+        }
+
+        for (const exclusiveId of trait.exclusive) {
+            if (exclusiveId === trait.id) {
+                continue;
+            }
+            const exclusive = traits[exclusiveId];
+            if (!exclusive) {
+                if (ownTrait) {
+                    warnings.push({
+                        text: localize('miopreview.warnings.exclusivenotexist', 'Mutually exclusive trait {0} of trait {1} does not exist.', exclusiveId, trait.id),
+                        source: trait.id,
+                    });
+                }
+                continue;
+            }
+            const key = trait.id < exclusiveId ? `${trait.id}\u0001${exclusiveId}` : `${exclusiveId}\u0001${trait.id}`;
+            if (reportedPairs.has(key) || isRemoved(exclusive) || !(checked(trait) || checked(exclusive))) {
+                continue;
+            }
+            reportedPairs.add(key);
+            if (yOf(exclusive) !== y) {
+                warnings.push({
+                    text: localize('miopreview.warnings.exclusivenotsamey', 'Mutually exclusive traits {0} and {1} are not on the same row.', trait.id, exclusiveId),
+                    source: trait.id,
+                    relatedSources: [exclusiveId],
+                });
+            }
         }
     }
 }

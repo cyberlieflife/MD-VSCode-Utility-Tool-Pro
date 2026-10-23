@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { parseHoi4File } from '../hoiformat/hoiparser';
 import { convertFocusFileNodeToJson, FocusTree, getFocusTreeWithFocusFile } from '../previewdef/focustree/schema';
 import { collectFocusWarnings, collectFocusWarningsAsync, formatFocusWarningReport, ParsedFocusFile } from '../previewdef/focustree/warningreport';
-import { registerWarningStyles, warningBadgeClass, warningBoxClass, warningEntryClass, warningFlashClass, warningListClass } from '../previewdef/focustree/warningstyles';
+import { registerWarningStyles, warningBadgeClass, warningBoxClass, warningEntryClass, warningFlashClass, warningListClass } from '../util/hoi4gui/warningstyles';
 import { StyleTable } from '../util/styletable';
 import { refreshFeatureFlags } from '../util/featureflags';
 

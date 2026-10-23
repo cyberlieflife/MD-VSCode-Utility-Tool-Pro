@@ -13,7 +13,9 @@ import { Mio, MioTrait, TraitEffect } from './schema';
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
 import { localisationIndex } from "../../util/featureflags";
 import { LoaderRender, RenderContentOptions } from '../loaderpreview';
-import { actionGroupHtml, iconButtonHtml } from '../toolbaricons';
+import { Localizer, actionGroupHtml, iconButtonHtml } from '../toolbaricons';
+import { registerWarningStyles, warningListClass } from '../../util/hoi4gui/warningstyles';
+import { registerTraceStyles } from '../../util/hoi4gui/tracestyles';
 
 const defaultTraitIcon = 'gfx/interface/goals/goal_unknown.dds';
 const traitEffectIconMap: Record<TraitEffect, string> = {
@@ -97,6 +99,9 @@ async function renderMios(mios: Mio[], styleTable: StyleTable, gfxFiles: string[
     // can't rebuild them from `mios` alone — it swaps this html into the stable <select>.
     const mioOptionsHtml = renderMioOptions(mios);
 
+    // 网页端每次渲染后都要把追踪类挂到新连线上，因此这些规则写进外壳样式表（在任何渲染之前序列化）。
+    registerTraceStyles(styleTable, 'miopreviewplaceholder');
+
     const baseContent = (
         `<div id="dragger" class="${styleTable.style('dragger', () => `
             width: 100vw;
@@ -108,6 +113,7 @@ async function renderMios(mios: Mio[], styleTable: StyleTable, gfxFiles: string[
         `<div id="miopreviewcontent" class="${styleTable.style('miopreviewcontent', () => `top:40px;left:-20px;position:relative`)}">
             <div id="miopreviewplaceholder"></div>
         </div>` +
+        renderWarningContainer(styleTable) +
         await renderToolBar(mios, styleTable, mioOptionsHtml)
     );
 
@@ -141,8 +147,36 @@ async function renderMios(mios: Mio[], styleTable: StyleTable, gfxFiles: string[
     };
 }
 
-function renderMioOptions(mios: Mio[]): string {
-    return mios.map((mio, i) => {
+// 警告标记与列表的类名必须在外壳样式表里注册，网页端才能随时把类挂到新渲染的特质上。
+function renderWarningContainer(styleTable: StyleTable): string {
+    registerWarningStyles(styleTable);
+    return `
+    <div id="warnings-container" class="${styleTable.style('warnings-container', () => `
+        height: 100vh;
+        width: 100vw;
+        position: fixed;
+        top: 0;
+        left: 0;
+        padding-top: 40px;
+        background: var(--vscode-editor-background);
+        box-sizing: border-box;
+        display: none;
+    `)}">
+        <div id="warnings" class="${warningListClass}"></div>
+    </div>`;
+}
+
+// 只在追踪激活时由网页端显示，因此总有一个可见的退出方式。用内联 display 隐藏而不是 `hidden`
+// 属性：下面这个类自带 display，会赢过 `[hidden]`。
+function traceStatusHtml(styleTable: StyleTable, localize: Localizer): string {
+    return `
+        <div id="trace-status-container" style="display:none" class="${styleTable.style('traceStatusContainer', () => `margin-left:10px; align-items:center;`)}">
+            <span id="trace-status" class="${styleTable.style('traceStatus', () => `margin-right:5px; opacity:0.8;`)}"></span>
+            ${iconButtonHtml('clearTrace', localize, { domId: 'clear-trace' })}
+        </div>`;
+}
+
+function renderMioOptions(mios: Mio[]): string {    return mios.map((mio, i) => {
         const localizedText = localisationIndex ? `(${mio.id}) ${getLocalisedTextQuick(mio.id)}` : mio.id;
         return `<option value="${i}">${htmlEscape(localizedText)}</option>`;
     }).join('');
@@ -180,12 +214,21 @@ async function renderToolBar(mios: Mio[], styleTable: StyleTable, mioOptionsHtml
         <label for="show-overlaps" class="${styleTable.style('toggleLabel', () => `margin-right:5px`)}">${localize('miopreview.showOverlaps', 'Show overlapping traits')}</label>
         <input type="checkbox" id="show-overlaps" class="${styleTable.style('marginRight10', () => `margin-right:10px`)}">`;
 
+    // 警告按钮始终可用：一次编辑可能带进第一条警告而不重载页面，没有警告时面板会说明。
+    const actions = actionGroupHtml({
+        showWarnings: iconButtonHtml('showWarnings', localize, { domId: 'show-warnings', on: false }),
+        warningMarkers: iconButtonHtml('warningMarkers', localize, { domId: 'toggle-warning-markers', on: true }),
+        copyWarnings: iconButtonHtml('copyWarnings', localize, { domId: 'copy-warnings' }),
+        clearTrace: traceStatusHtml(styleTable, localize),
+        refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }),
+    });
+
     return `<div class="toolbar-outer ${styleTable.style('toolbar-height', () => `box-sizing: border-box; height: 40px;`)}">
         <div class="toolbar ${styleTable.style('mio-toolbar', () => `top:0; transform:none;`)}">
             ${mioSelect}
             ${conditions}
             ${toggles}
-            ${actionGroupHtml({ refresh: iconButtonHtml("refresh", localize, { domId: "refresh" }) })}
+            ${actions}
         </div>
     </div>`;
 }

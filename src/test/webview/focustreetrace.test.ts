@@ -3,7 +3,7 @@ import { loadEntrypoint } from './setup';
 import { GridBoxConnectionTiles, GridBoxItem, renderLineConnections } from '../../../src/util/hoi4gui/gridboxcommon';
 import { focusLinkClass } from '../../../src/util/hoi4gui/focuslink';
 import { StyleTable } from '../../../src/util/styletable';
-import { traceDimClass, traceLineClass } from '../../../src/previewdef/focustree/tracestyles';
+import { traceDimClass, traceLineClass } from '../../../src/util/hoi4gui/tracestyles';
 
 // focustree.ts 在模块级读取 window.focusTrees 并把处理器挂到 window 的 load/message 上；这里只
 // 测导出的连线过滤函数，所以让 setup 的 loadEntrypoint 把监听先扣住。模块缓存先清掉：依赖
@@ -151,9 +151,9 @@ describe('webview/focustree applyPrerequisiteTrace', () => {
 
     // 壳层样式表是渲染后唯一还能挂类的样式表，选择器必须与导出的类名一致（否则类挂上去没样式）。
     it('emits both trace class names into the shell stylesheet', async () => {
-        const { registerTraceStyles } = await import('../../../src/previewdef/focustree/tracestyles');
+        const { registerTraceStyles } = await import('../../../src/util/hoi4gui/tracestyles');
         const styleTable = new StyleTable();
-        registerTraceStyles(styleTable);
+        registerTraceStyles(styleTable, 'focustreeplaceholder');
         const css = styleTable.toRawCss();
         assert.ok(css.includes('.' + traceLineClass), traceLineClass);
         assert.ok(css.includes('.' + traceDimClass), traceDimClass);

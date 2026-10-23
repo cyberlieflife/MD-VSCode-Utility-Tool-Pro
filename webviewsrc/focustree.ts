@@ -20,8 +20,15 @@ import { showContextMenu as showSharedContextMenu, closeContextMenu as closeShar
 import { substituteInlaySlots } from "./inlayslots";
 import { propagateAllowBranches, AllowBranchFocus } from "./focusbranch";
 import { patchFocusTreeContent } from "./focustreepatch";
-import { warningBadgeClass, warningBoxClass, warningEntryClass, warningFlashClass } from "../src/previewdef/focustree/warningstyles";
-import { traceLineClass, traceDimClass } from "../src/previewdef/focustree/tracestyles";
+import {
+    applyWarningMarkers as applyTreeWarningMarkers,
+    bindWarningPanelButton,
+    clearWarningMarkers as clearTreeWarningMarkers,
+    renderWarningList as renderTreeWarningList,
+    revealNode,
+    setWarningMarkersVisible,
+} from "./util/warnings";
+import { Tracing, subscribeTracing } from "./util/trace";
 import { applyIconState } from "../src/previewdef/toolbaricons";
 
 initCommon();
@@ -929,7 +936,7 @@ async function buildContent() {
     applyCustomTitlebarVisibility();
     applyFocusOverlayVisibility();
     // The connection divs are new after every rebuild, so an active trace has to be put back on.
-    reapplyPrerequisiteTrace();
+    tracing?.reapply();
     // The rebuild replaced every focus label, so cached originals are stale. Re-apply the name
     // mode (no-op in ID mode) and the selection highlight after the fresh render.
     focusSpanOriginalHtml.clear();
@@ -988,290 +995,25 @@ function scrollToInitialShowPosition(): boolean {
     return true;
 }
 
+// 警告标记与追踪的通用实现由 util/warnings.ts / util/trace.ts 提供（MIO 特质树共用）；这里只补
+// 焦点树的元素前缀。`warningFocusIdsFor` 与 `warningCellCountsFor` 继续导出给测试。
+export { warningCellCountsFor, warningIdsFor as warningFocusIdsFor } from "./util/warnings";
+export { applyPrerequisiteTrace } from "./util/trace";
+
+let tracing: Tracing | undefined;
+
 /**
  * 布局警告点名的焦点获得红框与警告角标，使问题在树上就能看见，而不只是警告面板里的一行。
  * 每次（重）渲染后运行，含就地更新路径；标记警告涉及的每个焦点（来源与相关来源）。
- * 导出（与 MIO 预览的 findOverlaps 同理）使收集 id 的逻辑可单测。
  */
-export function warningFocusIdsFor(focusTree: FocusTree): Set<string> {
-    const warningFocusIds = new Set<string>();
-    for (const warning of focusTree.warnings) {
-        warningFocusIds.add(warning.source);
-        for (const related of warning.relatedSources ?? []) {
-            warningFocusIds.add(related);
-        }
-    }
-    return warningFocusIds;
-}
-
-/**
- * 每个格子解析到多少个被警告的焦点，按焦点 id 归集。叠在同一格上的焦点互相遮盖，只有最后渲染的
- * 那个可见——角标上的计数是看出那里还藏着多个焦点的唯一途径。计数只覆盖已带警告的焦点，从别的
- * 文件并入的共享/联合焦点堆叠（校验器刻意忽略）不会造出标记。与 warningFocusIdsFor 同样的可测原因导出。
- */
-export function warningCellCountsFor(
-    items: GridBoxItem[],
-    warningFocusIds: Set<string>,
-): Record<string, number> {
-    const countByCell: Record<string, number> = {};
-    const cellByFocusId: Record<string, string> = {};
-    for (const item of items) {
-        if (!warningFocusIds.has(item.id)) {
-            continue;
-        }
-        const cell = item.gridX + "," + item.gridY;
-        cellByFocusId[item.id] = cell;
-        countByCell[cell] = (countByCell[cell] ?? 0) + 1;
-    }
-
-    const countByFocusId: Record<string, number> = {};
-    for (const [id, cell] of Object.entries(cellByFocusId)) {
-        countByFocusId[id] = countByCell[cell] ?? 1;
-    }
-    return countByFocusId;
-}
-
-// 每个焦点的警告文本，归在警告的来源与每个相关来源之下，配对的两端都能在悬停里自我说明，
-// 而不是只有警告归到的那个焦点。
-function warningTextsByFocusId(focusTree: FocusTree): Record<string, string[]> {
-    const texts: Record<string, string[]> = {};
-    for (const warning of focusTree.warnings) {
-        for (const id of [warning.source, ...(warning.relatedSources ?? [])]) {
-            (texts[id] ??= []).push(warning.text);
-        }
-    }
-    return texts;
-}
-
-// Prerequisite line tracing. A dense tree draws hundreds of overlapping connector lines underneath
-// the nodes, so following one by eye is guesswork. Shift+clicking a focus dims every connection in
-// the tree except the ones that focus's own prerequisite blocks produce. Focus nodes are left
-// untouched -- only lines are filtered.
-let tracedFocusId: string | undefined;
-
-// 导出使测试能断言类真的落在渲染出的连线上（整套行为就是这两个类）。
-export function applyPrerequisiteTrace(root: HTMLElement, focusId: string | undefined): void {
-    const connections = root.querySelectorAll("[data-conn-from]");
-    for (let i = 0; i < connections.length; i++) {
-        const connection = connections[i] as HTMLElement;
-        connection.classList.remove(traceLineClass, traceDimClass);
-        if (focusId === undefined) {
-            continue;
-        }
-
-        // data-conn-from is the focus that owns the connection, and data-conn-type is written
-        // before renderGridBoxConnection flips a diagonal "parent" to "child", so this pair means
-        // exactly "a line one of this focus's prerequisite blocks produced". A mutually exclusive
-        // link is "related" and dims with everything else.
-        const isPrerequisiteOfTraced =
-            connection.dataset.connFrom === focusId &&
-            connection.dataset.connType === "parent";
-        connection.classList.add(isPrerequisiteOfTraced ? traceLineClass : traceDimClass);
-    }
-}
-
-function reapplyPrerequisiteTrace(): void {
-    const placeholder = document.getElementById("focustreeplaceholder");
-    if (placeholder) {
-        applyPrerequisiteTrace(placeholder, tracedFocusId);
-    }
-}
-
-function setTracedFocus(focusId: string | undefined): void {
-    tracedFocusId = focusId;
-    reapplyPrerequisiteTrace();
-
-    const status = document.getElementById("trace-status");
-    if (status) {
-        // Focus ids come from the mod file, so they go in as text and never as markup.
-        status.textContent = focusId ? feLocalize("focustree.tracing", "Tracing: {0}", focusId) : "";
-    }
-
-    const container = document.getElementById("trace-status-container");
-    if (container) {
-        container.style.display = focusId ? "flex" : "none";
-    }
-}
-
-// Wired to the shell elements, which outlive every rebuild of the tree, so this runs once.
-function subscribeTracing(): void {
-    const content = document.getElementById("focustreecontent");
-    if (content) {
-        content.addEventListener(
-            "click",
-            (e) => {
-                if (!e.shiftKey) {
-                    return;
-                }
-
-                // Capture phase: stopping the event here is what keeps the bubble-phase .navigator
-                // handler from also jumping to the focus in the editor, and keeps a shift+click that
-                // lands on the completion checkbox from ticking it.
-                e.preventDefault();
-                e.stopPropagation();
-
-                const item = (e.target as Element | null)?.closest("[data-gridbox-item]") as HTMLElement | null;
-                const id = item?.dataset.gridboxItem;
-                if (!id) {
-                    return;
-                }
-
-                setTracedFocus(id === tracedFocusId ? undefined : id);
-            },
-            true,
-        );
-    }
-
-    const clearButton = document.getElementById("clear-trace");
-    clearButton?.addEventListener("click", () => setTracedFocus(undefined));
-
-    window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && tracedFocusId !== undefined) {
-            setTracedFocus(undefined);
-        }
-    });
-
-    // Clicking empty canvas clears the trace. The end of a pan is a click on that same canvas, so
-    // only a press that stayed where it started counts as one.
-    const dragger = document.getElementById("dragger");
-    if (dragger) {
-        let downX = 0;
-        let downY = 0;
-        dragger.addEventListener("mousedown", (e) => {
-            downX = e.pageX;
-            downY = e.pageY;
-        });
-        dragger.addEventListener("mouseup", (e) => {
-            if (tracedFocusId !== undefined && Math.abs(e.pageX - downX) < 4 && Math.abs(e.pageY - downY) < 4) {
-                setTracedFocus(undefined);
-            }
-        });
-    }
-}
-
-// 导出使测试能断言标记真的落在渲染出的节点上。
 export function applyWarningMarkers(focusTree: FocusTree, items: GridBoxItem[]) {
-    const warningFocusIds = warningFocusIdsFor(focusTree);
-    if (warningFocusIds.size === 0) {
-        return;
-    }
-
-    const cellCounts = warningCellCountsFor(items, warningFocusIds);
-    const texts = warningTextsByFocusId(focusTree);
-    const visible = showWarningMarkers();
-
-    warningFocusIds.forEach((id) => {
-        // 被 allow_branch 隐藏、或属于另一棵树的焦点没有元素。
-        const element = document.getElementById(`focus_${id}`);
-        if (!element) {
-            return;
-        }
-
-        // 通过 DOM 构建而不是 innerHTML：任何来自模组焦点 id 的内容都不会插进标记。
-        const marker = document.createElement("div");
-        marker.className = warningBoxClass;
-        if (!visible) {
-            marker.style.display = "none";
-        }
-        const badge = document.createElement("span");
-        badge.className = warningBadgeClass;
-        const stacked = cellCounts[id] ?? 1;
-        badge.textContent = stacked > 1 ? `⚠×${stacked}` : "⚠";
-        marker.appendChild(badge);
-        element.appendChild(marker);
-
-        // 悬停提示挂在本就携带焦点 id 与位置标题的 .navigator 子元素上；标记自身是
-        // pointer-events:none，显示不了提示。
-        const navigator = element.querySelector(".navigator") as HTMLElement | null;
-        const focusTexts = texts[id];
-        if (navigator && focusTexts) {
-            // 原始 title 先记下来：clearWarningMarkers 要把它还原回去，增量 patch 才能把没变的
-            // 格子判为未变（title 也是 innerHTML 的一部分）。
-            if (!navigator.hasAttribute("data-warning-base-title")) {
-                navigator.setAttribute("data-warning-base-title", navigator.title);
-            }
-            navigator.title = [navigator.title, ...focusTexts.map((t) => `⚠ ${t}`)]
-                .filter((line) => line)
-                .join("\n");
-        }
-    });
+    applyTreeWarningMarkers(focusTree, items, "focus_", showWarningMarkers());
 }
 
 // 标记与挂在 .navigator 上的警告行都是上一次渲染加上去的装饰：增量 patch 按 innerHTML 比较
 // 格子，任何残留都会让被标记过的格子每次都判为变化、整格重建。patch 之前必须把它们全部撤掉。
 export function clearWarningMarkers() {
-    document.querySelectorAll("." + warningBoxClass).forEach((element) => element.remove());
-    document.querySelectorAll("[data-warning-base-title]").forEach((element) => {
-        const baseTitle = element.getAttribute("data-warning-base-title") ?? "";
-        if (baseTitle === "") {
-            element.removeAttribute("title");
-        } else {
-            element.setAttribute("title", baseTitle);
-        }
-        element.removeAttribute("data-warning-base-title");
-    });
-}
-
-function setWarningMarkersVisible(visible: boolean) {
-    const markers = document.getElementsByClassName(warningBoxClass);
-    for (let i = 0; i < markers.length; i++) {
-        (markers[i] as HTMLDivElement).style.display = visible ? "block" : "none";
-    }
-}
-
-// 警告面板为每条警告列出一个可点击条目：激活它会关闭面板并把出问题的焦点滚动到视野中、短暂闪光，
-// 警告不必按坐标去手工寻找。
-function renderWarningList(focusTree: FocusTree) {
-    const warnings = document.getElementById("warnings") as HTMLDivElement | null;
-    if (!warnings) {
-        return;
-    }
-
-    warnings.textContent = "";
-    if (focusTree.warnings.length === 0) {
-        const empty = document.createElement("div");
-        empty.textContent = feLocalize("worldmap.warnings.nowarnings", "No warnings.");
-        warnings.appendChild(empty);
-        return;
-    }
-
-    for (const warning of focusTree.warnings) {
-        const entry = document.createElement("div");
-        entry.className = warningEntryClass;
-        entry.setAttribute("role", "button");
-        entry.tabIndex = 0;
-        entry.textContent = `[${warning.source}] ${warning.text}`;
-        const reveal = () => revealFocus(warning.source);
-        entry.addEventListener("click", reveal);
-        entry.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                reveal();
-            }
-        });
-        warnings.appendChild(entry);
-    }
-}
-
-function revealFocus(focusId: string) {
-    hideWarningPanel();
-    // 被 allow_branch 隐藏的焦点没有元素；此时条目只是关掉面板。
-    const element = document.getElementById(`focus_${focusId}`);
-    if (!element) {
-        return;
-    }
-
-    element.scrollIntoView({ block: "center", inline: "center" });
-    element.classList.add(warningFlashClass);
-    setTimeout(() => element.classList.remove(warningFlashClass), 1200);
-}
-
-function hideWarningPanel() {
-    const container = document.getElementById("warnings-container") as HTMLDivElement | null;
-    if (container) {
-        container.style.display = "none";
-        document.body.style.overflow = "";
-    }
+    clearTreeWarningMarkers();
 }
 
 function calculateFocusAllowed(focusTree: FocusTree, allowBranchOptionsValue: Record<string, boolean>) {
@@ -1471,7 +1213,7 @@ function updateSelectedFocusTree(clearCondition: boolean) {
     }
 
     renderShortcuts(focusTree, renderedShortcuts[selectedFocusTreeIndex]);
-    renderWarningList(focusTree);
+    renderTreeWarningList(focusTree, "focus_");
 }
 
 // 按钮全部由服务端渲染，这里只把当前树的填进浮层，并在没有快捷键的树上隐藏浮层。每个按钮带着
@@ -1503,7 +1245,7 @@ export function bindShortcuts(overlay: HTMLElement, currentTree: () => FocusTree
         const item = target.closest("[data-shortcut-index]") as HTMLElement | null;
         const shortcut = item ? currentTree()?.shortcuts?.[Number(item.dataset.shortcutIndex)] : undefined;
         if (shortcut) {
-            revealFocus(shortcut.target);
+            revealNode(`focus_${shortcut.target}`);
         }
     });
 }
@@ -2206,7 +1948,11 @@ window.addEventListener('load', tryRun(async function() {
     wireContinuousFocusEditing(() => focusTrees[selectedFocusTreeIndex]);
 
     // Shift+click a focus to isolate its prerequisite lines
-    subscribeTracing();
+    tracing = subscribeTracing({
+        contentId: 'focustreecontent',
+        placeholderId: 'focustreeplaceholder',
+        statusText: id => feLocalize('focustree.tracing', 'Tracing: {0}', id),
+    });
 
     // Search filters: dims focuses that don't carry any selected filter.
     const searchFiltersElement = document.getElementById('search-filters') as HTMLDivElement | null;
@@ -2222,16 +1968,7 @@ window.addEventListener('load', tryRun(async function() {
     }
 
     // Toggle warnings
-    const showWarnings = document.getElementById('show-warnings') as HTMLButtonElement;
-    if (showWarnings) {
-        const warnings = document.getElementById('warnings-container') as HTMLDivElement;
-        showWarnings.addEventListener('click', () => {
-            const visible = warnings.style.display === 'block';
-            document.body.style.overflow = visible ? '' : 'hidden';
-            warnings.style.display = visible ? 'none' : 'block';
-            applyIconState(showWarnings, 'showWarnings', !visible, feLocalize);
-        });
-    }
+    bindWarningPanelButton();
 
     // 画布上的警告标记开关：翻转既有标记元素而不是重建树，大树上也即时生效。
     const toggleWarningMarkers = document.getElementById('toggle-warning-markers') as HTMLButtonElement | null;
@@ -2240,8 +1977,8 @@ window.addEventListener('load', tryRun(async function() {
         toggleWarningMarkers.addEventListener('click', () => {
             const visible = !showWarningMarkers();
             setState({ showFocusWarningMarkers: visible });
+            // setWarningMarkersVisible 同时更新按钮图标。
             setWarningMarkersVisible(visible);
-            applyIconState(toggleWarningMarkers, 'warningMarkers', visible, feLocalize);
         });
     }
 

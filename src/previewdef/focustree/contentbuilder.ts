@@ -18,8 +18,8 @@ import { registerExclusiveLinkStyles } from "../../util/hoi4gui/exclusivelink";
 import { loadExclusiveLinkImages, nationalFocusViewGfxFile } from "../../util/hoi4gui/exclusivelinkimages";
 import { registerFocusLinkStyles } from "../../util/hoi4gui/focuslink";
 import { loadFocusLinkImages } from "../../util/hoi4gui/focuslinkimages";
-import { registerWarningStyles, warningListClass } from "./warningstyles";
-import { registerTraceStyles } from "./tracestyles";
+import { registerWarningStyles, warningListClass } from "../../util/hoi4gui/warningstyles";
+import { registerTraceStyles } from "../../util/hoi4gui/tracestyles";
 import { iconButtonHtml, iconClassOf } from "../toolbaricons";
 import { renderContainerWindow, RenderChildTypeMap } from "../../util/hoi4gui/containerwindow";
 import { calculateBBox, ParentInfo } from "../../util/hoi4gui/common";
@@ -289,7 +289,7 @@ export function buildFocusTreeErrorHtml(webview: vscode.Webview, uri: vscode.Uri
 async function renderFocusTreeShell(focusTrees: FocusTree[], styleTable: StyleTable, toolbarFlags: ToolbarFlags, styleNonce: string, gfxFiles: string[], layout: FocusTreeLayout, shortcutToggle: string): Promise<string> {
     // Same reason as registerWarningStyles below: the shell stylesheet is the only one the webview
     // can still attach classes against after a render. See tracestyles.ts.
-    registerTraceStyles(styleTable);
+    registerTraceStyles(styleTable, 'focustreeplaceholder');
 
     // Set by the webview while the continuous focus box can be dragged.
     styleTable.raw(`#continuousFocuses.continuous-editable`, `
