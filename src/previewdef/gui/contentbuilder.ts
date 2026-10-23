@@ -13,11 +13,14 @@ import { getSpriteByGfxName } from '../../util/image/imagecache';
 import { LoaderSession } from '../../util/loader/loader';
 import { StyleTable, normalizeForStyle } from '../../util/styletable';
 import { actionGroupHtml, iconButtonHtml } from "../toolbaricons";
+import { RenderContentOptions } from "../loaderpreview";
 import { GuiFileLoader, GuiFileLoaderResult } from "./loader";
 
-export async function renderGuiFile(loader: GuiFileLoader, uri: vscode.Uri, webview: vscode.Webview): Promise<string> {
+export async function renderGuiFile(loader: GuiFileLoader, uri: vscode.Uri, webview: vscode.Webview, options?: RenderContentOptions): Promise<string> {
     try {
-        const session = new LoaderSession(false);
+        // A .gfx or .gui this preview depends on changed; the document's own hash has not moved, so
+        // the session has to be forced or the loader answers from its cache.
+        const session = new LoaderSession(options?.dependencyChanged ?? false);
         const loadResult = await loader.load(session);
         const loadedLoaders = Array.from((session as any).loadedLoader).map<string>(v => (v as any).toString());
         debug('Loader session gui', loadedLoaders);

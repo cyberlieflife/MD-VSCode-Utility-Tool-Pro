@@ -137,10 +137,14 @@ export class IdeasLoader extends ContentLoader<IdeasLoaderResult> {
 			getIdeaPlaceholderIcon(),
 		]);
 
+		// The sprite .gfx files are where every idea picture comes from, so the preview subscribes to
+		// them: a sprite swapped or added in one has to reach the next render.
+		const gfxFiles = uniq([...gfxDependencies, ideasGFX]);
+
 		return {
 			result: {
 				ideas: merged,
-				gfxFiles: uniq([...gfxDependencies, ideasGFX]),
+				gfxFiles,
 				modifierDefinitions,
 				swaps,
 				swapsUnavailable: !ideaSwapIndex,
@@ -152,6 +156,7 @@ export class IdeasLoader extends ContentLoader<IdeasLoaderResult> {
 				this.file,
 				...ideaDependencies,
 				...mergeInLoadResult(ideaDepFiles, "dependencies"),
+				...gfxFiles,
 				...definitionFiles,
 			]),
 		};

@@ -12,7 +12,7 @@ import { StyleTable, normalizeForStyle } from '../../util/styletable';
 import { Mio, MioTrait, TraitEffect } from './schema';
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
 import { localisationIndex } from "../../util/featureflags";
-import { LoaderRender } from '../loaderpreview';
+import { LoaderRender, RenderContentOptions } from '../loaderpreview';
 import { actionGroupHtml, iconButtonHtml } from '../toolbaricons';
 
 const defaultTraitIcon = 'gfx/interface/goals/goal_unknown.dds';
@@ -22,9 +22,11 @@ const traitEffectIconMap: Record<TraitEffect, string> = {
     organization: 'GFX_organization_modifier_icon',
 };
 
-export async function renderMioFile(loader: MioLoader, uri: vscode.Uri, webview: vscode.Webview): Promise<LoaderRender> {
+export async function renderMioFile(loader: MioLoader, uri: vscode.Uri, webview: vscode.Webview, options?: RenderContentOptions): Promise<LoaderRender> {
     try {
-        const session = new LoaderSession(false);
+        // A dependency (a sprite .gfx, a new organisations file) changed; the document's own hash has
+        // not moved, so the session has to be forced or the loader answers from its cache.
+        const session = new LoaderSession(options?.dependencyChanged ?? false);
         const loadResult = await loader.load(session);
         const loadedLoaders = Array.from((session as any).loadedLoader).map<string>(v => (v as any).toString());
         debug('Loader session mio', loadedLoaders);

@@ -135,8 +135,9 @@ export class CharactersLoader extends ContentLoader<CharactersLoaderResult> {
 			// character grants comes from, so an edit to one of them has to bring the preview back.
 			// Reporting them here is what subscribes this preview to them; renderCharacterFile then
 			// forces the session on a dependency change, since the character file's own hash has not
-			// moved and the loader would otherwise hand back its cached traits.
-			dependencies: uniq([this.file, ...traits.files, ...definitionFiles]),
+			// moved and the loader would otherwise hand back its cached traits. The .gfx files are
+			// listed for the same reason: a portrait or medal sprite changed in one must redraw.
+			dependencies: uniq([this.file, ...traits.files, ...definitionFiles, ...gfxFiles]),
 		};
 	}
 

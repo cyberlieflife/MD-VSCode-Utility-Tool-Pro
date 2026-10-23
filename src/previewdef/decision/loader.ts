@@ -179,6 +179,10 @@ export class DecisionsLoader extends ContentLoader<DecisionsLoaderResult> {
 			...(await getGfxContainerFiles(uniq([...icons, ...categoryIcons]))),
 		];
 
+		// Every sprite the decision cards and category icons use lives in these .gfx files, so the
+		// preview subscribes to all of them rather than only the configured ones.
+		const gfxFiles = uniq([...gfxDependencies, ...decisionGfxFiles]);
+
 		return {
 			result: {
 				decisions: merged,
@@ -186,7 +190,7 @@ export class DecisionsLoader extends ContentLoader<DecisionsLoaderResult> {
 				scriptedGuis,
 				guiWindows,
 				modifierDefinitions,
-				gfxFiles: uniq([...gfxDependencies, ...decisionGfxFiles]),
+				gfxFiles,
 			},
 			dependencies: uniq([
 				this.file,
@@ -194,7 +198,7 @@ export class DecisionsLoader extends ContentLoader<DecisionsLoaderResult> {
 				...mergeInLoadResult(decisionDepFiles, "dependencies"),
 				`${decisionCategoriesFolder}/*`,
 				`${scriptedGuisFolder}/*`,
-				...decisionGfxFiles,
+				...gfxFiles,
 				// How every modifier line reads; renderDecisionFile forces the session on an edit.
 				...definitionFiles,
 			]),

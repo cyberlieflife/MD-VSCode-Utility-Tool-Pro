@@ -20,7 +20,7 @@ import { StyleTable } from '../../util/styletable';
 import { RenderNodeCommonOptions } from '../../util/hoi4gui/nodecommon';
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
 import { localisationIndex, technologyCountryIcons, gfxIndex } from "../../util/featureflags";
-import { LoaderRender } from '../loaderpreview';
+import { LoaderRender, RenderContentOptions } from '../loaderpreview';
 import { actionGroupHtml, iconButtonHtml } from '../toolbaricons';
 import { getPreviewOptions } from '../../util/previewoptions';
 import { technologyCountryOption } from './countryicons';
@@ -28,9 +28,11 @@ import { technologyCountryOption } from './countryicons';
 const techTreeViewName = 'countrytechtreeview';
 const doctrineTreeViewName = 'countrydoctrineview';
 
-export async function renderTechnologyFile(loader: TechnologyTreeLoader, uri: vscode.Uri, webview: vscode.Webview): Promise<LoaderRender> {
+export async function renderTechnologyFile(loader: TechnologyTreeLoader, uri: vscode.Uri, webview: vscode.Webview, options?: RenderContentOptions): Promise<LoaderRender> {
     try {
-        const session = new LoaderSession(false);
+        // A dependency (an icon .gfx, a .gui, an equipment file) changed; the document's own hash has
+        // not moved, so the session has to be forced or the loader answers from its cache.
+        const session = new LoaderSession(options?.dependencyChanged ?? false);
         const loadResult = await loader.load(session);
         const loadedLoaders = Array.from((session as any).loadedLoader).map<string>(v => (v as any).toString());
         debug('Loader session tech tree', loadedLoaders);

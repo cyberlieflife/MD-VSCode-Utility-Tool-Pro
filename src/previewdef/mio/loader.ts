@@ -50,6 +50,9 @@ export class MioLoader extends ContentLoader<MioLoaderResult> {
                 ideaGFX,
                 ...gfxDependencies,
                 ...mioDependencies,
+                // A file added under the organisations folder is in no list this load made, so the
+                // preview would never refresh for it without the wildcard.
+                `${mioOrgDir}/*`,
                 ...mergeInLoadResult(mioDepFiles, 'dependencies')
             ]),
         };

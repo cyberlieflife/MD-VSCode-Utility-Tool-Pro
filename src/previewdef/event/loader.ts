@@ -59,11 +59,14 @@ export class EventsLoader extends ContentLoader<EventsLoaderResult> {
             ...await getGfxContainerFiles(flatten(Object.values(events.eventItemsByNamespace)).map(e => e.picture)),
         ];
 
+        // Picture sprites come from these .gfx files, so an edit to one has to reach the next render.
+        const gfxFiles = uniq([...gfxDependencies, eventsGFX]);
+
         return {
             result: {
                 events: mergedEvents,
                 mainNamespaces: Object.keys(events.eventItemsByNamespace),
-                gfxFiles: uniq([...gfxDependencies, eventsGFX]),
+                gfxFiles,
                 localizationDict,
             },
             dependencies: uniq([
@@ -72,6 +75,7 @@ export class EventsLoader extends ContentLoader<EventsLoaderResult> {
                 ...mergeInLoadResult(eventsDepFiles, 'dependencies'),
                 ...localizationDependencies,
                 ...flatten(eventsDepFiles.map(f => f.dependencies)),
+                ...gfxFiles,
             ])
         };
     }
