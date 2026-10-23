@@ -1,3 +1,26 @@
+## [v1.2.3] - 2026-10-24
+
+### Functionality
+
+- [Military Industrial Organization Preview] The preview now reports the trait links that cannot work: a parent that does not exist, a `parent` block that asks for more parents than it lists, a parent not positioned above the trait it unlocks, and mutually exclusive traits that are missing or not on the same row. Both ends of a pair are marked on the tree. A toolbar button lists the warnings and jumps to the trait on click, another shows or hides the markers, and a third copies the warnings of the organization on screen.
+- [Military Industrial Organization Preview] Shift+clicking a trait dims every connector in the tree except the ones its own parents produce; Esc or the clear button ends the trace. The trace stays on when the organization is re-rendered.
+- [Focus Tree Preview] The search box shows how many currently visible focuses the query hits and which one `Enter` is on; the first `Enter` lands on the first hit instead of the second.
+- [Previews] Every navigable card and focus is now a tab stop activated with `Enter` or `Space`, owned by the shared navigation instead of each preview deciding for itself.
+- [Character Preview] A trait card expands and collapses with `Enter` or `Space`; Ctrl/Meta still opens the trait's file.
+- [Previews] Editing a sprite in a `.gfx` now refreshes the idea, event, character and decision previews, and the technology preview refreshes when an equipment file is added or removed.
+- [Extension] The extension activates in workspaces whose only content is interface `.gui` files or MIO organization files.
+
+### Bugfixes
+
+- [DDS] Six-value DXT5 alpha blocks interpolate in fifths, sRGB textures are no longer darkened by a second gamma curve, raw channels are read from their own bit offset, and B4G4R4A4 textures decode instead of being refused. A `.dds` asset that holds PNG data decodes as PNG.
+- [Images] Interlaced PNGs, a repeated IHDR and a declared size over the image limit are refused before decoding, and DDS/TGA conversion no longer makes an extra copy of the RGBA buffer.
+- [Parser] A string whose closing quote follows a backslash no longer makes the tokenizer backtrack exponentially, so Windows paths ending in a backslash parse and an unterminated run of backslashes fails immediately. Bad image input is no longer decoded a second time on the extension host.
+- [Previews] Opening a file that is not in the mod copies it into the workspace only after the target is checked to stay inside the chosen folder and outside dot-prefixed directories; a refused target is reported before the file is read.
+- [Install path] The Hearts of Iron IV install path is read-only through the extension's filesystem provider: creating, writing, deleting, renaming and copying are refused.
+- [Focus Tree Preview] Layout checks treat a file's shared and joint focuses as one import pool, apply offsets gated on `has_focus_tree` against the tree being checked, and treat focuses under different `allow_branch` gates as alternatives, so those pairs no longer report a false overlap. The audit runs in cancellable slices and parses without position tokens.
+- [Index] A failed `mapLimit` batch stops starting new work, and a rejected cache read no longer removes the entry that replaced it. Dependency markers are scanned linearly, and the province colour pass only consults its set when the colour changes.
+- [Previews] The event and technology previews no longer read the full text of a document that is not a `.txt` file, and focusing a search hit no longer throws where `scrollIntoView` is unavailable.
+
 ## [v1.2.2] - 2026-10-10
 
 ### Functionality
