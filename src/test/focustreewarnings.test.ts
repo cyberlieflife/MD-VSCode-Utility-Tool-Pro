@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { parseHoi4File } from '../hoiformat/hoiparser';
 import { convertFocusFileNodeToJson, FocusTree, getFocusTreeWithFocusFile } from '../previewdef/focustree/schema';
-import { collectFocusWarnings, formatFocusWarningReport, ParsedFocusFile } from '../previewdef/focustree/warningreport';
+import { collectFocusWarnings, collectFocusWarningsAsync, formatFocusWarningReport, ParsedFocusFile } from '../previewdef/focustree/warningreport';
 import { registerWarningStyles, warningBadgeClass, warningBoxClass, warningEntryClass, warningFlashClass, warningListClass } from '../previewdef/focustree/warningstyles';
 import { StyleTable } from '../util/styletable';
 import { refreshFeatureFlags } from '../util/featureflags';
@@ -229,9 +229,104 @@ ${refs}
     });
 });
 
+// 伪树与替代分支的重叠豁免：伪树里只有共享同一个导入根的两个焦点会相遇；offset 按
+// has_focus_tree 取到所检查的树；各在一扇默认关闭的门下的焦点算替代项。
+describe('previewdef/focustree layout overlap excuses', () => {
+    function withConditionInFocus<T>(run: () => T): T {
+        const realGetConfig = (vscode.workspace as any).getConfiguration;
+        (vscode.workspace as any).getConfiguration = () => ({
+            get: () => undefined, update: () => Promise.resolve(), inspect: () => undefined,
+            modFile: '', loadDlcContents: false, inlayWindowGfxRoots: [], useConditionInFocus: true,
+        });
+        refreshFeatureFlags();
+        try {
+            return run();
+        } finally {
+            (vscode.workspace as any).getConfiguration = realGetConfig;
+            refreshFeatureFlags();
+        }
+    }
+
+    it('does not compare two shared focuses that no single import brings in together', () => {
+        const warnings = withConditionInFocus(() => warningsOf(`
+shared_focus = { id = SH_a x = 0 y = 0 }
+shared_focus = { id = SH_b x = 0 y = 0 }`));
+        assert.ok(!warnings.some(w => w.includes('share the same position')), warnings.join(' | '));
+    });
+
+    it('still compares a shared focus with the prerequisite it comes in with', () => {
+        const warnings = withConditionInFocus(() => warningsOf(`
+shared_focus = { id = SH_a x = 0 y = 0 }
+shared_focus = { id = SH_b x = 0 y = 0 prerequisite = { focus = SH_a } }`));
+        assert.ok(warnings.some(w => w.includes('share the same position')), warnings.join(' | '));
+    });
+
+    it('applies an offset gated on has_focus_tree when checking that tree', () => {
+        const shared = `shared_focus = {
+    id = SH_a x = 0 y = 0
+    offset = { x = 2 trigger = { has_focus_tree = AAA_tree } }
+}
+shared_focus = {
+    id = SH_b x = 0 y = 0
+    offset = { x = -2 trigger = { has_focus_tree = BBB_tree } }
+}`;
+        const warnings = withConditionInFocus(() => {
+            const donorFile = convertFocusFileNodeToJson(parseHoi4File(shared), {});
+            const donors = getFocusTreeWithFocusFile(donorFile, [], 'common/national_focus/shared.txt', {});
+            const country = convertFocusFileNodeToJson(parseHoi4File(`focus_tree = {
+    id = AAA_tree
+    shared_focus = { SH_a SH_b }
+    focus = { id = AAA_start x = 10 y = 5 }
+}`), {});
+            return getFocusTreeWithFocusFile(country, donors, 'common/national_focus/AAA.txt', {})
+                .filter(t => !t.isSharedFocues)
+                .flatMap(t => t.warnings.map(w => w.text));
+        });
+
+        // 两棵树各把其中一个焦点移开 2 格，因此在 AAA_tree 里它们不再同位置。
+        assert.ok(!warnings.some(w => w.includes('share the same position')), warnings.join(' | '));
+    });
+
+    it('excuses a pair that each sits under a different closed allow_branch gate', () => {
+        const content = tree(`
+    focus = { id = A x = 0 y = 0 allow_branch = { has_country_flag = flag_a } }
+    focus = { id = B x = 0 y = 0 allow_branch = { has_country_flag = flag_b } }`);
+        assert.ok(!hasWarning(content, 'share the same position'), warningsOf(content).join(' | '));
+    });
+
+    it('still reports a pair under the same gate', () => {
+        const content = tree(`
+    focus = { id = A x = 0 y = 0 allow_branch = { has_country_flag = flag_a } }
+    focus = { id = B x = 0 y = 0 allow_branch = { has_country_flag = flag_a } }`);
+        assert.ok(hasWarning(content, 'share the same position'), warningsOf(content).join(' | '));
+    });
+});
+
+describe('collectFocusWarningsAsync', () => {
+    const parsed = (): ParsedFocusFile[] => [{
+        path: 'common/national_focus/test.txt',
+        file: convertFocusFileNodeToJson(parseHoi4File(tree(`
+    focus = { id = a x = 0 y = 0 }
+    focus = { id = b x = 0 y = 0 }`)), {}),
+    }];
+
+    it('matches the synchronous result', async () => {
+        assert.deepStrictEqual(
+            await collectFocusWarningsAsync(parsed()),
+            collectFocusWarnings(parsed()),
+        );
+    });
+
+    it('returns undefined once the reader cancels', async () => {
+        assert.strictEqual(
+            await collectFocusWarningsAsync(parsed(), { isCancellationRequested: true }),
+            undefined,
+        );
+    });
+});
+
 // 警告样式经 StyleTable.name 推导类名：测试锁定发出的规则与导出常量一致，两侧不会漂移。
-describe('previewdef/focustree warning styles', () => {
-    it('emits every rule under the exported class name', () => {
+describe('previewdef/focustree warning styles', () => {    it('emits every rule under the exported class name', () => {
         const styleTable = new StyleTable();
         registerWarningStyles(styleTable);
         const css = styleTable.toRawCss();

@@ -50,6 +50,14 @@ describe('util/dependency', () => {
             assert.deepStrictEqual(result, [{ type: 'event', path: 'events/foo.txt' }]);
         });
 
+        it('finds a marker after a large file without backtracing over it', function () {
+            this.timeout(5000);
+            // 每行行首的 \s* 曾把空行逐个吞掉再回溯，20 万空行就是几十亿步。
+            const padding = ':'.repeat(300_000) + '\r\n\r\n'.repeat(200_000);
+            const result = getDependenciesFromText(padding + '#!event:events/foo.txt\r\n');
+            assert.deepStrictEqual(result, [{ type: 'event', path: 'events/foo.txt' }]);
+        });
+
         it('does not match markers that are not at the start of a line', () => {
             const result = getDependenciesFromText('desc = "#!event:events/foo.txt"\n');
             assert.deepStrictEqual(result, []);
@@ -84,13 +92,10 @@ describe('util/dependency', () => {
             ]);
         });
 
-        it('does not match when the path has leading whitespace after the colon', () => {
-            // The path group in the regex is `.*\.ext$` and the regex is anchored to
-            // end-of-line, so the entire `  events/foo.txt  ` becomes the path and the
-            // extension (`txt  `) does not match the txt/yml filter. Document the
-            // behaviour: dependency markers must not have leading whitespace after the colon.
+        it('trims whitespace around the path', () => {
+            // 路径现在按行尾之前的整段读取再 trim，因此冒号后的空格与行尾空格都不再影响扩展名判断。
             const result = getDependenciesFromText('#!event:  events/foo.txt  \n');
-            assert.deepStrictEqual(result, []);
+            assert.deepStrictEqual(result, [{ type: 'event', path: 'events/foo.txt' }]);
         });
 
         it('ignores comment-like text that is not a marker', () => {

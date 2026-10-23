@@ -70,7 +70,7 @@ async function loadProvincesBmp(provincesFile: string, progressReporter: Progres
 }
 
 type ColorContainer = { color: number, warnings: [] };
-function getProvincesByPosition(provinceMapImage: BMP): { colorByPosition: Uint32Array, provinces: ColorContainer[], colorToProvince: Record<number, ColorContainer> } {
+export function getProvincesByPosition(provinceMapImage: BMP): { colorByPosition: Uint32Array, provinces: ColorContainer[], colorToProvince: Record<number, ColorContainer> } {
     if (provinceMapImage.width % 256 !== 0 || provinceMapImage.height % 256 !== 0) {
         throw new UserError(localize('worldmap.error.multiply256', 'Height and width of map image must be multiply of 256: {0}x{1}.',
             provinceMapImage.width, provinceMapImage.height));
@@ -79,24 +79,27 @@ function getProvincesByPosition(provinceMapImage: BMP): { colorByPosition: Uint3
     const colorByPosition = new Uint32Array(provinceMapImage.width * provinceMapImage.height);
     const bitmapData = provinceMapImage.data;
     const provinces: ColorContainer[] = [];
-    const colorToProvince: Record<number, ColorContainer> = {};
+    const seenColors = new Set<number>();
+    // Most pixels repeat the colour of the one before them, so only a colour change needs the set.
+    let previousColor = -1;
 
     for (let y = provinceMapImage.height - 1, sy = 0, dy = (provinceMapImage.height - 1) * provinceMapImage.width;
         y >= 0;
         y--, sy += provinceMapImage.bytesPerRow, dy -= provinceMapImage.width) {
         for (let x = 0, sx = sy, dx = dy; x < provinceMapImage.width; x++, sx += 3, dx++) {
             const color = (bitmapData[sx + 2] << 16) | (bitmapData[sx + 1] << 8) | bitmapData[sx];
-            const province = colorToProvince[color];
-            if (province === undefined) {
-                const newProvince: ColorContainer = { color, warnings: [] };
-
-                provinces.push(newProvince);
-                colorToProvince[color] = newProvince;
-                colorByPosition[dx] = color;
-            } else {
-                colorByPosition[dx] = province.color;
+            if (color !== previousColor && !seenColors.has(color)) {
+                seenColors.add(color);
+                provinces.push({ color, warnings: [] });
             }
+            previousColor = color;
+            colorByPosition[dx] = color;
         }
+    }
+
+    const colorToProvince: Record<number, ColorContainer> = {};
+    for (const province of provinces) {
+        colorToProvince[province.color] = province;
     }
 
     return {

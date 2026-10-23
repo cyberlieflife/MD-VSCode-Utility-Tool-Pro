@@ -7,7 +7,7 @@ import { parseHoi4File } from "../../hoiformat/hoiparser";
 import { localize } from "../../util/i18n";
 import { flatMap, chain } from "lodash";
 import { GuiFileLoader } from "../gui/loader";
-import { listFilesFromModOrHOI4, readFileFromModOrHOI4 } from "../../util/fileloader";
+import { hoiFilesExpiryToken, listFilesFromModOrHOI4, readFileFromModOrHOI4 } from "../../util/fileloader";
 import { getConfiguration } from "../../util/vsccommon";
 import { localisationIndex, technologyCountryIcons } from "../../util/featureflags";
 import { debug } from "../../util/debug";
@@ -26,6 +26,21 @@ export interface TechnologyTreeLoaderResult {
 }
 
 const equipmentFolder = 'common/units/equipment';
+const equipmentFolderDependencies = [`${equipmentFolder}/*`, `${equipmentFolder}/*/*`];
+
+async function listEquipmentFiles(): Promise<string[]> {
+    return chain(await listFilesFromModOrHOI4(equipmentFolder, { recursively: true }))
+        .filter(f => f.toLowerCase().endsWith('.txt'))
+        .map(f => `${equipmentFolder}/${f}`.replace(/\/+/g, '/'))
+        .uniq()
+        .value();
+}
+
+// The globs catch a file created at the equipment root or one folder below it. The loaded files are
+// listed as well because the globs reach no deeper than that.
+export function equipmentDependencies(equipmentFiles: string[]): string[] {
+    return [...equipmentFiles, ...equipmentFolderDependencies];
+}
 
 const technologyUIGfxFiles = [
     'interface/countrytechtreeview.gfx',
@@ -76,7 +91,7 @@ export class TechnologyTreeLoader extends ContentLoader<TechnologyTreeLoaderResu
                 equipmentArchetypes,
                 countryTagsByFolder,
             },
-            dependencies: chain([this.file]).concat(gfxDependencies, extraGfxFiles, guiDependencies, equipmentFiles, countryTagFiles, mergeInLoadResult(guiDepFiles, 'dependencies')).uniq().value(),
+            dependencies: chain([this.file]).concat(gfxDependencies, extraGfxFiles, guiDependencies, equipmentDependencies(equipmentFiles), countryTagFiles, mergeInLoadResult(guiDepFiles, 'dependencies')).uniq().value(),
         };
     }
 
@@ -115,8 +130,27 @@ interface EquipmentArchetypesResult {
 // files; without caching, every render would re-walk and re-parse all `common/units/equipment`
 // files. A short TTL collapses those repeated parses while staying fresh enough that edits show up
 // within a couple of seconds, mirroring `fileListCache` in fileloader.ts.
+//
+// The expiry token re-lists the folder rather than reusing the load's own list: a file added since
+// then is in no list the load made, and each part of the token carries its path, so an added or
+// removed file changes it too.
 const equipmentArchetypeCache = new PromiseCache<EquipmentArchetypesResult>({
     factory: () => loadEquipmentArchetypesUncached(),
+    expireWhenChange: (_key, cached) => cached.then(
+        async () => {
+            if (!localisationIndex) {
+                return 'off';
+            }
+            try {
+                return `on|${await hoiFilesExpiryToken(await listEquipmentFiles())}`;
+            } catch (e) {
+                // An expiry check must not throw, and a token that differs every time reloads.
+                debug('Failed to list equipment files', e);
+                return `failed@${Date.now()}`;
+            }
+        },
+        () => '',
+    ),
     life: 3 * 1000,
     maxSize: 1,
 });
@@ -134,11 +168,7 @@ async function loadEquipmentArchetypesUncached(): Promise<EquipmentArchetypesRes
         return { equipmentArchetypes: {}, equipmentFiles: [] };
     }
 
-    const relativeFiles = chain(await listFilesFromModOrHOI4(equipmentFolder, { recursively: true }))
-        .filter(f => f.toLowerCase().endsWith('.txt'))
-        .map(f => `${equipmentFolder}/${f}`.replace(/\/+/g, '/'))
-        .uniq()
-        .value();
+    const relativeFiles = await listEquipmentFiles();
 
     const fileArchetypes = await Promise.all(relativeFiles.map(async file => {
         try {

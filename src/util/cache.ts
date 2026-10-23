@@ -141,17 +141,22 @@ export class PromiseCache<V> extends Cache<Promise<V>> {
         super({
             ...rest,
             factory: (key) => {
-                return options.factory(key).then(
+                // Only drop the entry this promise created: an older read that rejects after the
+                // key was replaced must not delete the replacement.
+                const wrapped: Promise<V> = options.factory(key).then(
                     value => {
-                        if (value === null || value === undefined) {
+                        if ((value === null || value === undefined) && this._cache[key]?.value === wrapped) {
                             this.remove(key);
                         }
                         return value;
                     },
                     error => {
-                        this.remove(key);
+                        if (this._cache[key]?.value === wrapped) {
+                            this.remove(key);
+                        }
                         return Promise.reject<V>(error);
                     });
+                return wrapped;
             }
         });
         this.pweigher = weigher;

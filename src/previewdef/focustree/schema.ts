@@ -20,6 +20,9 @@ export interface FocusTree {
     allowBranchOptions: string[];
     conditionExprs: ConditionItem[];
     isSharedFocues: boolean;
+    // 同一文件同时定义共享与联合焦点时，另一类伪树的焦点。游戏把两类当成一个池，共享焦点可以
+    // 相对联合焦点摆位；这些只用于解析锚点，不参与本树的绘制与检查。
+    anchorFocuses?: Record<string, Focus>;
     continuousFocusPositionX?: number;
     continuousFocusPositionY?: number;
     // 文件里这棵树的连续焦点框写回目标：拖动它之后改的是树自己的 continuous_focus_position。
@@ -292,58 +295,76 @@ export function convertFocusFileNodeToJson(node: Node, constants: {}): HOIPartia
     return convertNodeToJson<FocusFile>(node, focusFileSchema, constants);
 }
 
-export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFocusTrees: FocusTree[], filePath: string, constants: {} ): FocusTree[] {
+export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFocusTrees: FocusTree[], filePath: string, constants: {}, useCondition: boolean = useConditionInFocus): FocusTree[] {
     const focusTrees: FocusTree[] = [];
-    if (file.shared_focus.length > 0) {
-        const conditionExprs: ConditionItem[] = [];
-        const warnings: FocusWarning[] = [];
-        const focuses = getFocuses(file.shared_focus, conditionExprs, filePath, warnings, constants);
+
+    const sharedConditionExprs: ConditionItem[] = [];
+    const sharedWarnings: FocusWarning[] = [];
+    const sharedFocuses = getFocuses(file.shared_focus, sharedConditionExprs, filePath, sharedWarnings, constants);
+    const jointConditionExprs: ConditionItem[] = [];
+    const jointWarnings: FocusWarning[] = [];
+    const jointFocuses = getFocuses(file.joint_focus, jointConditionExprs, filePath, jointWarnings, constants);
+    const hasSharedFocuses = file.shared_focus.length > 0;
+    const hasJointFocuses = file.joint_focus.length > 0;
+    const ownPseudoTrees: FocusTree[] = [];
+    // 条件打开时共享焦点会并进国家树；关闭时伪树是唯一检查它们重叠的地方，每一对都要看。
+    const importRoots = (hasSharedFocuses || hasJointFocuses) && useCondition
+        ? computeImportRoots({ ...jointFocuses, ...sharedFocuses })
+        : undefined;
+
+    if (hasSharedFocuses) {
+        const anchorFocuses = hasJointFocuses ? jointFocuses : undefined;
         // 片段：缺失的相对位置锚点（另一个文件里的焦点）不报告，但布局检查照跑。
-        runLayoutValidation(focuses, warnings, false);
-        sortConditionExprs(conditionExprs);
-        const sharedFocusTree = {
+        runLayoutValidation(sharedFocuses, sharedWarnings, false, { anchorFocuses, importRoots });
+        sortConditionExprs(sharedConditionExprs);
+        const sharedFocusTree: FocusTree = {
             id: localize('focustree.sharedfocuses', '<Shared focuses>'),
-            focuses,
+            focuses: sharedFocuses,
             inlayWindowRefs: [],
             inlayWindows: [],
             inlayConditionExprs: [],
-            allowBranchOptions: getAllowBranchOptions(focuses),
-            conditionExprs,
+            allowBranchOptions: getAllowBranchOptions(sharedFocuses),
+            conditionExprs: sharedConditionExprs,
             isSharedFocues: true,
-            searchFilters: chain(focuses).flatMap(f => f.searchFilters).uniq().value(),
-            warnings,
+            ...(anchorFocuses ? { anchorFocuses } : {}),
+            searchFilters: chain(sharedFocuses).flatMap(f => f.searchFilters).uniq().value(),
+            warnings: sharedWarnings,
         };
         focusTrees.push(sharedFocusTree);
-        sharedFocusTrees = [sharedFocusTree, ...sharedFocusTrees];
+        ownPseudoTrees.push(sharedFocusTree);
     }
 
-    if (file.joint_focus.length > 0) {
-        const conditionExprs: ConditionItem[] = [];
-        const warnings: FocusWarning[] = [];
-        const focuses = getFocuses(file.joint_focus, conditionExprs, filePath, warnings, constants);
+    if (hasJointFocuses) {
+        const anchorFocuses = hasSharedFocuses ? sharedFocuses : undefined;
         // 与共享焦点文件同样是片段：缺失锚点不报告，布局检查照跑。
-        runLayoutValidation(focuses, warnings, false);
+        runLayoutValidation(jointFocuses, jointWarnings, false, { anchorFocuses, importRoots });
+        sortConditionExprs(jointConditionExprs);
 
-        focusTrees.push({
+        const jointFocusTree: FocusTree = {
             id: getJointFocusTreeId(filePath),
-            focuses,
+            focuses: jointFocuses,
             inlayWindowRefs: [],
             inlayWindows: [],
             inlayConditionExprs: [],
-            allowBranchOptions: getAllowBranchOptions(focuses),
-            conditionExprs,
+            allowBranchOptions: getAllowBranchOptions(jointFocuses),
+            conditionExprs: jointConditionExprs,
             isSharedFocues: false,
-            searchFilters: chain(focuses).flatMap(f => f.searchFilters).uniq().value(),
-            warnings,
-        });
+            ...(anchorFocuses ? { anchorFocuses } : {}),
+            searchFilters: chain(jointFocuses).flatMap(f => f.searchFilters).uniq().value(),
+            warnings: jointWarnings,
+        };
+        focusTrees.push(jointFocusTree);
+        ownPseudoTrees.push(jointFocusTree);
     }
+    // 同一个文件里的共享与联合焦点互为供体：游戏把它们当一个池，导入时一并解析。
+    sharedFocusTrees = [...ownPseudoTrees, ...sharedFocusTrees];
 
     for (const focusTree of file.focus_tree) {
         const conditionExprs: ConditionItem[] = [];
         const warnings: FocusWarning[] = [];
         const focuses = getFocuses(focusTree.focus, conditionExprs, filePath, warnings, constants);
 
-        if (useConditionInFocus) {
+        if (useCondition) {
             for (const sharedFocus of extractOrListIds(focusTree.shared_focus)) {
                 if (!sharedFocus) {
                     continue;
@@ -352,7 +373,7 @@ export function getFocusTreeWithFocusFile(file: HOIPartial<FocusFile>, sharedFoc
             }
         }
 
-        runLayoutValidation(focuses, warnings, true);
+        runLayoutValidation(focuses, warnings, true, { treeId: focusTree.id });
         sortConditionExprs(conditionExprs);
         focusTrees.push({
             id: focusTree.id ?? localize('focustree.ananymous', '<Anonymous focus tree>'),
@@ -687,11 +708,24 @@ function getFocus(hoiFocus: HOIPartial<FocusDef>, conditionExprs: ConditionItem[
 
 function addSharedFocus(focuses: Record<string, Focus>, filePath: string, sharedFocusTrees: FocusTree[], sharedFocusId: string, conditionExprs: ConditionItem[], warnings: FocusWarning[]) {
     const sharedFocusTree = sharedFocusTrees.find(sft => sharedFocusId in sft.focuses);
-    if (!sharedFocusTree) {
+    const requested = sharedFocusTree?.focuses[sharedFocusId];
+    if (!sharedFocusTree || !requested) {
         return;
     }
 
-    const sharedFocuses = sharedFocusTree.focuses;
+    // 游戏把共享与联合焦点当成同一个供体池，因此同一个文件的两棵伪树一起算：共享焦点的前置是
+    // 联合焦点时，它会随该联合焦点一并导入。
+    const donorTrees = chain(sharedFocusTrees)
+        .filter(sft => sft === sharedFocusTree
+            || (sft.isSharedFocues && Object.values(sft.focuses).some(f => f.file === requested.file)))
+        .uniq()
+        .value();
+    const merged = new Set<string>(sharedFocusId in focuses ? [] : [sharedFocusId]);
+    const sharedFocuses: Record<string, Focus> = Object.assign(
+        {},
+        ...donorTrees.map(sft => sft.focuses),
+        sharedFocusTree.focuses,
+    );
 
     // Build reverse dependency map: focus -> focuses that depend on it
     const dependents = new Map<string, string[]>();
@@ -747,18 +781,20 @@ function addSharedFocus(focuses: Record<string, Focus>, filePath: string, shared
                     });
                 }
                 focuses[dep] = focus;
+                merged.add(dep);
                 updateConditionExprsByFocus(focus, conditionExprs);
                 queue.push(dep);
             }
         }
     }
 
-    for (const warning of sharedFocusTree.warnings) {
+    // 只重放本次导入带进来的焦点的警告：更早的一次导入已经重放过它自己的。
+    for (const warning of donorTrees.flatMap(sft => sft.warnings)) {
         // 布局警告描述的是供体自己的网格；宿主树用不同的网格摆放并入的焦点，重放它多半是错的。
         if (warning.layout) {
             continue;
         }
-        if (warning.source in focuses) {
+        if (merged.has(warning.source)) {
             warnings.push(warning);
         }
     }
@@ -791,26 +827,106 @@ function getAllowBranchOptions(focuses: Record<string, Focus>): string[] {
 function resolveFocusPosition(
     focus: Focus,
     focuses: Record<string, Focus>,
+    context: LayoutContext,
 ): { x: number; y: number } {
-    // 与网页端 getFocusPosition 对应，只是不含依赖条件的 offset 处理：解析出的位置是焦点自身的
-    // x/y 加上 relative_position_id 链逐级解析的位置。环会被切断（由 validateRelativePositionId 报告）。
-    let x = focus.x;
-    let y = focus.y;
-    const seen = new Set<string>([focus.id]);
-    let current =
-        focus.relativePositionId !== undefined
-            ? focuses[focus.relativePositionId]
-            : undefined;
+    // 与网页端 getFocusPosition 对应：焦点自身的 x/y 加上 relative_position_id 链逐级解析的位置，
+    // 每一级都叠加它自己的 offset。这里只能知道仅由 has_focus_tree 决定的 offset，其余依赖条件
+    // 的一律忽略。环会被切断（由 validateRelativePositionId 报告）。
+    let x = 0;
+    let y = 0;
+    const seen = new Set<string>();
+    let current: Focus | undefined = focus;
     while (current !== undefined && !seen.has(current.id)) {
         x += current.x;
         y += current.y;
+        for (const offset of current.offset) {
+            if (isFocusTreeOffsetApplied(offset, context.treeId)) {
+                x += offset.x;
+                y += offset.y;
+            }
+        }
         seen.add(current.id);
         current =
             current.relativePositionId !== undefined
-                ? focuses[current.relativePositionId]
+                ? (focuses[current.relativePositionId] ??
+                    context.anchorFocuses?.[current.relativePositionId])
                 : undefined;
     }
     return { x, y };
+}
+
+/**
+ * 一个只测 has_focus_tree 的 offset 是否作用于正在检查的这棵树。Millennium Dawn 用这种方式按
+ * 导入树移动共享焦点，网页端也已经照做（它把 `has_focus_tree = <选中的树>` 当成真）。带国家
+ * 作用域的写法（如 `GER = { has_focus_tree = X }`）测的是本检查不知道的树，按依赖条件忽略。
+ */
+function isFocusTreeOffsetApplied(
+    offset: Offset,
+    treeId: string | undefined,
+): boolean {
+    if (treeId === undefined || offset.trigger === undefined) {
+        return false;
+    }
+    const leaves = extractConditionalExprs(offset.trigger);
+    return (
+        leaves.length > 0 &&
+        leaves.every(
+            (leaf) =>
+                leaf.scopeName === '' && /^has_focus_tree\s*=/.test(leaf.nodeContent),
+        ) &&
+        applyCondition(offset.trigger, [
+            { scopeName: '', nodeContent: 'has_focus_tree = ' + treeId },
+        ])
+    );
+}
+
+/** 布局检查在一棵树的焦点之外还知道的东西。 */
+interface LayoutContext {
+    // focus_tree 的 id，用于 has_focus_tree 触发的 offset。伪树没有。
+    treeId?: string;
+    // 只用来解析 relative_position_id 锚点的焦点（FocusTree.anchorFocuses）。
+    anchorFocuses?: Record<string, Focus>;
+    // 伪树：每个焦点随哪些导入根进来（computeImportRoots）。
+    importRoots?: Map<string, Set<string>>;
+}
+
+/**
+ * 共享或联合焦点随哪些导入根进来。一棵树用 `shared_focus = <id>` 导入一个根，并拿到它的前置在
+ * 池里齐全的所有焦点；因此根就是池里没有前置的焦点，一个焦点属于它各个前置的根。伪树把每个根
+ * 都画在同一张网格上，但没有共同根的两个焦点只会在同时导入两者的树里相遇，那种重叠由那棵树
+ * 自己的布局检查负责。
+ */
+function computeImportRoots(
+    pool: Record<string, Focus>,
+): Map<string, Set<string>> {
+    const roots = new Map<string, Set<string>>();
+    const inProgress = new Set<string>();
+    const rootsOf = (id: string): Set<string> => {
+        const cached = roots.get(id);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const focus = pool[id];
+        if (focus === undefined || inProgress.has(id)) {
+            return new Set();
+        }
+        inProgress.add(id);
+        const prerequisites = flatten(focus.prerequisite).filter(
+            (p) => p !== id && p in pool,
+        );
+        const result = new Set<string>();
+        if (prerequisites.length === 0) {
+            result.add(id);
+        }
+        for (const prerequisite of prerequisites) {
+            rootsOf(prerequisite).forEach((root) => result.add(root));
+        }
+        inProgress.delete(id);
+        roots.set(id, result);
+        return result;
+    };
+    Object.keys(pool).forEach(rootsOf);
+    return roots;
 }
 
 /**
@@ -828,11 +944,12 @@ function resolveFocusPosition(
 function validateFocusLayout(
     focuses: Record<string, Focus>,
     warnings: FocusWarning[],
+    context: LayoutContext,
 ) {
     for (const [filePath, fileFocuses] of Object.entries(
         groupBy(Object.values(focuses), "file"),
     )) {
-        validateFocusLayoutOfFile(focuses, warnings, filePath, fileFocuses);
+        validateFocusLayoutOfFile(focuses, warnings, filePath, fileFocuses, context);
     }
 }
 
@@ -841,11 +958,12 @@ function validateFocusLayoutOfFile(
     warnings: FocusWarning[],
     filePath: string,
     fileFocuses: Focus[],
+    context: LayoutContext,
 ) {
     // 对整棵树解析，使锚定到宿主树自身焦点的共享焦点落在预览画它的位置。
     const entries = fileFocuses.map((focus) => ({
         focus,
-        position: resolveFocusPosition(focus, focuses),
+        position: resolveFocusPosition(focus, focuses, context),
     }));
     const positions = new Map(
         entries.map((entry) => [entry.focus.id, entry.position] as const),
@@ -891,7 +1009,9 @@ function validateFocusLayoutOfFile(
         if (cached !== undefined) {
             return cached;
         }
-        const result = computeVisibleTogether(focuses, a, b);
+        const result =
+            shareImportRoot(context.importRoots, a, b) &&
+            computeVisibleTogether(focuses, a, b);
         visibleTogetherCache.set(key, result);
         return result;
     };
@@ -1045,6 +1165,31 @@ function validateFocusLayoutOfFile(
     }
 }
 
+// 伪树之外，所有焦点都可能同屏；伪树里只有共享同一个导入根的两个焦点才会。根未知的焦点（例如
+// 前置成环）按“和其它所有焦点都可能同屏”处理。
+function shareImportRoot(
+    importRoots: Map<string, Set<string>> | undefined,
+    a: string,
+    b: string,
+): boolean {
+    const rootsOfA = importRoots?.get(a);
+    const rootsOfB = importRoots?.get(b);
+    if (
+        rootsOfA === undefined ||
+        rootsOfB === undefined ||
+        rootsOfA.size === 0 ||
+        rootsOfB.size === 0
+    ) {
+        return true;
+    }
+    for (const root of rootsOfA) {
+        if (rootsOfB.has(root)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // 超过这么多个不同的 allow_branch 条件，就直接假定一对可以同时显示（保留其警告），
 // 而不是穷举 2^n 种组合。
 const maxAllowBranchConditions = 12;
@@ -1054,10 +1199,13 @@ function computeVisibleTogether(
     a: string,
     b: string,
 ): boolean {
-    const roots = chain([
-        ...(focuses[a]?.inAllowBranch ?? []),
-        ...(focuses[b]?.inAllowBranch ?? []),
-    ]).uniq().value();
+    const rootsOfA = focuses[a]?.inAllowBranch ?? [];
+    const rootsOfB = focuses[b]?.inAllowBranch ?? [];
+    // 各自处在对方没有的门下，是模组表达“替代分支”的常规写法。
+    if (onlyUnderDistinctGates(focuses, a, b)) {
+        return false;
+    }
+    const roots = chain([...rootsOfA, ...rootsOfB]).uniq().value();
     if (roots.length === 0) {
         return true;
     }
@@ -1075,7 +1223,12 @@ function computeVisibleTogether(
 
     for (let mask = 0; mask < 1 << conditions.length; mask++) {
         const trueExprs = conditions.filter((_, i) => (mask & (1 << i)) !== 0);
-        const isHidden = hiddenByAllowBranch(focuses, trueExprs);
+        const isHidden = hiddenByAllowBranch(
+            focuses,
+            (focus) =>
+                focus.allowBranch === undefined ||
+                applyCondition(focus.allowBranch, trueExprs),
+        );
         if (!isHidden(a) && !isHidden(b)) {
             return true;
         }
@@ -1084,12 +1237,70 @@ function computeVisibleTogether(
 }
 
 /**
- * 网页端 calculateFocusAllowed 的查表版：带 allow_branch 的焦点在条件不成立时隐藏，其它焦点在
+ * a 与 b 是否各自依赖一个对方没有的 allow_branch 条件：模组正是这样把替代分支画在同一位置的，
+ * 通常由互斥事件或排他焦点设置的 flag 来关门，尽管这里无法证明两个 flag 互斥。门按条件比较，
+ * 因此测同一件事的两个门算一个；只有“关掉测该条件的全部门就会隐藏该焦点”时，才算它依赖该条件
+ * ——带一个无门选项的 OR 前置会让焦点始终可见。
+ *
+ * 只认默认关闭、且与对方不共享任何测试的门。默认打开的门（如过时分支写法里的
+ * `NOT = { has_completed_focus = X }` 或 `always = yes`）在有人关门之前一直和另一支同屏；与
+ * 对方共享某个测试的门（如 `has_dlc = X` 对 `has_dlc = X` 加另一个检查）也可能是同时打开的。
+ */
+function onlyUnderDistinctGates(
+    focuses: Record<string, Focus>,
+    a: string,
+    b: string,
+): boolean {
+    const gateKey = (root: string) => JSON.stringify(focuses[root]?.allowBranch);
+    const keysOfA = new Set((focuses[a]?.inAllowBranch ?? []).map(gateKey));
+    const keysOfB = new Set((focuses[b]?.inAllowBranch ?? []).map(gateKey));
+    const onlyA = [...keysOfA].filter((key) => !keysOfB.has(key));
+    const onlyB = [...keysOfB].filter((key) => !keysOfA.has(key));
+    if (onlyA.length === 0 || onlyB.length === 0) {
+        return false;
+    }
+    const conditionByKey = new Map<string, ConditionComplexExpr | undefined>(
+        [...(focuses[a]?.inAllowBranch ?? []), ...(focuses[b]?.inAllowBranch ?? [])].map(
+            (root) => [gateKey(root), focuses[root]?.allowBranch] as const,
+        ),
+    );
+    const closedByDefault = (key: string) => {
+        const condition = conditionByKey.get(key);
+        return condition !== undefined && !applyCondition(condition, []);
+    };
+    if (!onlyA.every(closedByDefault) || !onlyB.every(closedByDefault)) {
+        return false;
+    }
+    const leafKeys = (keys: string[]) =>
+        new Set(
+            keys.flatMap((key) => {
+                const condition = conditionByKey.get(key);
+                return condition === undefined
+                    ? []
+                    : extractConditionalExprs(condition).map(
+                            (leaf) => `${leaf.scopeName}\n${leaf.nodeContent}`,
+                        );
+            }),
+        );
+    const leavesOfA = leafKeys(onlyA);
+    if ([...leafKeys(onlyB)].some((leaf) => leavesOfA.has(leaf))) {
+        return false;
+    }
+    const hiddenWhenClosed = (keys: string[]) =>
+        hiddenByAllowBranch(
+            focuses,
+            (focus) => !keys.includes(JSON.stringify(focus.allowBranch)),
+        );
+    return hiddenWhenClosed(onlyA)(a) && hiddenWhenClosed(onlyB)(b);
+}
+
+/**
+ * 网页端 calculateFocusAllowed 的查表版：带 allow_branch 的焦点在门关闭时隐藏，其它焦点在
  * 某一组前置全部隐藏时隐藏。树外的前置、以及环，都不会隐藏任何东西。
  */
 function hiddenByAllowBranch(
     focuses: Record<string, Focus>,
-    trueExprs: ConditionItem[],
+    isGateOpen: (focus: Focus) => boolean,
 ): (id: string) => boolean {
     const memo = new Map<string, boolean>();
     const inProgress = new Set<string>();
@@ -1104,8 +1315,7 @@ function hiddenByAllowBranch(
         }
         inProgress.add(id);
         const hidden = focus.hasAllowBranch
-            ? focus.allowBranch !== undefined &&
-                !applyCondition(focus.allowBranch, trueExprs)
+            ? !isGateOpen(focus)
             : focus.prerequisite.some(
                     (group) => group.length > 0 && group.every(isHidden),
                 );
@@ -1124,10 +1334,10 @@ function hiddenByAllowBranch(
  * 定义的焦点摆位。这样的片段传 reportMissingRelativePositionTarget = false，不报告缺失的锚点。
  * 这些焦点仍参与布局检查：片段通常挂在一个外部锚点上，其焦点彼此之间的相对位置仍有意义。
  */
-function runLayoutValidation(focuses: Record<string, Focus>, warnings: FocusWarning[], reportMissingRelativePositionTarget: boolean) {
+function runLayoutValidation(focuses: Record<string, Focus>, warnings: FocusWarning[], reportMissingRelativePositionTarget: boolean, context: LayoutContext = {}) {
     const layoutWarnings: FocusWarning[] = [];
     validateRelativePositionId(focuses, layoutWarnings, reportMissingRelativePositionTarget);
-    validateFocusLayout(focuses, layoutWarnings);
+    validateFocusLayout(focuses, layoutWarnings, context);
     for (const warning of layoutWarnings) {
         warnings.push({ ...warning, layout: true });
     }

@@ -193,14 +193,22 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, in
 
     const effectiveLimit = Math.max(1, Math.min(limit, items.length));
     let nextIndex = 0;
+    let failed = false;
 
     async function worker(): Promise<void> {
-        while (true) {
+        while (!failed) {
             const index = nextIndex++;
             if (index >= items.length) {
                 return;
             }
-            results[index] = await fn(items[index], index);
+            // Once any callback fails, the remaining items are not started: a build that is already
+            // failing must not keep walking a thousand more files.
+            try {
+                results[index] = await fn(items[index], index);
+            } catch (error) {
+                failed = true;
+                throw error;
+            }
         }
     }
 

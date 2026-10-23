@@ -15,14 +15,17 @@ export type Dependency = { type: string, path: string };
 
 export function getDependenciesFromText(text: string): Dependency[] {
     const dependencies: Dependency[] = [];
-    const regex = /^\s*#!(?<type>.*?):(?<path>.*\.(?<ext>.*?))$/gm;
+    // A flat pattern per marker: the old one ended in `.*\.(?<ext>.*?)$`, which backtracked over
+    // every character of a long line that never contained the marker.
+    const regex = /^[^\S\r\n\u2028\u2029]*#!([^:\r\n\u2028\u2029]*):([^\r\n\u2028\u2029]*)/gm;
     let match = regex.exec(text);
     while (match) {
-        const type = match.groups?.type;
-        const ext = match.groups?.ext!;
-        if (type && (type === ext || ext === 'txt' || ext === 'yml')) {   
-            const path = match.groups?.path!;
-            const pathValue = path.trim().replace(/\/\/+|\\+/g, '/');
+        const type = match[1];
+        const path = match[2]!.trim();
+        const dot = path.lastIndexOf('.');
+        const ext = dot < 0 ? '' : path.slice(dot + 1);
+        if (type && (type === ext || ext === 'txt' || ext === 'yml')) {
+            const pathValue = path.replace(/\/\/+|\\+/g, '/');
 
             dependencies.push({ type, path: pathValue });
         }

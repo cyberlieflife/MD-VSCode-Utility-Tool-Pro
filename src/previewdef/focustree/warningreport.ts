@@ -2,14 +2,14 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { Commands } from "../../constants";
 import { parseHoi4File } from "../../hoiformat/hoiparser";
-import { mapLimit } from "../../util/common";
+import { createTimeSlicer, mapLimit, yieldToEventLoop } from "../../util/common";
 import { error } from "../../util/debug";
 import { useConditionInFocus } from "../../util/featureflags";
 import { listFilesFromModOrHOI4, readFileFromModOrHOI4 } from "../../util/fileloader";
 import { localize } from "../../util/i18n";
 import { Logger } from "../../util/logger";
 import { isRecord } from "../../util/messageguards";
-import { ProgressReport, withCancellableProgress } from "../../util/progress";
+import { ProgressReport, uncancelledToken, withCancellableProgress } from "../../util/progress";
 import { sendEvent } from "../../util/telemetry";
 import { getConfiguration } from "../../util/vsccommon";
 import {
@@ -67,24 +67,65 @@ async function loadBounded<T>(
  * 每个国家列一遍。改为按定义文件归集，它只列一次，就在需要修的地方。
  */
 export function collectFocusWarnings(parsed: ParsedFocusFile[]): FileWarnings[] {
+	const work = collectFocusWarningSteps(parsed, useConditionInFocus);
+	let next = work.next();
+	while (!next.done) {
+		next = work.next();
+	}
+	return next.value;
+}
+
+/**
+ * 与 collectFocusWarnings 相同，但让出主线程并在每次让出后检查取消：一次审计要解析整个
+ * common/national_focus，同步跑完会把扩展宿主按住。
+ */
+export async function collectFocusWarningsAsync(
+	parsed: ParsedFocusFile[],
+	token: Pick<vscode.CancellationToken, "isCancellationRequested"> = uncancelledToken,
+): Promise<FileWarnings[] | undefined> {
+	const work = collectFocusWarningSteps(parsed, useConditionInFocus);
+	const slice = createTimeSlicer();
+	while (!token.isCancellationRequested) {
+		const next = work.next();
+		if (next.done) {
+			// 即使审计很小，也要先处理一次挂起的取消，再发布报告。
+			await yieldToEventLoop();
+			return token.isCancellationRequested ? undefined : next.value;
+		}
+		await slice();
+	}
+	return undefined;
+}
+
+function* collectFocusWarningSteps(
+	parsed: ParsedFocusFile[],
+	useCondition: boolean,
+): Generator<void, FileWarnings[]> {
 	const treesByFile = new Map<string, FocusTree[]>();
-	for (const { path: filePath, file } of parsed) {
-		treesByFile.set(filePath, getFocusTreeWithFocusFile(file, [], filePath, {}));
+	const importers: ParsedFocusFile[] = [];
+	for (const entry of parsed) {
+		const { path: filePath, file } = entry;
+		const importsShared = useCondition && file.focus_tree.some(
+			(tree) => extractOrListIds(tree.shared_focus).length > 0,
+		);
+		if (importsShared) {
+			importers.push(entry);
+		}
+		// 引用共享焦点的文件，其自身树会在第二遍连同供体重建，所以这一遍只提供它的共享/联合焦点。
+		const firstPass = importsShared ? { ...file, focus_tree: [] } : file;
+		treesByFile.set(filePath, getFocusTreeWithFocusFile(firstPass, [], filePath, {}, useCondition));
+		yield;
 	}
 
 	// 预览只在条件打开时才把共享焦点并入树；关闭时第一遍就是它显示的内容。
-	if (useConditionInFocus) {
+	if (useCondition) {
 		const sharedTrees = [...treesByFile.entries()].flatMap(([filePath, trees]) =>
 			trees.filter((tree) => tree.isSharedFocues).map((tree) => ({ filePath, tree })),
 		);
-		for (const { path: filePath, file } of parsed) {
-			const usesSharedFocuses = file.focus_tree.some(
-				(tree) => extractOrListIds(tree.shared_focus).length > 0,
-			);
-			if (usesSharedFocuses) {
-				const donors = sharedTrees.filter((s) => s.filePath !== filePath).map((s) => s.tree);
-				treesByFile.set(filePath, getFocusTreeWithFocusFile(file, donors, filePath, {}));
-			}
+		for (const { path: filePath, file } of importers) {
+			const donors = sharedTrees.filter((s) => s.filePath !== filePath).map((s) => s.tree);
+			treesByFile.set(filePath, getFocusTreeWithFocusFile(file, donors, filePath, {}, useCondition));
+			yield;
 		}
 	}
 
@@ -217,7 +258,11 @@ export async function buildFocusTreeAuditReport(
 		}
 		try {
 			const [buffer] = await readFileFromModOrHOI4(filePath, options);
-			const node = parseHoi4File(buffer.toString());
+			if (progress.token.isCancellationRequested) {
+				return undefined;
+			}
+			// 索引只要名字与值；位置 token 会显著抬高整轮审计的峰值内存。
+			const node = parseHoi4File(buffer.toString(), "", { keepTokens: false });
 			return { path: filePath, file: convertFocusFileNodeToJson(node, {}) };
 		} catch (e) {
 			return { path: filePath, parseError: e instanceof Error ? e.message : String(e) };
@@ -235,7 +280,12 @@ export async function buildFocusTreeAuditReport(
 		.filter((f): f is { path: string; parseError: string } => "parseError" in f)
 		.map((f) => ({ file: f.path, warnings: [], parseError: f.parseError }));
 
-	return formatFocusWarningReport([...collectFocusWarnings(parsed), ...failed], files.length);
+	const warnings = await collectFocusWarningsAsync(parsed, progress.token);
+	if (warnings === undefined) {
+		return undefined;
+	}
+
+	return formatFocusWarningReport([...warnings, ...failed], files.length);
 }
 
 function reportFolderUri(folder: string): vscode.Uri {

@@ -16,6 +16,7 @@ import { DecisionsLoader } from '../previewdef/decision/loader';
 import { DecisionCategoriesLoader } from '../previewdef/decision/categories';
 import { ScriptedGuisLoader } from '../previewdef/decision/scriptedgui';
 import { MioLoader } from '../previewdef/mio/loader';
+import { TechnologyTreeLoader, equipmentDependencies } from '../previewdef/technology/loader';
 import { renderGuiFile } from '../previewdef/gui/contentbuilder';
 import { renderMioFile } from '../previewdef/mio/contentbuilder';
 import { renderTechnologyFile } from '../previewdef/technology/contentbuilder';
@@ -120,6 +121,29 @@ describe('preview dependencies: a sprite .gfx change reaches the preview', () =>
 
         assert.ok(dependencies.includes('common/military_industrial_organization/organizations/*'));
         assert.ok(dependencies.includes(spriteGfx));
+    });
+
+    it('adds the equipment folder globs next to the files it read', () => {
+        assert.deepStrictEqual(equipmentDependencies(['common/units/equipment/a.txt']), [
+            'common/units/equipment/a.txt',
+            'common/units/equipment/*',
+            'common/units/equipment/*/*',
+        ]);
+    });
+
+    it('subscribes the technology preview to files added under the equipment folder', async () => {
+        replace(fileloader, 'readFileFromModOrHOI4', async (path: string) => [
+            Buffer.from(''),
+            vscode.Uri.file(`/tmp/${path}`),
+        ]);
+        replace(fileloader, 'hoiFileExpiryToken', async () => '');
+        replace(fileloader, 'listFilesFromModOrHOI4', async () => []);
+
+        const loader = new TechnologyTreeLoader('common/technologies/test.txt', async () => '');
+        const { dependencies } = await loader.load(new LoaderSession(false));
+
+        assert.ok(dependencies.includes('common/units/equipment/*'));
+        assert.ok(dependencies.includes('common/units/equipment/*/*'));
     });
 });
 

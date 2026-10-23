@@ -110,6 +110,23 @@ describe('util/common', function () {
             });
             assert.strictEqual(maxRunning, 2);
         });
+
+        it('stops starting new work once a callback fails', async function () {
+            const started: number[] = [];
+            await assert.rejects(
+                mapLimit([1, 2, 3, 4], 1, async (n) => {
+                    started.push(n);
+                    if (n === 2) {
+                        throw new Error('boom');
+                    }
+                    return n;
+                }),
+                /boom/,
+            );
+
+            // 串行时失败之后的项都不再开始；否则一次失败的索引构建还会继续走完后半个目录。
+            assert.deepStrictEqual(started, [1, 2]);
+        });
     });
 
     describe('forceError', function () {

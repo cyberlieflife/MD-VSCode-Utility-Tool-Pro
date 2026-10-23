@@ -255,8 +255,34 @@ describe('PromiseCache', () => {
         assert.deepStrictEqual(keys(cache), ['b', 'c']);
     });
 
-    it('remove() forces the next get to re-invoke the factory', async () => {
+    it('keeps a newer entry when an older read fails after being replaced', async () => {
+        let rejectFirst: (e: Error) => void = () => undefined;
         let calls = 0;
+        const cache = track(new PromiseCache<number>({
+            factory: async () => {
+                calls++;
+                if (calls === 1) {
+                    return new Promise<number>((_, reject) => { rejectFirst = reject; });
+                }
+                return 2;
+            },
+            expireWhenChange: async () => Math.random(),
+            nonExpireLife: 0,
+            life: 60_000,
+        }));
+
+        const first = cache.get('k');
+        const second = cache.get('k'); // 第二次 get 用新条目替换了旧条目
+        rejectFirst(new Error('boom'));
+
+        await assert.rejects(first, /boom/);
+        await second;
+        await tick();
+        // 旧请求的失败不能把已经替换它的新条目删掉。
+        assert.deepStrictEqual(keys(cache), ['k']);
+    });
+
+    it('remove() forces the next get to re-invoke the factory', async () => {        let calls = 0;
         const cache = track(new PromiseCache<number>({
             factory: async () => ++calls,
             life: 60_000,

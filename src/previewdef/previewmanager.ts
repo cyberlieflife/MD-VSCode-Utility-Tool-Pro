@@ -327,14 +327,18 @@ export class PreviewManager implements vscode.WebviewPanelSerializer {
     }
 
     private getPreviewItemsNeedsUpdate(uri: string): PreviewBase[] {
-        const result: PreviewBase[] = [];
+        // A preview that depends on both a file and a glob over it matches twice, and would render
+        // twice for one edit.
+        const result = new Set<PreviewBase>();
         for (const [ matchString, previewItems ] of this._updateSubscriptions.entries()) {
             if (matchPathEnd(uri, matchString)) {
-                result.push(...previewItems);
+                for (const preview of previewItems) {
+                    result.add(preview);
+                }
             }
         }
 
-        return result;
+        return [...result];
     }
 
     private updatePreviewItemsInSubscription = debounceByInput(
