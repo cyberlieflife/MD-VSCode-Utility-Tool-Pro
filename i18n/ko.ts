@@ -220,6 +220,8 @@ const table: Partial<typeof __table> = {
     "focustree.resetcheckboxes": "Reset focus checkboxes",
     "focustree.search": "검색: ",
     "focustree.searchfilters": "필터: ",
+    "focustree.searchmatches": "{0}/{1}",
+    "focustree.nomatches": "일치 없음",
     "focustree.sharedfocuses": "<공유 중점>",
     "focustree.shortcuts.toggle": "바로가기 표시/숨기기",
     "focustree.warnings": "경고 활성/비활성",

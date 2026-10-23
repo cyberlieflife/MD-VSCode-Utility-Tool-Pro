@@ -220,6 +220,8 @@ const table: Partial<typeof __table> = {
     "focustree.resetcheckboxes": "Reset focus checkboxes",
     "focustree.search": "搜索：",
     "focustree.searchfilters": "筛选器：",
+    "focustree.searchmatches": "{0}/{1}",
+    "focustree.nomatches": "无匹配",
     "focustree.sharedfocuses": "<共享国策>",
     "focustree.shortcuts.toggle": "显示或隐藏快捷方式",
     "focustree.warnings": "开启/收起警告列表",

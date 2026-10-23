@@ -48,6 +48,33 @@ function showBranch(visibility: boolean, optionClass: string) {
 let focusElementsCache: HTMLDivElement[] = [];
 let searchDebounceTimer: number | undefined;
 
+// 搜索框右侧的计数：{当前}/{命中}。Enter 之前当前是 "-"，筛掉后没有命中时显示“无匹配”。
+let searchMatches: HTMLDivElement[] = [];
+let searchCursor = -1;
+
+function renderSearchCount(query: string): void {
+    // 每次重新查询而不缓存：重建页面会换掉工具栏里的这个元素。
+    const label = document.getElementById('focus-search-count');
+    if (!label) {
+        return;
+    }
+    if (query === '') {
+        label.textContent = '';
+        return;
+    }
+    const visible = searchMatches.filter((focus) => focus.style.display !== 'none');
+    if (visible.length === 0) {
+        label.textContent = feLocalize('focustree.nomatches', 'no matches');
+        return;
+    }
+    label.textContent = feLocalize(
+        'focustree.searchmatches',
+        '{0}/{1}',
+        searchCursor < 0 ? '-' : String(searchCursor + 1),
+        String(visible.length),
+    );
+}
+
 function search(searchContent: string, navigate: boolean = true) {
     const focuses = focusElementsCache;
     const searchedFocus: HTMLDivElement[] = [];
@@ -58,7 +85,8 @@ function search(searchContent: string, navigate: boolean = true) {
             focus.style.outline = '1px solid #E33';
             focus.style.background = 'rgba(255, 0, 0, 0.5)';
             if (navigate && !navigated) {
-                focus.scrollIntoView({ block: "center", inline: "center" });
+                // 可选调用：jsdom 没有实现 scrollIntoView，测试里让搜索照常完成而不是抛出。
+                focus.scrollIntoView?.({ block: "center", inline: "center" });
                 navigated = true;
             }
             searchedFocus.push(focus);
@@ -2040,9 +2068,14 @@ window.addEventListener('load', tryRun(async function() {
 
     // Searchbox
     const searchbox = document.getElementById('searchbox') as HTMLInputElement;
-    let currentNavigatedIndex = 0;
+    // 还没按过 Enter 时没有“当前项”，第一次 Enter 落在第一处命中（Shift+Enter 落在最后一处）。
+    let currentNavigatedIndex = -1;
     let oldSearchboxValue: string = getState().searchboxValue || '';
     let searchedFocus: HTMLDivElement[] = search(oldSearchboxValue, false);
+
+    searchMatches = searchedFocus;
+    searchCursor = currentNavigatedIndex;
+    renderSearchCount(oldSearchboxValue);
 
     searchbox.value = oldSearchboxValue;
 
@@ -2054,8 +2087,11 @@ window.addEventListener('load', tryRun(async function() {
         }
         clearTimeout(searchDebounceTimer);
         searchDebounceTimer = undefined;
-        currentNavigatedIndex = 0;
+        currentNavigatedIndex = -1;
         searchedFocus = search(oldSearchboxValue);
+        searchMatches = searchedFocus;
+        searchCursor = currentNavigatedIndex;
+        renderSearchCount(oldSearchboxValue);
         setState({ searchboxValue: oldSearchboxValue });
         saveUiState();
     };
@@ -2078,9 +2114,13 @@ window.addEventListener('load', tryRun(async function() {
             flushSearch();
             const visibleSearchedFocus = searchedFocus.filter(f => f.style.display !== 'none');
             if (visibleSearchedFocus.length > 0) {
-                currentNavigatedIndex = (currentNavigatedIndex + (e.shiftKey ? visibleSearchedFocus.length - 1 : 1)) % visibleSearchedFocus.length;
-                visibleSearchedFocus[currentNavigatedIndex].scrollIntoView({ block: "center", inline: "center" });
+                currentNavigatedIndex = currentNavigatedIndex < 0
+                    ? (e.shiftKey ? visibleSearchedFocus.length - 1 : 0)
+                    : (currentNavigatedIndex + (e.shiftKey ? visibleSearchedFocus.length - 1 : 1)) % visibleSearchedFocus.length;
+                visibleSearchedFocus[currentNavigatedIndex].scrollIntoView?.({ block: "center", inline: "center" });
             }
+            searchCursor = currentNavigatedIndex;
+            renderSearchCount(oldSearchboxValue);
         } else {
             searchboxChangeFunc.apply(this);
         }
@@ -2089,7 +2129,14 @@ window.addEventListener('load', tryRun(async function() {
     searchbox.addEventListener('paste', searchboxChangeFunc);
     searchbox.addEventListener('cut', searchboxChangeFunc);
 
-    retriggerSearch = () => { searchedFocus = search(oldSearchboxValue, false); };
+    retriggerSearch = () => {
+        // 重建之后旧的命中项已经不在 DOM 里：重新匹配并从头计数。
+        searchedFocus = search(oldSearchboxValue, false);
+        currentNavigatedIndex = -1;
+        searchMatches = searchedFocus;
+        searchCursor = currentNavigatedIndex;
+        renderSearchCount(oldSearchboxValue);
+    };
 
     // Conditions
     if (useConditionInFocus) {

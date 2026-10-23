@@ -220,6 +220,8 @@ const internalTable = /* SOT Do not remove this comment */{
     "focustree.resetcheckboxes": "Reset focus checkboxes",
     "focustree.search": "Search: ",
     "focustree.searchfilters": "Filters: ",
+    "focustree.searchmatches": "{0}/{1}",
+    "focustree.nomatches": "no matches",
     "focustree.sharedfocuses": "<Shared focuses>",
     "focustree.shortcuts.toggle": "Show or hide the shortcuts",
     "focustree.warnings": "Toggle warnings",

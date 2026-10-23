@@ -43,6 +43,10 @@ export function subscribeNavigators() {
     const navigators = document.getElementsByClassName("navigator");
     for (let i = 0; i < navigators.length; i++) {
         const navigator = navigators[i] as HTMLDivElement;
+        // Keyboard focus is owned here rather than by whichever card builder made the node, so
+        // every navigable thing in every preview is reached the same way.
+        navigator.setAttribute("role", "button");
+        navigator.tabIndex = 0;
         if (wiredNavigators.has(navigator)) {
             continue;
         }

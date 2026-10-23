@@ -447,7 +447,7 @@ function fillDecisions(frame: HTMLElement, card: BopCard): void {
 			name.innerHTML = textForHtml(decision.name);
 		}
 		row.title = decision.id;
-		applyNav(row, decision.nav, true);
+		applyNav(row, decision.nav);
 	}
 }
 
@@ -460,7 +460,7 @@ function decisionList(card: BopCard): HTMLElement {
 		row.className = "bop-decision";
 		row.innerHTML = textForHtml(decision.name);
 		row.title = decision.id;
-		applyNav(row, decision.nav, true);
+		applyNav(row, decision.nav);
 		list.appendChild(row);
 	}
 	return list;

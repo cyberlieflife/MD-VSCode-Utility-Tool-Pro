@@ -68,6 +68,7 @@ describe('webview/focustree interactions', function () {
             '<div id="inlaywindowplaceholder"></div>',
             '<div id="continuousFocuses"></div>',
             '<input id="searchbox" type="text"/>',
+            '<span id="focus-search-count"></span>',
             '<input id="show-focus-names" type="checkbox"/>',
             '<div id="condition-container"></div>',
             '<div id="allowbranch-container"></div>',
@@ -518,6 +519,27 @@ describe('webview/focustree interactions', function () {
             mod.initialShowPoint({} as any, focusPosition, origin, spacing, center),
             undefined,
         );
+    });
+
+    // 搜索计数：命中多少个当前可见的焦点，以及 Enter 走到第几个。
+    it('shows how many visible focuses the search hits and where Enter is', async function () {
+        const searchbox = document.getElementById('searchbox') as HTMLInputElement;
+        const count = document.getElementById('focus-search-count') as HTMLElement;
+        assert.ok(count, 'the toolbar carries a search count');
+
+        searchbox.value = 'a';
+        searchbox.dispatchEvent(new Event('keyup'));
+        // 输入有 200ms 防抖。
+        await new Promise(resolve => setTimeout(resolve, 250));
+        assert.strictEqual(count.textContent, '-/1');
+
+        searchbox.dispatchEvent(new window.KeyboardEvent('keypress', { key: 'Enter', bubbles: true }));
+        assert.strictEqual(count.textContent, '1/1');
+
+        searchbox.value = 'zzz';
+        searchbox.dispatchEvent(new Event('keyup'));
+        await new Promise(resolve => setTimeout(resolve, 250));
+        assert.strictEqual(count.textContent, 'no matches');
     });
 
     // 警告标记：涉及焦点的收集、同格计数与红框/角标落到渲染出的节点上。

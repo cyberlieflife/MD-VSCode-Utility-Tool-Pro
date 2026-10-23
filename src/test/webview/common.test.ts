@@ -102,6 +102,30 @@ describe('webview/util/common', function () {
             // Does not throw when clicked
             el.dispatchEvent(new Event('click'));
         });
+
+        it('makes a navigator a tab stop and opens it with Enter', function () {
+            const el = document.createElement('div');
+            el.className = 'navigator';
+            el.setAttribute('start', '5');
+            el.setAttribute('end', '10');
+            el.setAttribute('file', 'test.txt');
+            document.body.appendChild(el);
+
+            subscribeNavigators();
+
+            // 键盘焦点由共享导航统一接管，卡片构建器不再各自决定。
+            assert.strictEqual(el.getAttribute('role'), 'button');
+            assert.strictEqual(el.tabIndex, 0);
+
+            takePostedMessages();
+            el.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+            const messages = takePostedMessages();
+            assert.ok(
+                messages.some((m) => m.command === 'navigate' && m.file === 'test.txt' && m.start === 5),
+                JSON.stringify(messages),
+            );
+        });
     });
 
     describe('subscribeRefreshButton', function () {

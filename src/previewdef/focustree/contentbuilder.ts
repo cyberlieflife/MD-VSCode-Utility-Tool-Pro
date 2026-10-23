@@ -386,7 +386,8 @@ async function renderToolBar(focusTrees: FocusTree[], styleTable: StyleTable, fl
             class="${styleTable.style('searchbox', () => `margin-right:10px`)}"
             id="searchbox"
             type="text"
-        />`;
+        />
+        <span id="focus-search-count" class="${styleTable.style('focusSearchCount', () => `margin-right:10px`)}"></span>`;
 
     // ID/name display toggle: un-checked = show focus ids (default), checked = show localised
     // names resolved from the editor-language localisation files on demand.

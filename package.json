@@ -29,11 +29,13 @@
 		"onWebviewPanel:mdftpreview",
 		"onWebviewPanel:mdworldmappreview",
 		"workspaceContains:**/*.gfx",
+		"workspaceContains:interface/**/*.gui",
 		"workspaceContains:common/national_focus/*.txt",
 		"workspaceContains:common/technologies/*.txt",
 		"workspaceContains:events/*.txt",
 		"workspaceContains:map/default.map",
 		"workspaceContains:common/ideas/*.txt",
+		"workspaceContains:common/military_industrial_organization/organizations/*.txt",
 		"workspaceContains:common/characters/*.txt",
 		"workspaceContains:common/decisions/*.txt",
 		"workspaceContains:common/bop/*.txt"
