@@ -17,6 +17,12 @@ function canPreviewEvent(document: vscode.TextDocument) {
         return 0;
     }
 
+    // Only a .txt file can be an events file. Giving up before getText() keeps a tab switch from
+    // reading localisation, JSON and Markdown documents that can never preview.
+    if (!uri.path.toLowerCase().endsWith('.txt')) {
+        return undefined;
+    }
+
     const text = document.getText();
     return /(country_event|news_event|unit_leader_event|state_event|operative_leader_event)\s*=\s*{/.exec(text)?.index;
 }

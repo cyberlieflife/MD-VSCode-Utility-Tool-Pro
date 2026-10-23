@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { dirUri, mkdirs, writeFile } from './vsccommon';
 import { getFilePathFromMod, getHoiOpenedFileOriginalUri, readFileFromModOrHOI4 } from './fileloader';
 import { forceError } from './common';
@@ -14,6 +15,32 @@ export interface CopyFilesIntoWorkspaceOptions {
     mustOpenFolderMessage: string;
     selectFolderMessage: string;
     failedToOpenMessage: (errorMessage: string) => string;
+}
+
+/**
+ * Refuses a copy target that leaves the workspace folder. `..` is refused by the file resolver
+ * too, but the target is joined from a path a preview supplied, so the check belongs here, before
+ * anything is read from the game install.
+ */
+async function ensureCopyTargetIsInsideWorkspace(targetPath: vscode.Uri, workspaceRoot: vscode.Uri): Promise<void> {
+    if (targetPath.scheme !== 'file' || workspaceRoot.scheme !== 'file') {
+        return;
+    }
+
+    const relative = path.relative(workspaceRoot.fsPath, targetPath.fsPath);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error('Copy target resolves outside the workspace');
+    }
+    if (hasDotPrefixedSegment(relative)) {
+        throw new Error('Copy target is inside a dot-prefixed path');
+    }
+}
+
+// `.` and `..` are not names: the file resolver refuses `..`, and joinPath drops `.`.
+function hasDotPrefixedSegment(file: string): boolean {
+    return file
+        .split(/[\\/]/)
+        .some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..');
 }
 
 /**
@@ -55,8 +82,14 @@ export async function copyFilesIntoWorkspace(files: string[], options: CopyFiles
         }
 
         try {
-            const [buffer] = await readFileFromModOrHOI4(file);
+            // Both checks run before the read: a refused target must not cost a file read, and a
+            // dot-prefixed folder is not a place to drop a copy of a game file.
             const targetPath = vscode.Uri.joinPath(targetFolderUri, file);
+            if (hasDotPrefixedSegment(file)) {
+                throw new Error('Copy target is inside a dot-prefixed path');
+            }
+            await ensureCopyTargetIsInsideWorkspace(targetPath, targetFolderUri);
+            const [buffer] = await readFileFromModOrHOI4(file);
             await mkdirs(dirUri(targetPath));
             await writeFile(targetPath, buffer);
             return targetPath;

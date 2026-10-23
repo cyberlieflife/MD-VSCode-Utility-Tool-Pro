@@ -14,6 +14,12 @@ function canPreviewTechnology(document: vscode.TextDocument) {
         return 0;
     }
 
+    // Only a .txt file can be a technology file. Giving up before getText() keeps a tab switch from
+    // reading localisation, JSON and Markdown documents that can never preview.
+    if (!uri.path.toLowerCase().endsWith('.txt')) {
+        return undefined;
+    }
+
     const text = document.getText();
     return text.match(/(technologies)\s*=\s*{/)?.index;
 }

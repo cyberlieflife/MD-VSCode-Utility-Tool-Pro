@@ -168,12 +168,39 @@ function buildStub() {
         }
     }
 
+    // Real API: each factory returns an Error whose `code` names the failure. A filesystem provider
+    // that refuses an operation throws one of these.
+    class FileSystemError extends Error {
+        code: string;
+        constructor(messageOrUri?: string | { fsPath?: string }, code = 'Unknown') {
+            super(typeof messageOrUri === 'string' ? messageOrUri : (messageOrUri?.fsPath ?? ''));
+            this.name = 'FileSystemError';
+            this.code = code;
+        }
+        static FileNotFound(messageOrUri?: string | { fsPath?: string }): FileSystemError {
+            return new FileSystemError(messageOrUri, 'FileNotFound');
+        }
+        static FileExists(messageOrUri?: string | { fsPath?: string }): FileSystemError {
+            return new FileSystemError(messageOrUri, 'FileExists');
+        }
+        static NoPermissions(messageOrUri?: string | { fsPath?: string }): FileSystemError {
+            return new FileSystemError(messageOrUri, 'NoPermissions');
+        }
+        static NotSupported(messageOrUri?: string | { fsPath?: string }): FileSystemError {
+            return new FileSystemError(messageOrUri, 'NotSupported');
+        }
+        static Unavailable(messageOrUri?: string | { fsPath?: string }): FileSystemError {
+            return new FileSystemError(messageOrUri, 'Unavailable');
+        }
+    }
+
     return {
         Uri,
         workspace,
         window,
         commands,
         languages,
+        FileSystemError,
         env: { openExternal: async () => true },
         FileType,
         ConfigurationTarget,

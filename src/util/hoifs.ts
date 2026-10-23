@@ -136,33 +136,29 @@ class Hoi4UtilsFsProvider implements vscode.FileSystemProvider {
     }
 
     createDirectory(uri: vscode.Uri): void | Thenable<void> {
-        return vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(this.getInstallPath(), trimStart(uri.path, '/')));
+        // The provider is read-only: the game install is not ours to write, and a caller reaching it
+        // through this provider must be told so rather than silently editing the install.
+        throw vscode.FileSystemError.NoPermissions(uri);
     }
 
     readFile(uri: vscode.Uri): Uint8Array | Thenable<Uint8Array> {
         return vscode.workspace.fs.readFile(vscode.Uri.joinPath(this.getInstallPath(), trimStart(uri.path, '/')));
     }
     
-    writeFile(uri: vscode.Uri, content: Uint8Array, _options: { create: boolean; overwrite: boolean; }): void | Thenable<void> {
-        return vscode.workspace.fs.writeFile(vscode.Uri.joinPath(this.getInstallPath(), trimStart(uri.path, '/')), content);
+    writeFile(uri: vscode.Uri, _content: Uint8Array, _options: { create: boolean; overwrite: boolean; }): void | Thenable<void> {
+        throw vscode.FileSystemError.NoPermissions(uri);
     }
 
-    delete(uri: vscode.Uri, options: { recursive: boolean; }): void | Thenable<void> {
-        return vscode.workspace.fs.delete(vscode.Uri.joinPath(this.getInstallPath(), trimStart(uri.path, '/')), options);
+    delete(uri: vscode.Uri, _options: { recursive: boolean; }): void | Thenable<void> {
+        throw vscode.FileSystemError.NoPermissions(uri);
     }
 
-    rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean; }): void | Thenable<void> {
-        return vscode.workspace.fs.rename(
-            vscode.Uri.joinPath(this.getInstallPath(), trimStart(oldUri.path, '/')),
-            vscode.Uri.joinPath(this.getInstallPath(), trimStart(newUri.path, '/')),
-            options);
+    rename(oldUri: vscode.Uri, _newUri: vscode.Uri, _options: { overwrite: boolean; }): void | Thenable<void> {
+        throw vscode.FileSystemError.NoPermissions(oldUri);
     }
 
-    copy(source: vscode.Uri, destination: vscode.Uri, options: { overwrite: boolean; }): void | Thenable<void> {
-        return vscode.workspace.fs.copy(
-            vscode.Uri.joinPath(this.getInstallPath(), trimStart(source.path, '/')),
-            vscode.Uri.joinPath(this.getInstallPath(), trimStart(destination.path, '/')),
-            options);
+    copy(source: vscode.Uri, _destination: vscode.Uri, _options: { overwrite: boolean; }): void | Thenable<void> {
+        throw vscode.FileSystemError.NoPermissions(source);
     }
 
     private getInstallPath(): vscode.Uri {
