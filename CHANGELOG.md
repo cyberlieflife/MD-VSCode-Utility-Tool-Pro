@@ -1,3 +1,20 @@
+## [v1.2.4] - 2026-10-31
+
+### Functionality
+
+- [World Map Preview] Each redraw classifies province borders once instead of once per colour, and finds the province a sea crossing ends at by id instead of scanning the drawn provinces, so panning and zooming redraw a little faster.
+- [Focus Tree Preview] The overlap check compares only focuses on the same row, so a large tree is audited faster. The warnings it reports and their order are unchanged.
+- [Previews] Replacing a dropdown while its menu is open now closes the old menu and restores canvas zoom.
+- [Extension] Opening a folder that contains mods now activates their previews, just as opening a mod folder directly does.
+
+### Bugfixes
+
+- [DDS] Signed and floating-point texture channels outside the display range now clamp to its nearest endpoint instead of wrapping to a wrong colour.
+- [World Map Preview] A `provinces.bmp` with more than 65,536 distinct colours now stops loading with a translated error instead of using up the editor's memory.
+- [Image Preview] Grayscale TGA files with 16-bit pixels now keep their gray value and transparency. TGA is decoded by the extension itself, so the bundled `tga` dependency is gone.
+- [Loading] On Linux, files in folders whose names differ only by case no longer use the wrong open document.
+- [Previews] A character or idea list that becomes empty stops the roster that was still painting, so its groups no longer appear under "No characters to show." or "No ideas to show."
+
 ## [v1.2.3] - 2026-10-24
 
 ### Functionality
