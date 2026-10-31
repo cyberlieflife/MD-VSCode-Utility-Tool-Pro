@@ -345,12 +345,18 @@ function uintNormalizer(value: number, max: number): number {
 
 function sintNormalizer(value: number, max: number): number {
     const midValue = (max - 1) / 2;
-    return value === midValue + 1 ? -1 :
+    const normalized = value === midValue + 1 ? -1 :
         (value <= midValue ? value / midValue : -(max - value + 1) / midValue);
+    // Out-of-range channel values would wrap when scaled to a byte, so clamp them here.
+    return clampPixelValue(normalized);
 }
 
 function floatNormalizer(value: number, _max: number): number {
-    return value;
+    return clampPixelValue(value);
+}
+
+function clampPixelValue(value: number): number {
+    return Math.max(0, Math.min(1, value));
 }
 
 // Don't use js clossure for better performance

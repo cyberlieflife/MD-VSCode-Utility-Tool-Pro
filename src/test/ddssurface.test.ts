@@ -145,4 +145,22 @@ describe('util/image/dds surface', () => {
             assert.deepStrictEqual(decodeRgba(dds), [85, 204, 51, 170]);
         });
     });
+
+    describe('signed and float channels', () => {
+        it('clamps signed channels instead of wrapping them', () => {
+            // DXGI_FORMAT_R8G8B8A8_SNORM: 128 and 192 are below zero, 64 is above it.
+            const dds = makeDx10Dds(1, 1, 31, Buffer.from([128, 192, 64, 127]));
+
+            assert.deepStrictEqual(decodeRgba(dds), [0, 0, 128, 255]);
+        });
+
+        it('clamps float channels to the display range', () => {
+            // DXGI_FORMAT_R32G32B32A32_FLOAT: 1.5, -0.5, Infinity and NaN all leave 0..1.
+            const pixels = Buffer.alloc(16);
+            [1.5, -0.5, Infinity, NaN].forEach((value, index) => pixels.writeFloatLE(value, index * 4));
+            const dds = makeDx10Dds(1, 1, 2, pixels);
+
+            assert.deepStrictEqual(decodeRgba(dds), [255, 0, 255, 0]);
+        });
+    });
 });
