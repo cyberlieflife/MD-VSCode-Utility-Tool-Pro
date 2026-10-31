@@ -1,4 +1,4 @@
-import { Province, Point, State, Zone, Terrain, StrategicRegion, SupplyArea, WithCondition } from "../../src/previewdef/worldmap/definitions";
+import { Province, ProvinceEdge, Point, State, Zone, Terrain, StrategicRegion, SupplyArea, WithCondition } from "../../src/previewdef/worldmap/definitions";
 import { FEWorldMap, Loader } from "./loader";
 import { ViewPoint } from "./viewpoint";
 import { bboxCenter, distanceSqr, distanceHamming, mergeRiverRuns, RiverPixel } from "./graphutils";
@@ -24,6 +24,11 @@ const renderScaleByViewMode: Record<ViewMode, { edge: number, labels: number }> 
     supplyarea: { edge: 0.5, labels: 1 },
     warnings: { edge: 2, labels: 3 },
 };
+
+interface EdgeGeometryList {
+    provinces: Province[];
+    edges: ProvinceEdge[];
+}
 
 interface RenderContext {
     topBar: TopBar;
@@ -406,18 +411,25 @@ export class Renderer extends Subscriber {
     private static renderAllEdges(renderContext: RenderContext, worldMap: FEWorldMap, context: CanvasRenderingContext2D, xOffset: number) {
         const renderedProvinces = renderContext.renderedProvincesByOffset[xOffset] ?? [];
         const preciseEdge = renderContext.preciseEdge;
+        const blackEdges: EdgeGeometryList = { provinces: [], edges: [] };
+        const redEdges: EdgeGeometryList = { provinces: [], edges: [] };
 
+        for (const province of renderedProvinces) {
+            Renderer.classifyEdges(renderContext, province, worldMap, blackEdges, redEdges);
+        }
+
+        context.lineWidth = 2;
         context.strokeStyle = 'black';
         context.beginPath();
-        for (const province of renderedProvinces) {
-            Renderer.renderEdges(renderContext, province, worldMap, context, xOffset, false, preciseEdge);
+        for (let i = 0; i < blackEdges.edges.length; i++) {
+            Renderer.renderEdgeGeometry(renderContext, blackEdges.provinces[i]!, blackEdges.edges[i]!, context, xOffset, preciseEdge);
         }
         context.stroke();
 
         context.strokeStyle = 'red';
         context.beginPath();
-        for (const province of renderedProvinces) {
-            Renderer.renderEdges(renderContext, province, worldMap, context, xOffset, true, preciseEdge);
+        for (let i = 0; i < redEdges.edges.length; i++) {
+            Renderer.renderEdgeGeometry(renderContext, redEdges.provinces[i]!, redEdges.edges[i]!, context, xOffset, preciseEdge);
         }
         context.stroke();
     }
@@ -505,20 +517,17 @@ export class Renderer extends Subscriber {
         }
     }
 
-    private static renderEdges(
+    // 每条边只判一次颜色：黑红两遍原本各自重算州属性、视图过滤与路径，重绘时开销翻倍。
+    private static classifyEdges(
         renderContext: RenderContext,
         province: Province,
         worldMap: FEWorldMap,
-        context: CanvasRenderingContext2D,
-        xOffset: number,
-        isRed: boolean,
-        preciseEdge?: boolean,
+        blackEdges: EdgeGeometryList,
+        redEdges: EdgeGeometryList,
     ) {
-        const { provinceToState, provinceToStrategicRegion, stateToSupplyArea, renderedProvinces, topBar, viewPoint } = renderContext;
-        const scale = viewPoint.scale;
+        const { provinceToState, provinceToStrategicRegion, stateToSupplyArea, topBar } = renderContext;
         const viewMode = topBar.viewMode$.value;
 
-        context.lineWidth = 2;
         for (const provinceEdge of province.edges) {
             if (!('path' in provinceEdge)) {
                 continue;
@@ -536,10 +545,7 @@ export class Renderer extends Subscriber {
 
             const impassable = provinceEdge.type === 'impassable' || stateFromImpassable !== stateToImpassable;
             const paths = provinceEdge.path;
-            
-            if ((impassable || (paths.length === 0 && provinceEdge.type !== 'impassable')) !== isRed) {
-                continue;
-            }
+            const isRed = impassable || (paths.length === 0 && provinceEdge.type !== 'impassable');
 
             const strategicRegionFromId = provinceToStrategicRegion[province.id];
             const strategicRegionToId = provinceToStrategicRegion[provinceEdge.to];
@@ -562,28 +568,45 @@ export class Renderer extends Subscriber {
                 }
             }
 
-            for (const path of paths) {
-                if (path.length === 0) {
+            const list = isRed ? redEdges : blackEdges;
+            list.provinces.push(province);
+            list.edges.push(provinceEdge);
+        }
+    }
+
+    private static renderEdgeGeometry(
+        renderContext: RenderContext,
+        province: Province,
+        provinceEdge: ProvinceEdge,
+        context: CanvasRenderingContext2D,
+        xOffset: number,
+        preciseEdge?: boolean,
+    ) {
+        const { viewPoint, renderedProvincesById } = renderContext;
+        const scale = viewPoint.scale;
+        const paths = provinceEdge.path;
+
+        for (const path of paths) {
+            if (path.length === 0) {
+                continue;
+            }
+
+            context.moveTo(viewPoint.convertX(path[0].x + xOffset), viewPoint.convertY(path[0].y));
+            for (let j = 0; j < path.length; j++) {
+                if (!preciseEdge && scale <= 4 && j % (scale < 1 ? Math.floor(10 / scale) : 6 - scale) !== 0 && !isCriticalPoint(path, j)) {
                     continue;
                 }
-
-                context.moveTo(viewPoint.convertX(path[0].x + xOffset), viewPoint.convertY(path[0].y));
-                for (let j = 0; j < path.length; j++) {
-                    if (!preciseEdge && scale <= 4 && j % (scale < 1 ? Math.floor(10 / scale) : 6 - scale) !== 0 && !isCriticalPoint(path, j)) {
-                        continue;
-                    }
-                    const pos = path[j];
-                    context.lineTo(viewPoint.convertX(pos.x + xOffset), viewPoint.convertY(pos.y));
-                }
+                const pos = path[j];
+                context.lineTo(viewPoint.convertX(pos.x + xOffset), viewPoint.convertY(pos.y));
             }
+        }
 
-            if (paths.length === 0 && provinceEdge.type !== 'impassable') {
-                const toProvince = renderedProvinces?.find(p => p.id === provinceEdge.to);
-                const [startPoint, endPoint] = findNearestPoints(provinceEdge.start, provinceEdge.stop, province, toProvince);
+        if (paths.length === 0 && provinceEdge.type !== 'impassable') {
+            const toProvince = renderedProvincesById[provinceEdge.to];
+            const [startPoint, endPoint] = findNearestPoints(provinceEdge.start, provinceEdge.stop, province, toProvince);
 
-                context.moveTo(viewPoint.convertX(startPoint.x + xOffset), viewPoint.convertY(startPoint.y));
-                context.lineTo(viewPoint.convertX(endPoint.x + xOffset), viewPoint.convertY(endPoint.y));
-            }
+            context.moveTo(viewPoint.convertX(startPoint.x + xOffset), viewPoint.convertY(startPoint.y));
+            context.lineTo(viewPoint.convertX(endPoint.x + xOffset), viewPoint.convertY(endPoint.y));
         }
     }
 
