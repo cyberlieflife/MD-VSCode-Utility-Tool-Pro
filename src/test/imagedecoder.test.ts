@@ -21,15 +21,18 @@ import '../util/image/imageworker';
 // point the decoder at.
 import './hangingImageWorker';
 
-const TGA = require('tga') as typeof import('tga');
-
-// A tiny 2x2 RGBA TGA built with the same library the converter uses. Pixel indices are r,g,b,a.
+// A tiny 2x2 RGBA TGA, uncompressed and top-down, so the fixture does not need an encoder.
 function makeTga(): Buffer {
-    const rgba = [
+    const header = Buffer.alloc(18);
+    header[2] = 2;               // uncompressed true-colour
+    header.writeUInt16LE(2, 12); // width
+    header.writeUInt16LE(2, 14); // height
+    header[16] = 32;             // bits per pixel
+    header[17] = 0x28;           // top-down origin, 8 alpha bits
+    return Buffer.concat([header, Buffer.from([
         255, 0, 0, 255,   0, 255, 0, 255,
         0, 0, 255, 255,   255, 255, 0, 128,
-    ];
-    return TGA.createTgaBuffer(2, 2, rgba as unknown as [], false);
+    ])]);
 }
 
 // A tiny uncompressed A8R8G8B8 (DDPF_RGB|DDPF_ALPHA, 32bpp) DDS. Header is 32 little-endian int32s

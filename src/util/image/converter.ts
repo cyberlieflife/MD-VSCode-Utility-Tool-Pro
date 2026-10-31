@@ -2,7 +2,7 @@ import { DDS } from "./dds";
 import { PNG } from "pngjs";
 import { UserError } from '../common';
 import { assertImageDimensions } from "./imagelimits";
-const TGA = require('tga') as typeof import('tga');
+import { decodeTga } from './tga';
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -92,26 +92,13 @@ export function ddsToPng(dds: DDS): PNG {
     return png;
 }
 
-const TGA_HEADER_LENGTH = 18;
-
 export function tgaToPng(buffer: Buffer): PNG {
-    // The tga library allocates width * height * 4 bytes in its constructor, so the header has to
-    // be checked before the buffer reaches it.
-    if (buffer.length < TGA_HEADER_LENGTH) {
-        throw new UserError('TGA header is truncated');
-    }
-    assertImageDimensions(buffer.readUInt16LE(12), buffer.readUInt16LE(14), "TGA");
-
-    const tga = new TGA(buffer);
-    if (!tga.pixels) {
-        throw new UserError('Unspported tga format');
-    }
+    const decoded = decodeTga(buffer);
 
     const png = new PNG();
-    png.width = tga.width;
-    png.height = tga.height;
-    // The decoder owns these pixels and is no longer used after conversion.
-    png.data = Buffer.from(tga.pixels.buffer, tga.pixels.byteOffset, tga.pixels.byteLength);
+    png.width = decoded.width;
+    png.height = decoded.height;
+    png.data = decoded.pixels;
 
     return png;
 }
