@@ -107,6 +107,32 @@ describe('previewdef/focustree layout warnings', () => {
         assert.ok(!hasWarning(farEnough, 'less than 2 apart'));
     });
 
+    it('keeps overlap warning order across interleaved rows', () => {
+        const content = tree(`
+    focus = { id = row_a_first x = 0 y = 0 }
+    focus = { id = row_b_first x = 0 y = 1 }
+    focus = { id = row_a_second x = 1 y = 0 }
+    focus = { id = row_b_second x = 1 y = 1 }
+    focus = { id = row_a_third x = 2 y = 0 }
+    focus = { id = row_b_third x = 2 y = 1 }`);
+        assert.deepStrictEqual(
+            warningsOf(content).filter(t => t.includes('less than 2 apart')),
+            [
+                'Focuses row_a_first and row_a_second are less than 2 apart on the same row, so their icons overlap.',
+                'Focuses row_b_first and row_b_second are less than 2 apart on the same row, so their icons overlap.',
+                'Focuses row_a_second and row_a_third are less than 2 apart on the same row, so their icons overlap.',
+                'Focuses row_b_second and row_b_third are less than 2 apart on the same row, so their icons overlap.',
+            ],
+        );
+    });
+
+    it('still checks rows whose number did not parse', () => {
+        const content = tree(`
+    focus = { id = a x = 0 y = not_a_number }
+    focus = { id = b x = 1 y = not_a_number }`);
+        assert.ok(hasWarning(content, 'less than 2 apart'), warningsOf(content).join(' | '));
+    });
+
     // 一对永远不同时显示的替代项（一正一反的 allow_branch）画在同一个位置是常规写法。
     it('does not call one spot a collision when allow_branch keeps the pair apart', () => {
         const content = tree(`

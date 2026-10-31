@@ -1129,21 +1129,33 @@ function validateFocusLayoutOfFile(
     }
 
     // 焦点图标跨两个网格列，因此同一行其余成对焦点之间至少要隔两个 X 单位，否则精灵重叠。
-    // 同位置的成对由上面的堆叠覆盖。
-    for (let i = 0; i < entries.length; i++) {
-        const entryA = entries[i];
-        if (entryA === undefined) {
+    // 同位置的成对由上面的堆叠覆盖。按行分组，行内保持条目原顺序，警告仍按原先的外层 i /
+    // 内层 j 顺序产生。
+    const entriesByY = new Map<
+        number,
+        { entries: (typeof entries)[number][]; next: number }
+    >();
+    for (const entry of entries) {
+        if (Number.isNaN(entry.position.y)) {
             continue;
         }
-        for (let j = i + 1; j < entries.length; j++) {
-            const entryB = entries[j];
-            if (entryB === undefined) {
-                continue;
-            }
-            if (
-                entryA.position.y !== entryB.position.y ||
-                entryA.position.x === entryB.position.x
-            ) {
+        const row = entriesByY.get(entry.position.y);
+        if (row === undefined) {
+            entriesByY.set(entry.position.y, { entries: [entry], next: 0 });
+        } else {
+            row.entries.push(entry);
+        }
+    }
+    for (const entryA of entries) {
+        const row = entriesByY.get(entryA.position.y);
+        if (row === undefined) {
+            continue;
+        }
+        // 条目按原顺序进入行，游标此刻正指向 entryA。
+        row.next++;
+        for (let j = row.next; j < row.entries.length; j++) {
+            const entryB = row.entries[j];
+            if (entryB === undefined || entryA.position.x === entryB.position.x) {
                 continue;
             }
             if (
