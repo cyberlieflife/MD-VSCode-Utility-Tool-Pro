@@ -3,7 +3,7 @@ import * as path from 'path';
 import { localize } from './i18n';
 import { ymlSuffixBySettingName } from './locales';
 import { UserError } from './common';
-import { isSamePath } from './nodecommon';
+import { pathIdentity } from './nodecommon';
 import { ConfigurationKey } from '../constants';
 import { getFs } from './fs';
 
@@ -36,7 +36,13 @@ export function ensureFileScheme(uri: vscode.Uri) {
 }
 
 export function isSameUri(uriA: vscode.Uri, uriB: vscode.Uri) {
-    return (isFileScheme(uriA) && isFileScheme(uriB) && isSamePath(uriA.fsPath, uriB.fsPath)) || uriA.toString() === uriB.toString();
+    return (isFileScheme(uriA) && isFileScheme(uriB) && filePathIdentity(uriA.fsPath) === filePathIdentity(uriB.fsPath)) || uriA.toString() === uriB.toString();
+}
+
+// Off Windows a backslash is part of a file name, so only Windows paths fold slashes and case.
+function filePathIdentity(fsPath: string): string {
+    const resolved = path.resolve(fsPath);
+    return process.platform === 'win32' ? pathIdentity(resolved) : resolved;
 }
 
 export async function getLastModifiedAsync(path: vscode.Uri): Promise<number> {
