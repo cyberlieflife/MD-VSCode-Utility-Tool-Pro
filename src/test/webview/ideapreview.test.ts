@@ -503,6 +503,56 @@ describe("webview/ideapreview rendering", () => {
 		assert.strictEqual(content().querySelectorAll(".idea-empty").length, 0);
 	});
 
+	// A roster still painting must not keep adding groups under the empty message: the empty case
+	// starts its own (empty) run, which invalidates the one in flight.
+	it("stops a roster still painting when the new list is empty", () => {
+		const realNow = Date.now;
+		const queued: FrameRequestCallback[] = [];
+		// Each clock read moves 4 ms on, so one step paints exactly one task and the rest stay queued.
+		let clock = 0;
+		Date.now = () => (clock += 4);
+		(global as any).requestAnimationFrame = (callback: FrameRequestCallback) => {
+			queued.push(callback);
+			return queued.length;
+		};
+
+		try {
+			window.dispatchEvent(
+				new (window as any).MessageEvent("message", {
+					data: { type: "updateBody", data: { ideaPreview: integrationPayload } },
+				}),
+			);
+
+			const emptyPayload: IdeaPreviewPayload = {
+				...integrationPayload,
+				cards: [],
+				groups: [],
+				chains: [],
+			};
+			window.dispatchEvent(
+				new (window as any).MessageEvent("message", {
+					data: { type: "updateBody", data: { ideaPreview: emptyPayload } },
+				}),
+			);
+
+			while (queued.length > 0) {
+				queued.shift()!(0);
+			}
+
+			assert.strictEqual(content().querySelectorAll(".idea-empty").length, 1);
+			assert.strictEqual(content().querySelectorAll(".idea-group").length, 0);
+			assert.strictEqual(content().querySelectorAll(".idea-card").length, 0);
+		} finally {
+			delete (global as any).requestAnimationFrame;
+			Date.now = realNow;
+			window.dispatchEvent(
+				new (window as any).MessageEvent("message", {
+					data: { type: "updateBody", data: { ideaPreview: integrationPayload } },
+				}),
+			);
+		}
+	});
+
 	it("says when the swap index is off, so a missing chain is not read as none existing", () => {
 		const offPayload: IdeaPreviewPayload = {
 			...integrationPayload,
