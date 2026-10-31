@@ -22,6 +22,7 @@ class Dropdown extends Subscriber {
 
     constructor(readonly select: HTMLSelectElement) {
         super();
+        this.addSubscription({ dispose: () => this.closeDropdown?.() });
         this.init();
     }
 
@@ -84,16 +85,16 @@ class Dropdown extends Subscriber {
             this.closeDropdown?.apply(this);
         })));
 
-        numDropDownOpened$.next(numDropDownOpened$.value + 1);
         this.closeDropdown = () => {
+            this.closeDropdown = undefined;
             this.select.classList.remove('dropdown-opened');
             dropdownMenu.hide();
             dropdownMenuSubscriptions.forEach(d => d.dispose());
             numDropDownOpened$.next(numDropDownOpened$.value - 1);
-            this.closeDropdown = undefined;
         };
 
         dropdownMenu.show(this.select);
+        numDropDownOpened$.next(numDropDownOpened$.value + 1);
     }
 }
 
@@ -116,6 +117,7 @@ export class DivDropdown extends Subscriber {
         private labels: DivDropdownLabels = {},
     ) {
         super();
+        this.addSubscription({ dispose: () => this.closeDropdown?.() });
         this.init();
         this.addSubscription(this.selectedValues$.subscribe((value) => {
             const options = this.getOptions(value);
@@ -204,16 +206,16 @@ export class DivDropdown extends Subscriber {
             this.closeDropdown?.apply(this);
         })));
 
-        numDropDownOpened$.next(numDropDownOpened$.value + 1);
         this.closeDropdown = () => {
+            this.closeDropdown = undefined;
             this.select.classList.remove('dropdown-opened');
             dropdownMenu.hide();
             dropdownMenuSubscriptions.forEach(d => d.dispose());
             numDropDownOpened$.next(numDropDownOpened$.value - 1);
-            this.closeDropdown = undefined;
         };
 
         dropdownMenu.show(this.select);
+        numDropDownOpened$.next(numDropDownOpened$.value + 1);
     }
 
     private getOptions(selectedValues?: readonly string[]): Option[] {

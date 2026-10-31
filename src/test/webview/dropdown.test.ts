@@ -60,6 +60,20 @@ describe('webview/util/dropdown', function () {
         dd.dispose();
     });
 
+    it('closes an open menu when the dropdown is disposed', function () {
+        const dd = buildDivDropdown(['a', 'b']);
+        dd.select.dispatchEvent(new Event('mousedown'));
+        assert.strictEqual(numDropDownOpened$.value, 1);
+        assert.ok(dd.select.classList.contains('dropdown-opened'));
+        assert.strictEqual(document.querySelectorAll('.select-dropdown').length, 1);
+
+        dd.dispose();
+
+        assert.strictEqual(numDropDownOpened$.value, 0);
+        assert.strictEqual(dd.select.classList.contains('dropdown-opened'), false);
+        assert.strictEqual(document.querySelectorAll('.select-dropdown').length, 0);
+    });
+
     it('increments open counter when dropdown opens', function (done) {
         const dd = buildDivDropdown(['a', 'b']);
         const sub = numDropDownOpened$.subscribe(n => {
