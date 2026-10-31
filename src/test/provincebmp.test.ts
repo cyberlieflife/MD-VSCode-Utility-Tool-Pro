@@ -50,4 +50,19 @@ describe('worldmap/loader/provincebmp getProvincesByPosition', () => {
             /multiply of 256/,
         );
     });
+
+    it('refuses a map with more distinct colours than the preview allows', () => {
+        const width = 256;
+        const height = 512;
+        const pixels = new Uint8Array(width * height * 3);
+        // Every pixel gets its own colour: red and green take the low 16 bits, blue the rest.
+        for (let i = 0; i < width * height; i++) {
+            setPixel(pixels, i, i & 0xff, (i >> 8) & 0xff, (i >> 16) & 0xff);
+        }
+
+        assert.throws(
+            () => getProvincesByPosition(bmpOf(width, height, pixels)),
+            /distinct colors/,
+        );
+    });
 });

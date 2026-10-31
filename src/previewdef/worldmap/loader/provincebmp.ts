@@ -70,6 +70,10 @@ async function loadProvincesBmp(provincesFile: string, progressReporter: Progres
 }
 
 type ColorContainer = { color: number, warnings: [] };
+
+// Bound per-color allocations for pathological province images.
+const MAX_DISTINCT_PROVINCE_COLORS = 65_536;
+
 export function getProvincesByPosition(provinceMapImage: BMP): { colorByPosition: Uint32Array, provinces: ColorContainer[], colorToProvince: Record<number, ColorContainer> } {
     if (provinceMapImage.width % 256 !== 0 || provinceMapImage.height % 256 !== 0) {
         throw new UserError(localize('worldmap.error.multiply256', 'Height and width of map image must be multiply of 256: {0}x{1}.',
@@ -89,6 +93,12 @@ export function getProvincesByPosition(provinceMapImage: BMP): { colorByPosition
         for (let x = 0, sx = sy, dx = dy; x < provinceMapImage.width; x++, sx += 3, dx++) {
             const color = (bitmapData[sx + 2] << 16) | (bitmapData[sx + 1] << 8) | bitmapData[sx];
             if (color !== previousColor && !seenColors.has(color)) {
+                if (provinces.length >= MAX_DISTINCT_PROVINCE_COLORS) {
+                    throw new UserError(localize(
+                        'worldmap.error.toomanyprovinces',
+                        'The provinces image contains more than {0} distinct colors, exceeding the preview limit.',
+                        MAX_DISTINCT_PROVINCE_COLORS));
+                }
                 seenColors.add(color);
                 provinces.push({ color, warnings: [] });
             }

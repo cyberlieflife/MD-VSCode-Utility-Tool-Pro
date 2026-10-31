@@ -427,6 +427,7 @@ const table: Partial<typeof __table> = {
     "worldmap.error.fieldnotindefaultmap": "Поле \"{0}\" не найдено в default.map.",
     "worldmap.error.multiply256": "Высота и ширина карты должна быть умножена на 256: {0}x{1}.",
     "worldmap.error.provinceidtoolarge": "Максимальный id провинции слишком большой: {0}.",
+    "worldmap.error.toomanyprovinces": "Изображение провинций содержит больше {0} разных цветов, это превышает предел предпросмотра.",
     "worldmap.export.error": "Невозможно экспортировать карту мира: {0}.",
     "worldmap.export.error.imgformat": "Невозможно экспортировать карту мира: Изображение в неверном формате.",
     "worldmap.export.success": "Успешный экспорт карты мира.",
