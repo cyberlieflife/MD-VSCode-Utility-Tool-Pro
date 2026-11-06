@@ -81,7 +81,7 @@ async function loadResources(file: string): Promise<Resource[]> {
     return Object.values(data.resources._map).map<Resource>(v => {
         const name = v._key;
         const iconFrame = v._value.icon_frame ?? 0;
-        const imageUri = image?.frames[iconFrame - 1]?.uri ?? image?.frames[0]?.uri ?? '';
+        const imageUri = image?.frame(iconFrame - 1)?.uri ?? image?.frame(0)?.uri ?? '';
         return { name, displayName: localisedResourceName(name), iconFrame, imageUri, file };
     });
 }

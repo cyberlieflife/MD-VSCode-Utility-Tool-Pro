@@ -15,7 +15,7 @@ export function renderSprite(position: NumberPosition, size: NumberSize, sprite:
     }
 
     // Use first frame if frame is not found
-    if (!sprite.frames[frame] && frame > 0) {
+	if (!sprite.frame(frame) && frame > 0) {
         frame = 0;
     }
 
@@ -31,7 +31,7 @@ export function renderSprite(position: NumberPosition, size: NumberSize, sprite:
             height: ${sprite.height * scale}px;
         `)}
         ${options.styleTable.style(`sprite-img-${normalizeForStyle(sprite.id)}-${frame}-${normalizeForStyle(String(scale))}`, () => `
-            background-image: url(${sprite.frames[frame]?.uri});
+            background-image: url(${sprite.frame(frame)?.uri});
             background-size: ${sprite.width * scale}px ${sprite.height * scale}px;
         `)}
     "></div>`;

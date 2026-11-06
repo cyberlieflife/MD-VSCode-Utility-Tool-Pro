@@ -18,8 +18,8 @@ export async function loadFocusLinkImages(
     for (const shape of focusLinkShapes) {
         const sprite = await getSpriteByGfxName(spec.gfx[shape], gfxFiles);
         // 与互斥连线一样取帧而不是整张精灵：条带里有全部四帧。
-        const solidFrame = sprite?.frames[frames.solid];
-        const dashedFrame = sprite?.frames[frames.dashed];
+    const solidFrame = sprite?.frame(frames.solid);
+    const dashedFrame = sprite?.frame(frames.dashed);
         if (solidFrame === undefined || dashedFrame === undefined) {
             return undefined;
         }

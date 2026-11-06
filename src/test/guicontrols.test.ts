@@ -21,7 +21,7 @@ function stubSprite(): Sprite {
         id: 'test',
         width: 10,
         height: 10,
-        frames: [{ uri: 'data:image/png;base64,' }],
+        frame: () => ({ uri: 'data:image/png;base64,' }),
     } as unknown as Sprite;
 }
 

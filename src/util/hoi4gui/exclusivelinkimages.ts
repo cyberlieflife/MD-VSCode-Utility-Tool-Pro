@@ -24,12 +24,12 @@ export async function loadExclusiveLinkImages(
         return undefined;
     }
 
-    // frames 把条带横向切帧。取帧而不是整张精灵，也避开九宫格路径：它是 corneredTileSpriteType
+    // frame 把条带横向切帧。取帧而不是整张精灵，也避开九宫格路径：它是 corneredTileSpriteType
     // 但没有 borderSize，切片只会把贴图切坏。
-    const line = lineSprite.frames[spec.lineFrame];
-    const left = leftSprite.frames[spec.leftFrame];
-    const mid = midSprite.frames[spec.midFrame];
-    const right = rightSprite.frames[spec.rightFrame];
+    const line = lineSprite.frame(spec.lineFrame);
+    const left = leftSprite.frame(spec.leftFrame);
+    const mid = midSprite.frame(spec.midFrame);
+    const right = rightSprite.frame(spec.rightFrame);
     if (line === undefined || left === undefined || mid === undefined || right === undefined) {
         return undefined;
     }

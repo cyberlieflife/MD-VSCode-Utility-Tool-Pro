@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import { FocusTree, Focus, FocusTreeShortcut, focusTreesToDisplay, getGfxNameForSearchFilter } from './schema';
 import { getSpriteByGfxName, Image, getImageByPath, iconResolveStats, resetIconResolveStats, Sprite } from '../../util/image/imagecache';
 import { localize, i18nTableAsScript } from '../../util/i18n';
-import { forceError, randomString, mapLimit } from '../../util/common';
+import { forceError, randomString, mapLimit, CancelledError, CancellationLike, UserError, throwIfCancelled } from '../../util/common';
 import { HOIPartial, toNumberLike, toStringAsSymbolIgnoreCase } from '../../hoiformat/schema';
 import { html, htmlEscape, escapeAttr, previewedFileUriScript } from '../../util/html';
-import { GridBoxType, IconType, ButtonType, InstantTextBoxType } from '../../hoiformat/gui';
+import { GridBoxType, IconType, ButtonType, ContainerWindowType, InstantTextBoxType } from '../../hoiformat/gui';
 import { FocusTreeLoader, ProgressCallback } from './loader';
 import { LoaderSession } from '../../util/loader/loader';
 import { debug, error } from '../../util/debug';
@@ -28,6 +28,10 @@ import { renderSprite } from "../../util/hoi4gui/nodecommon";
 import { getLocalisedTextQuick } from "../../util/localisationIndex";
 
 const defaultFocusIcon = 'gfx/interface/goals/goal_unknown.dds';
+
+// LoaderSession.throwIfCancelled 抛出的消息。loader 对被取消的会话固定抛 UserError，单看类型分不出
+// 取消与其它加载失败，只能靠消息识别。
+const loadSessionCancelledMessage = 'Load session cancelled.';
 
 // Caps how many focus/inlay renders run concurrently.
 const renderConcurrency = 8;
@@ -57,8 +61,10 @@ export interface FocusTreePayload extends FocusTreeUpdatePayload {
 
 export type { ToolbarFlags };
 
-export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: ProgressCallback, options?: { resolveIcons?: boolean; dependencyChanged?: boolean }): Promise<FocusTreePayload | null> {
+export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: ProgressCallback, options?: { resolveIcons?: boolean; dependencyChanged?: boolean; token?: CancellationLike }): Promise<FocusTreePayload | null> {
     const resolveIcons = options?.resolveIcons !== false;
+    // 本次构建自己的取消信号：调用方超时、被更新的渲染取代或面板关闭时置位。
+    const token = options?.token;
     try {
         // Per-phase timing of parsing/loading, icon resolution, and DDS->PNG conversion, logged via debug() in dev builds.
         resetIconResolveStats();
@@ -66,7 +72,9 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
 
         // 依赖变更（覆盖层 gfx 清单的设置或 .mod 列表、连线贴图文件等）必须把强制开关传进会话，
         // 否则 loader 按未变的文本哈希返回依赖变更前读到的结果。
-        const session = new LoaderSession(options?.dependencyChanged ?? false);
+        // 取消回调只认本次构建的 token。loader 和它的缓存与其它读取同一批文件的调用方共享，
+        // 那些会话必须继续运行。
+        const session = new LoaderSession(options?.dependencyChanged ?? false, () => token?.isCancellationRequested ?? false);
         const loadResult = await loader.load(session);
         debug('Loader session focus tree', session.loadedLoaderNames());
         const tLoaded = Date.now();
@@ -113,6 +121,9 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
         }
         let renderedFocusCount = 0;
         await mapLimit(allFocuses, renderConcurrency, async (focus) => {
+            // 必须抛出而不是返回：mapLimit 只有回调抛出才会停止取新项，仅返回会让其它 worker
+            // 继续为一个已经没人要的构建渲染。
+            throwIfCancelled(token);
             renderedFocus[focus.id] = (await renderFocus(focus, styleTable, loadResult.result.gfxFiles, loadResult.result.overlayGfxFiles, loader.file, titlebarStyles, layout.item, resolveIcons)).replace(/\s\s+/g, ' ');
             renderedFocusCount++;
             if (progress) {
@@ -133,6 +144,7 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
         }
         let renderedInlayCount = 0;
         await mapLimit(allInlays, renderConcurrency, async (inlay) => {
+            throwIfCancelled(token);
             renderedInlayWindows[inlay.id] = (await renderInlayWindow(inlay, styleTable, loadResult.result.gfxFiles)).replace(/\s\s+/g, ' ');
             renderedInlayCount++;
             if (progress) {
@@ -161,6 +173,7 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
         for (const tree of focusTrees) {
             const items: string[] = [];
             for (const [index, shortcut] of (tree.shortcuts ?? []).entries()) {
+                throwIfCancelled(token);
                 items.push((await renderShortcut(shortcut, index, tree, shortcutGui?.item, styleTable, loadResult.result.gfxFiles, resolveIcons)).replace(/\s\s+/g, ' '));
             }
             renderedShortcuts.push(items);
@@ -183,6 +196,108 @@ export async function buildFocusTreePayload(loader: FocusTreeLoader, progress?: 
             gfxFiles: loadResult.result.gfxFiles,
         };
     } catch (e) {
+        // 被取消的构建只是过时，不是损坏：以 CancelledError 抛出，让调用方把"没人要的渲染"
+        // （保留当前页面）与格式错误的 mod 数据（仍返回 null）区分开。
+        if (e instanceof CancelledError) {
+            throw e;
+        }
+        if (e instanceof UserError && e.message === loadSessionCancelledMessage) {
+            // 本会话的取消回调触发了（LoaderSession.throwIfCancelled）；loader 测试把它的错误类型
+            // 固定成 UserError，所以在这里转换成 CancelledError。
+            throw new CancelledError();
+        }
+        error(e);
+        return null;
+    }
+}
+
+/**
+ * 只解析图标推送要流进已渲染结构的样式。结构遍已经连同占位符一起渲染了焦点、inlay 和快捷键的
+ * HTML，所以这一遍不能再渲染其中任何标记：它只注册与完整 resolveIcons 构建相同的类名（焦点图标
+ * 与缺图回退、快捷键图片类、互斥/前置连线贴图、名条/覆盖层、inlay gfx 类），并返回生成的 CSS。
+ * 就地更新只能通过这份 CSS 把新铸造的类名送到页面上，因此它按完整构建的同样分类携带每个身份，
+ * 无论是否解析成功。树为空或格式错误时返回 null。
+ */
+export interface FocusTreeIconStyles {
+    styleTable: StyleTable;
+}
+
+export async function buildFocusTreeIconStyles(
+    loader: FocusTreeLoader,
+    options?: { token?: CancellationLike },
+): Promise<FocusTreeIconStyles | null> {
+    const token = options?.token;
+    try {
+        const tStart = Date.now();
+        resetIconResolveStats();
+        // 与现有图标推送点一致，这一遍不启动 dependencyChanged 会话：loader 只在必要时重解析
+        // 自己的文档，并复用结构遍共享的同一批缓存。token 只属于本次推送的取消。
+        const session = new LoaderSession(false, () => token?.isCancellationRequested ?? false);
+        const loadResult = await loader.load(session);
+        const focusTrees = focusTreesToDisplay(loadResult.result.focusTrees);
+        if (focusTrees.length === 0) {
+            return null;
+        }
+        const layout = loadResult.result.layout ?? standardFocusTreeLayout;
+        const styleTable = new StyleTable();
+
+        // 结构遍也会注册这些类（纯色线分支），所以这一遍新增的只有解析出的贴图产生的类。
+        const exclusiveLinkImages = layout.mode === 'gui'
+            ? await loadExclusiveLinkImages(layout.exclusive.sprites, [nationalFocusViewGfxFile, ...loadResult.result.gfxFiles])
+            : await loadExclusiveLinkImages();
+        registerExclusiveLinkStyles(styleTable, exclusiveLinkImages, layout.spacing.x, {
+            startX: layout.exclusive.startX,
+            endX: layout.exclusive.endX,
+            y: layout.exclusive.offsetY,
+        }, layout.spacing.y, {
+            // 压过焦点层（最高 3），它在名条行会横穿焦点；低于追踪线（5）和警告标记（6）。
+            zIndex: 4,
+            gapUnderMid: true,
+            clampToCentre: true,
+        });
+
+        const focusLinkState = focusTreePrerequisiteLines;
+        const focusLinkImages = layout.mode === 'gui'
+            ? await loadFocusLinkImages(layout.prerequisiteLink.sprites, [nationalFocusViewGfxFile, ...loadResult.result.gfxFiles], focusLinkState)
+            : await loadFocusLinkImages(undefined, undefined, focusLinkState);
+        registerFocusLinkStyles(styleTable, focusLinkImages, focusLinkState);
+
+        const titlebarStyles = await loadFocusTitlebarStyles();
+        for (const focus of flatMap(focusTrees, tree => Object.values(tree.focuses))) {
+            throwIfCancelled(token);
+            await registerFocusIconAndLayerStyles(focus, styleTable, loadResult.result.gfxFiles, loadResult.result.overlayGfxFiles, titlebarStyles, true);
+        }
+
+        await prepareInlayGfxStyles(focusTrees, styleTable);
+
+        // renderShortcut 在页面那侧会铸造的类：每个快捷键为 item 窗口声明的每个 focus_button 比例
+        // 各注册一个图片类；没有 item 时用唯一的回退比例。
+        const shortcutGui = loadResult.result.shortcutGui;
+        const shortcutScales = shortcutGui?.item ? focusButtonScalesOf(shortcutGui.item) : [fallbackShortcutItem.icon.scale];
+        for (const tree of focusTrees) {
+            for (const shortcut of tree.shortcuts ?? []) {
+                throwIfCancelled(token);
+                const iconName = tree.focuses[shortcut.target]?.icon.find(i => i.icon)?.icon;
+                const image = iconName ? await getFocusIcon(iconName, loadResult.result.gfxFiles) : await getImageByPath(defaultFocusIcon);
+                for (const scale of shortcutScales) {
+                    styleTable.style(shortcutIconStyleName(iconName, scale), () => shortcutIconCss(image, scale));
+                }
+            }
+        }
+
+        debug(`[focustree] icon style pass: load=${Date.now() - tStart}ms | focuses=${focusTrees.length} ` +
+            `imageDecodes=${iconResolveStats.imageDecodes} decodeTime=${iconResolveStats.imageDecodeMs}ms`);
+
+        return { styleTable };
+    } catch (e) {
+        // 与 buildFocusTreePayload 一致：被取消的构建重新抛出，让调用方的守卫成立；其它失败保留
+        // 页面上已有的 CSS。
+        if (e instanceof CancelledError) {
+            throw e;
+        }
+        if (e instanceof UserError && e.message === loadSessionCancelledMessage) {
+            throw new CancelledError();
+        }
         error(e);
         return null;
     }
@@ -578,7 +693,7 @@ async function prepareInlayGfxStyles(focusTrees: FocusTree[], styleTable: StyleT
                     }
 
                     const sprite = await getSpriteByGfxName(option.gfxName, option.gfxFile);
-                    const frame = sprite?.frames[0];
+                    const frame = sprite?.frame(0);
                     if (!frame) {
                         styleTable.style(key, () => `
                             width: 96px;
@@ -757,6 +872,44 @@ const fallbackShortcutItem = {
     name: { x: 63, y: 6, width: 112, height: 60, fontSize: 14 },
 };
 
+// 快捷键图片类的类名与 CSS，renderShortcut 和 buildFocusTreeIconStyles 共用，保证两边为同一
+// (icon, scale) 铸造同一条规则。scale 来自 gui 的 focus_button，图标遍从不渲染它，所以写进类名。
+function shortcutIconStyleName(iconName: string | undefined, scale: number): string {
+    return `shortcut-icon-${normalizeForStyle(iconName ?? '-empty')}-${Math.round(scale * 100)}`;
+}
+
+function shortcutIconCss(image: Image | undefined, scale: number): string {
+    return image ? `
+            width: ${image.width * scale}px;
+            height: ${image.height * scale}px;
+            background-image: url(${image.uri});
+            background-size: ${image.width * scale}px ${image.height * scale}px;
+        ` : `
+            width: ${94 * scale}px;
+            height: ${86 * scale}px;
+            background: rgba(127, 127, 127, 0.35);
+        `;
+}
+
+// item 窗口里每个 focus_button 子控件的比例，按渲染顺序（顺序只影响 CSS，不同比例始终是不同类名）。
+// 与 renderShortcut 的遍历一致：容器递归（renderContainerWindowChildren），三种按钮按
+// renderShortcut 的 onRenderChild 匹配，grid box 不产出，因为那里的 renderGridBox 没有收到条目。
+function focusButtonScalesOf(item: HOIPartial<ContainerWindowType>): number[] {
+    const scales: number[] = [];
+    const walk = (window: HOIPartial<ContainerWindowType>): void => {
+        for (const button of [...window.buttontype, ...window.checkboxtype, ...window.guibuttontype]) {
+            if (button.name === 'focus_button') {
+                scales.push(button.scale ?? 1);
+            }
+        }
+        for (const child of [...window.containerwindowtype, ...window.windowtype]) {
+            walk(child);
+        }
+    };
+    walk(item);
+    return scales;
+}
+
 // 一个快捷键按游戏的画法：nationalfocusview.gui 里的 item 窗口，`name` 文本框放本地化后的
 // 快捷键名，`focus_button` 放目标焦点的图标。
 async function renderShortcut(
@@ -775,16 +928,7 @@ async function renderShortcut(
     // 图片挂在一个以图标命名的类上，和焦点图标一样：结构遍往这个类名下写占位，图标遍把真图盖上，
     // 尺寸也放在那里。居中用 transform，位置就不受那个尺寸影响。
     const icon = (x: number, y: number, scale: number, centered: boolean) => {
-        const pictureClass = styleTable.style(`shortcut-icon-${normalizeForStyle(iconName ?? '-empty')}-${Math.round(scale * 100)}`, () => image ? `
-            width: ${image.width * scale}px;
-            height: ${image.height * scale}px;
-            background-image: url(${image.uri});
-            background-size: ${image.width * scale}px ${image.height * scale}px;
-        ` : `
-            width: ${94 * scale}px;
-            height: ${86 * scale}px;
-            background: rgba(127, 127, 127, 0.35);
-        `);
+        const pictureClass = styleTable.style(shortcutIconStyleName(iconName, scale), () => shortcutIconCss(image, scale));
         return `<div class="${pictureClass} ${styleTable.oneTimeStyle('shortcut-icon', () => `
             position: absolute;
             left: ${x}px;
@@ -893,16 +1037,19 @@ async function localiseShortcutName(name: string): Promise<string> {
 // objects, also on dependency changes) invalidates automatically; a WeakMap never leaks.
 const renderedFocusHtmlCache = new WeakMap<Focus, string>();
 
-async function renderFocus(
+/**
+ * 注册一个焦点的图标与名条/覆盖层样式类，renderFocus（载荷构建）与 buildFocusTreeIconStyles
+ * （仅图标遍）共用，保证两边为同一焦点铸造同样的类名与 CSS，无论各自渲染什么。返回解析出的图片
+ * 和 renderFocus 标记所需的两个层类名。
+ */
+async function registerFocusIconAndLayerStyles(
     focus: Focus,
     styleTable: StyleTable,
     gfxFiles: string[],
     overlayGfxFiles: string[],
-    file: string,
     titlebarStyles: Record<string, string>,
-    itemLayout: FocusItemLayout,
-    resolveIcons: boolean = true,
-): Promise<string> {
+    resolveIcons: boolean,
+): Promise<{ titlebarClass: string; overlayClass: string; titlebarObject: Image | undefined; overlayObject: Image | undefined }> {
     // Skips the expensive per-texture DDS->PNG conversions in the structure-only pass and registers a
     // neutral placeholder. 元素尺寸取图片尺寸：图标层是焦点的拖动命中区，必须与图片同宽高。
     for (const focusIcon of focus.icon) {
@@ -916,7 +1063,7 @@ async function renderFocus(
                     : `background-color: rgba(127, 127, 127, 0.25); width: 64px; height: 64px; background-size: 0px;`
         );
     }
-    
+
     styleTable.style('focus-icon-' + normalizeForStyle('-empty'), () => 'background: grey; width: 64px; height: 64px;');
 
     const titlebarObject = await getFocusTitlebarImage(focus.textIcon, titlebarStyles);
@@ -942,6 +1089,22 @@ async function renderFocus(
             display: none;
         `
     );
+
+    return { titlebarClass, overlayClass, titlebarObject, overlayObject };
+}
+
+async function renderFocus(
+    focus: Focus,
+    styleTable: StyleTable,
+    gfxFiles: string[],
+    overlayGfxFiles: string[],
+    file: string,
+    titlebarStyles: Record<string, string>,
+    itemLayout: FocusItemLayout,
+    resolveIcons: boolean = true,
+): Promise<string> {
+    const { titlebarClass, overlayClass, titlebarObject, overlayObject } =
+        await registerFocusIconAndLayerStyles(focus, styleTable, gfxFiles, overlayGfxFiles, titlebarStyles, resolveIcons);
 
     // Layout classes are registered on every pass (the styleTable is fresh per render), then the
     // markup assembly reuses the cached string when this focus object was already rendered.

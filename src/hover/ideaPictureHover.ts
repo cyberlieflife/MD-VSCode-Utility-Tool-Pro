@@ -85,7 +85,7 @@ export interface HoverPictureContent {
 export function buildHoverPicture(sprite: Sprite): HoverPictureContent {
     // Multi-frame sprites are horizontal strips: frame 0 is what the game shows in the
     // idea list, and sprite.width already divides the strip width by the frame count.
-    const frame = sprite.noOfFrames > 1 ? sprite.frames[0] : sprite.image;
+    const frame = sprite.noOfFrames > 1 ? (sprite.frame(0) ?? sprite.image) : sprite.image;
     const scale = frame.height > MAX_HOVER_IMAGE_HEIGHT ? MAX_HOVER_IMAGE_HEIGHT / frame.height : 1;
     return {
         gfxName: sprite.id,

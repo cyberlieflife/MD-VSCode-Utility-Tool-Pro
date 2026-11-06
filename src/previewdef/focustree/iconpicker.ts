@@ -37,7 +37,7 @@ export async function collectFocusIconNames(): Promise<string[]> {
 }
 
 // Picker thumbnail for a focus icon: a single-frame sprite returns its whole image; a multi-frame
-// atlas returns just the first frame (cropped once per sprite instance and memoized on Sprite.frames,
+// atlas returns just the first frame (cropped once per sprite instance and memoized on Sprite.frame,
 // the same frame the focus-tree preview and inlay windows show). Huge textures fall back to the
 // whole image so an unexpectedly large atlas cannot stall the picker with a synchronous crop.
 export function pickPickerImage(sprite: Sprite | undefined): Image | undefined {
@@ -45,7 +45,7 @@ export function pickPickerImage(sprite: Sprite | undefined): Image | undefined {
         return undefined;
     }
     if (sprite.noOfFrames > 1 && sprite.image.width * sprite.image.height <= MAX_PICKER_ATLAS_PIXELS) {
-        return sprite.frames[0];
+        return sprite.frame(0);
     }
     return sprite.image;
 }
