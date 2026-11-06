@@ -20,6 +20,31 @@ import { addMapItem } from './editor/addmapitem';
 import { editState } from './editor/editstate';
 import { renderWorldMapIcons } from './toolbar';
 
+type WorldMapItemField =
+    | "provinces"
+    | "states"
+    | "countries"
+    | "strategicRegions"
+    | "supplyAreas"
+    | "railways"
+    | "supplyNodes";
+
+const requestItemData: Record<
+    RequestMapItemMessage["command"],
+    { field: WorldMapItemField; responseCommand: MapItemMessage["command"] }
+> = {
+    requestprovinces: { field: "provinces", responseCommand: "provinces" },
+    requeststates: { field: "states", responseCommand: "states" },
+    requestcountries: { field: "countries", responseCommand: "countries" },
+    requeststrategicregions: {
+        field: "strategicRegions",
+        responseCommand: "strategicregions",
+    },
+    requestsupplyareas: { field: "supplyAreas", responseCommand: "supplyareas" },
+    requestrailways: { field: "railways", responseCommand: "railways" },
+    requestsupplynodes: { field: "supplyNodes", responseCommand: "supplynodes" },
+};
+
 interface WorldMapWebviewAssets {
     commonJs: string;
     worldmapJs: string;
@@ -69,6 +94,8 @@ export class WorldMap {
     private worldMapLoader: WorldMapLoader;
     private worldMapDependencies: string[] | undefined;
     private cachedWorldMap: WorldMapData | undefined;
+    private requestSequence = 0;
+    private pendingRequests = 0;
 
     private lastRequestedExportUri: vscode.Uri | undefined;
 
@@ -100,14 +127,20 @@ export class WorldMap {
     }
 
     private releaseMemory(): void {
-        if (this.cachedWorldMap === undefined) {
-            return;
-        }
         this.cachedWorldMap = undefined;
-        // Dropping the loader lets its cached WorldMapData be garbage collected. A fresh loader
-        // rebuilds from disk on the next request.
-        this.worldMapLoader = new WorldMapLoader();
-        this.worldMapLoader.onProgress(this.progressReporter);
+        this.releaseIfIdle();
+    }
+
+    // Keep the loader until every outstanding response has finished posting.
+    private releaseIfIdle(): void {
+        if (
+            this.pendingRequests === 0 &&
+            (this.panel === undefined || this.panel.visible === false)
+        ) {
+            this.cachedWorldMap = undefined;
+            this.worldMapLoader = new WorldMapLoader();
+            this.worldMapLoader.onProgress(this.progressReporter);
+        }
     }
 
     public onDocumentChange = debounceByInput(
@@ -126,6 +159,7 @@ export class WorldMap {
 
     public dispose() {
         this.panel = undefined;
+        this.releaseMemory();
     }
 
     private async renderWorldMap(webview: vscode.Webview): Promise<string> {
@@ -158,25 +192,13 @@ export class WorldMap {
                     await this.sendProvinceMapSummaryToWebview(msg.force);
                     break;
                 case 'requestprovinces':
-                    await this.sendMapData('provinces', msg, (await this.worldMapLoader.getWorldMap()).provinces);
-                    break;
                 case 'requeststates':
-                    await this.sendMapData('states', msg, (await this.worldMapLoader.getWorldMap()).states);
-                    break;
                 case 'requestcountries':
-                    await this.sendMapData('countries', msg, (await this.worldMapLoader.getWorldMap()).countries);
-                    break;
                 case 'requeststrategicregions':
-                    await this.sendMapData('strategicregions', msg, (await this.worldMapLoader.getWorldMap()).strategicRegions);
-                    break;
                 case 'requestsupplyareas':
-                    await this.sendMapData('supplyareas', msg, (await this.worldMapLoader.getWorldMap()).supplyAreas);
-                    break;
                 case 'requestrailways':
-                    await this.sendMapData('railways', msg, (await this.worldMapLoader.getWorldMap()).railways);
-                    break;
                 case 'requestsupplynodes':
-                    await this.sendMapData('supplynodes', msg, (await this.worldMapLoader.getWorldMap()).supplyNodes);
+                    await this.sendItemData(msg);
                     break;
                 case 'openfile':
                     await this.openFile(msg.file, msg.type, msg.start, msg.end, msg.lineNumber);
@@ -214,6 +236,21 @@ export class WorldMap {
         } as WorldMapMessage);
     }
 
+    private async sendItemData(msg: RequestMapItemMessage): Promise<void> {
+        this.pendingRequests++;
+        try {
+            const { field, responseCommand } = requestItemData[msg.command];
+            await this.sendMapData(
+                responseCommand,
+                msg,
+                (await this.worldMapLoader.getWorldMap())[field],
+            );
+        } finally {
+            this.pendingRequests--;
+            this.releaseIfIdle();
+        }
+    }
+
     private progressReporter: ProgressReporter = async (progress: string) => {
         debug('Progress:', progress);
         await this.postMessageToWebview({
@@ -223,11 +260,16 @@ export class WorldMap {
     };
 
     private async sendProvinceMapSummaryToWebview(force: boolean) {
+        const requestSequence = ++this.requestSequence;
+        this.pendingRequests++;
         try {
             this.worldMapLoader.shallowForceReload();
-            const oldCachedWorldMap = this.cachedWorldMap;
             const loaderSession = new LoaderSession(force, () => this.panel === undefined);
             const { result: worldMap, dependencies } = await this.worldMapLoader.load(loaderSession);
+            if (requestSequence !== this.requestSequence || this.panel === undefined) {
+                return;
+            }
+            const oldCachedWorldMap = this.cachedWorldMap;
             this.worldMapDependencies = dependencies;
             this.cachedWorldMap = worldMap;
 
@@ -252,11 +294,17 @@ export class WorldMap {
             } as WorldMapMessage);
         } catch (e) {
             error(e);
+            if (requestSequence !== this.requestSequence || this.panel === undefined) {
+                return;
+            }
 
             await this.postMessageToWebview({
                 command: 'error',
                 data: localize('worldmap.failedtoload', 'Failed to load world map: {0}.', forceError(e).toString()),
             } as WorldMapMessage);
+        } finally {
+            this.pendingRequests--;
+            this.releaseIfIdle();
         }
     }
 
