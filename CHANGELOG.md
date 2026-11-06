@@ -1,3 +1,25 @@
+## [v1.2.5] - 2026-11-06
+
+### Functionality
+
+- [Focus Tree Preview] The icon pass now builds only the icon styles instead of rendering the whole tree again, so icons fill in faster on a large tree.
+- [Previews] Rapid edits to a previewed file now collapse into one redraw of the newest state instead of one redraw per delivered change.
+- [Index] A warm index build where nothing changed no longer writes the index cache back, which saves a copy of the whole index on every unchanged reload.
+- [Previews] Opening one frame of a multi-frame sprite no longer cuts every other frame out of the strip first.
+- [Previews] Texture decodes now queue for a free worker instead of failing the requests that arrive while every decoder is busy, and closing an image view cancels a decode that has not started.
+- [World Map Preview] Hiding the map while it loads now releases the loaded data once the outstanding responses finish, instead of keeping it until the panel changes again.
+- [Focus Tree Preview] Updating a focus tree or MIO organization now redraws the preview once instead of once more for every condition list it refreshes.
+
+### Bugfixes
+
+- [Previews] Condition and effect text now keeps quotation marks and backslashes inside strings.
+- [World Map Preview] Rivers no longer disappear when the map reloads.
+- [Previews] Closing a preview during an update no longer starts follow-up work for the closed panel.
+- [Focus Tree Preview] A focus tree that takes too long to render, is replaced by a newer render, or has its preview closed now stops building in the background. A stopped render no longer shows an error page or "No focus tree".
+- [Military Industrial Organization Preview] Condition options are built as DOM elements, so a trigger can no longer add markup to the dropdown.
+- [Dependencies] Development dependencies with known advisories were updated. `npm audit` reports 18 advisories left, all of which need a breaking major upgrade of a build or test dependency.
+- [Build] Packaging the extension no longer includes scratch files kept under `.tmp/`, and the unused `EXTENSION_ID` build global is gone.
+
 ## [v1.2.4] - 2026-10-31
 
 ### Functionality
