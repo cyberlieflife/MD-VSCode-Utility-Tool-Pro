@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { buildFocusTreeHtml, buildNoFocusTreeHtml, buildFocusTreeErrorHtml, buildFocusTreePayload, loadFocusTreesOnly, FocusTreePayload, FocusTreeUpdatePayload, ToolbarFlags, toolbarFlagsEqual } from './contentbuilder';
+import { buildFocusTreeHtml, buildNoFocusTreeHtml, buildFocusTreeErrorHtml, buildFocusTreePayload, buildFocusTreeIconStyles, FocusTreeIconStyles, loadFocusTreesOnly, FocusTreePayload, FocusTreeUpdatePayload, ToolbarFlags, toolbarFlagsEqual } from './contentbuilder';
 import { FocusTreeLayout, focusTreeGridBoxFor } from './layout';
 import { copyTreeWarnings } from './warningreport';
 import { matchPathEnd } from '../../util/nodecommon';
@@ -15,15 +15,30 @@ import { Logger } from '../../util/logger';
 import { getRelativePathInWorkspace, getDocumentByUri } from '../../util/vsccommon';
 import { localize } from '../../util/i18n';
 import { loadingShellHtml } from '../../util/html';
-import { withTimeout, TimeoutError } from '../../util/common';
+import { withTimeout, TimeoutError, CancelledError, CancellationLike } from '../../util/common';
 import { error } from '../../util/debug';
 import { useConditionInFocus } from '../../util/featureflags';
 import { ensureLocalisationIndex, getLocalisedTextUnchecked, notifyFocusTreePreviewOpened, notifyFocusTreePreviewClosed } from '../../util/localisationIndex';
 import { computeStructuralFingerprint, computeIconSourceFingerprint, computeTreeStructuralFingerprint, computeTreeIconFingerprint, decideFocusTreeUpdate, fnv1a, shouldSkipTextEarlyOut, FocusTreeFingerprints } from './fingerprint';
+import { StyleTable } from '../../util/styletable';
 
 // A render taking longer than this is treated as stuck. The underlying load keeps running
 // in the background, but the user gets a recoverable panel instead of an endless spinner.
 const focusTreeRenderTimeout = 60 * 1000;
+
+// 单次 buildFocusTreePayload 的取消信号。cancel() 由构建自己的 withTimeout 放弃时调用（包装器
+// 拒绝但构建仍在跑）；轮询还会读到预览已关闭或被更新的渲染取代。它不碰任何共享状态：loader、
+// 图片解码器和缓存继续服务其它调用方，本次构建只是不再开始新的工作。
+class BuildToken implements CancellationLike {
+    private cancelled = false;
+    public constructor(private readonly obsolete: () => boolean) {}
+    public get isCancellationRequested(): boolean {
+        return this.cancelled || this.obsolete();
+    }
+    public cancel(): void {
+        this.cancelled = true;
+    }
+}
 
 // Above this many unique picker icons, the host stops auto-pushing every image (which would decode
 // hundreds of textures in the background) and instead lets the webview pull only the icons its
@@ -78,6 +93,14 @@ class FocusTreePreview extends PreviewBase {
     // Generation token: each full (re)load bumps it so a slow background icon push from an earlier
     // load is dropped instead of overwriting a newer render.
     private iconRenderGeneration = 0;
+    // Counts renders. A build abandoned by its timeout keeps running in the background, and this is
+    // what its token polls to see that a newer render has superseded it.
+    private renderEpoch = 0;
+    // The structure payload of the last render, kept so an icon push rides together with the CSS that
+    // page's structure minted: an in-place update posts markup data only, so its newly-minted class
+    // names (icon identities, inlay slot geometry) reach the live page only through this pushed CSS.
+    // Cleared when the preview shows a page that has no icon channel (error / no tree).
+    private lastStructurePayload: FocusTreePayload | undefined = undefined;
     // Resolves when the webview signals it has rendered the structure and can accept icon CSS.
     private webviewReady: Promise<void> = Promise.resolve();
     private signalWebviewReady: () => void = () => {};
@@ -514,6 +537,8 @@ class FocusTreePreview extends PreviewBase {
         const contentHash = fnv1a(this.content);
         const contentLength = this.content.length;
         const generation = ++this.iconRenderGeneration;
+        const renderEpoch = ++this.renderEpoch;
+        const token = new BuildToken(() => this.isDisposed || this.renderEpoch !== renderEpoch);
         // A full (re)render embeds the current structure directly in the returned html, so any cached
         // in-place update belongs to a superseded page and must never be re-posted over this render.
         this.lastUpdateMessage = undefined;
@@ -527,14 +552,22 @@ class FocusTreePreview extends PreviewBase {
             // appears immediately even when the (slow) DDS->PNG icon conversion would blow the
             // render budget. The timeout now only guards this fast structural pass. (plan Stap 3)
             const structure = await withTimeout(
-                buildFocusTreePayload(this.focusTreeLoader, progress, { resolveIcons: false, dependencyChanged }),
+                buildFocusTreePayload(this.focusTreeLoader, progress, { resolveIcons: false, dependencyChanged, token }),
                 focusTreeRenderTimeout,
                 () => {
+                    // 包装器放弃但构建还在跑：取消它，让被遗弃的工作在下一个检查点停下，
+                    // 而不是把整棵树渲染完再丢掉。
+                    token.cancel();
                     progress(localize('focustree.loading.slow', 'Still working on a heavy focus tree...'));
                     return new TimeoutError();
                 },
             );
+            // 在最后一次检查之后被取消：结果和取消的构建一样过时，不能落入下面的无树分支。
+            if (token.isCancellationRequested) {
+                return this.panel.webview.html;
+            }
             if (structure) {
+                this.lastStructurePayload = structure;
                 const fingerprints = this.fingerprintsFor(structure);
                 this.lastStructuralFingerprint = fingerprints.structural;
                 this.lastIconSourceFingerprint = fingerprints.iconSource;
@@ -560,8 +593,14 @@ class FocusTreePreview extends PreviewBase {
             this.lastToolbarFlags = undefined;
             this.lastGoodHadFocusTrees = false;
             this.lastFocusTrees = [];
+            this.lastStructurePayload = undefined;
             return buildNoFocusTreeHtml(this.panel.webview, document.uri);
         } catch (e) {
+            // 被取消的构建是预览不再需要的（关闭或被取代）：保留当前页面，不报错。错误页或
+            // “No focus tree”会错误描述渲染停止的原因。
+            if (e instanceof CancelledError) {
+                return this.panel.webview.html;
+            }
             // Timeout or unexpected failure: show a recoverable panel with a Reload button
             // instead of leaving the user stuck on a dead loading spinner.
             error(e);
@@ -578,11 +617,21 @@ class FocusTreePreview extends PreviewBase {
             this.lastToolbarFlags = undefined;
             this.lastGoodHadFocusTrees = false;
             this.lastFocusTrees = [];
+            this.lastStructurePayload = undefined;
             return buildFocusTreeErrorHtml(this.panel.webview, document.uri, e);
         } finally {
             this.focusTreeLoader.setProgressListener(undefined);
             this.content = undefined;
         }
+    }
+
+    /**
+     * 图标推送要发的 CSS：没有结构渲染在用时（测试或被取代的流程）只发图标遍自己的 styleTable；
+     * 否则在最近结构遍的 CSS 上追加图标遍的类，这正是让就地更新过的页面拿到旧样式表没有的规则。
+     */
+    private pushedIconCss(iconTable: StyleTable): string {
+        const structure = this.lastStructurePayload;
+        return structure === undefined ? iconTable.toRawCss() : structure.styleTable.toRawCss() + iconTable.toRawCss();
     }
 
     /**
@@ -592,16 +641,20 @@ class FocusTreePreview extends PreviewBase {
      * newer load superseded it (generation mismatch) or the panel was disposed.
      */
     private async pushIconStyles(generation: number): Promise<void> {
+        if (this.isDisposed) {
+            return;
+        }
+        const token = new BuildToken(() => this.isDisposed || this.iconRenderGeneration !== generation);
         try {
-            const full = await buildFocusTreePayload(this.focusTreeLoader);
-            if (!full || generation !== this.iconRenderGeneration || this.isDisposed) {
+            const icons = await buildFocusTreeIconStyles(this.focusTreeLoader, { token });
+            if (!icons || generation !== this.iconRenderGeneration || this.isDisposed) {
                 return;
             }
             await this.webviewReady;
             if (generation !== this.iconRenderGeneration || this.isDisposed) {
                 return;
             }
-            const css = full.styleTable.toRawCss();
+            const css = this.pushedIconCss(icons.styleTable);
             this.lastPushedIconCss = css;
             this.lastPushedIconGeneration = generation;
             this.panel.webview.postMessage({ type: 'iconStyles', css });
@@ -611,7 +664,10 @@ class FocusTreePreview extends PreviewBase {
             // with the preview's own icon streaming.
             void this.prewarmPickerIcons();
         } catch (e) {
-            error(e);
+            // 被取消的构建是预期内的（被取代或关闭），不作为错误上报。
+            if (!(e instanceof CancelledError)) {
+                error(e);
+            }
         }
     }
 
@@ -649,6 +705,8 @@ class FocusTreePreview extends PreviewBase {
         }
         this.content = document.getText();
         const textHash = fnv1a(this.content);
+        const renderEpoch = ++this.renderEpoch;
+        const token = new BuildToken(() => this.isDisposed || this.renderEpoch !== renderEpoch);
         // Text-hash early-out (cheaper than the object-level one below): unchanged text and no
         // dependency change means the parsed FocusTree[] is byte-identical, so skip the object-level
         // load and its fingerprint serialization entirely. This fires on the common while-typing
@@ -710,13 +768,22 @@ class FocusTreePreview extends PreviewBase {
             let structure: FocusTreePayload | null = null;
             try {
                 structure = await withTimeout(
-                    buildFocusTreePayload(this.focusTreeLoader, undefined, { resolveIcons: false, dependencyChanged }),
+                    buildFocusTreePayload(this.focusTreeLoader, undefined, { resolveIcons: false, dependencyChanged, token }),
                     focusTreeRenderTimeout,
                 );
             } catch (e) {
+                // 超时后包装器放弃但构建还在跑：取消它，避免后台继续为一个过时的编辑渲染。
+                token.cancel();
                 // Slow/stuck transient render: keep the current preview rather than flipping to
                 // an error or empty state. A later edit (or reload) will refresh it.
-                error(e);
+                if (!(e instanceof CancelledError)) {
+                    error(e);
+                }
+                return;
+            }
+
+            // 在最后一次检查之后被取消：结果同样过时，保留当前预览。
+            if (token.isCancellationRequested) {
                 return;
             }
 
@@ -781,6 +848,7 @@ class FocusTreePreview extends PreviewBase {
             this.lastToolbarFlags = structure.toolbarFlags;
             this.lastGoodHadFocusTrees = true;
             this.lastFocusTrees = structure.focusTrees;
+            this.lastStructurePayload = structure;
 
             if (decision.postUpdate) {
                 const updateMsg: FocusTreeUpdatePayload & { type: string } = {
@@ -823,15 +891,22 @@ class FocusTreePreview extends PreviewBase {
      * in-place DOM rebuild, so this needs no full reload.
      */
     private async repushResolvedIconStyles(): Promise<void> {
-        let full: FocusTreePayload | null = null;
-        try {
-            full = await withTimeout(buildFocusTreePayload(this.focusTreeLoader), focusTreeRenderTimeout);
-        } catch (e) {
-            // Slow icon pass: keep the previously pushed icons rather than blanking them.
-            error(e);
+        if (this.isDisposed) {
             return;
         }
-        if (!full || this.isDisposed) {
+        const token = new BuildToken(() => this.isDisposed);
+        let icons: FocusTreeIconStyles | null = null;
+        try {
+            icons = await withTimeout(buildFocusTreeIconStyles(this.focusTreeLoader, { token }), focusTreeRenderTimeout);
+        } catch (e) {
+            // 超时后包装器放弃但构建还在跑：取消它，保留上一次推送的图标而不是清空。
+            token.cancel();
+            if (!(e instanceof CancelledError)) {
+                error(e);
+            }
+            return;
+        }
+        if (!icons || this.isDisposed) {
             return;
         }
         // Advance the generation so a still-in-flight background pushIconStyles from an earlier load
@@ -839,7 +914,7 @@ class FocusTreePreview extends PreviewBase {
         // The bump + tag + post run without an await between them, so the older push can only post
         // before the bump (then this fresh post lands after it) or drop after seeing the new value.
         const generation = ++this.iconRenderGeneration;
-        const css = full.styleTable.toRawCss();
+        const css = this.pushedIconCss(icons.styleTable);
         this.lastPushedIconCss = css;
         this.lastPushedIconGeneration = generation;
         this.panel.webview.postMessage({ type: 'iconStyles', css });

@@ -224,6 +224,9 @@ export abstract class UpdateablePreviewBase extends PreviewBase {
 		// stays un-advanced so the next render retries instead of skipping on a matching hash.
 		if (decision.kind === "post") {
 			const delivered = await this.panel.webview.postMessage(decision.message);
+			if (this.isDisposed) {
+				return;
+			}
 			if (delivered) {
 				// A thunk is kept as a thunk: the page already shows this content, and the html
 				// property is only flushed (and thus built) if the panel goes hidden.
