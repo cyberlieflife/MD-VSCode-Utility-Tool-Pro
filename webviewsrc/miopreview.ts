@@ -21,6 +21,9 @@ let showIncludedTraits: boolean = getState().showIncludedTraits ?? true;
 let showGrid: boolean = getState().showGrid ?? false;
 let showOverlaps: boolean = getState().showOverlaps ?? true;
 let conditions: DivDropdown | undefined = undefined;
+// 程序化同步下拉框（把选择对齐到载荷）不是读者的选择：让订阅跳过它，否则调用方紧接着的
+// buildContent 之外还会再重建一次预览。
+let pendingSilentSelection = false;
 // Shift+点击一个特质隔离它的前置连线。外壳加载完毕后接一次。
 let tracing: Tracing | undefined;
 
@@ -267,11 +270,24 @@ function updateSelectedMio(clearCondition: boolean) {
     }
 
     if (conditions) {
-        conditions.select.innerHTML = `<span class="value"></span>
-            ${conditionExprs.map(option =>
-                `<div class="option" value='${option.scopeName}!|${option.nodeContent}'>${option.scopeName ? `[${option.scopeName}]` : ''}${option.nodeContent}</div>`
-            ).join('')}`;
+        // 清空随组织切换而来。下面的程序化同步不再经由下拉框的 change 处理器上报，所以这里把
+        // 存储的选择重置成控件即将显示的内容——否则旧条件会继续过滤重建后的树。
+        if (clearCondition) {
+            selectedExprs = [];
+            setState({ selectedExprs });
+        }
+        // 用 DOM + textContent 构建选项，mod 文件里的条件字符串就无法注入标记。
+        conditions.select.innerHTML = '<span class="value"></span>';
+        for (const option of conditionExprs) {
+            const div = document.createElement('div');
+            div.className = 'option';
+            div.setAttribute('value', `${option.scopeName}!|${option.nodeContent}`);
+            div.textContent = (option.scopeName ? `[${option.scopeName}]` : '') + option.nodeContent;
+            conditions.select.appendChild(div);
+        }
+        pendingSilentSelection = true;
         conditions.selectedValues$.next(clearCondition ? [] : selectedExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
+        pendingSilentSelection = false;
     }
 
 }
@@ -445,6 +461,8 @@ window.addEventListener('load', tryRun(async function() {
             selectedMioIndex = parseInt(mioSelect.value);
             setState({ selectedMioIndex });
             updateSelectedMio(true);
+            // 条件同步不再以重绘作为副作用，所以组织选择在这里自己重绘一次，和焦点树的选中一致。
+            void buildContent();
         });
     }
 
@@ -455,6 +473,10 @@ window.addEventListener('load', tryRun(async function() {
         
         conditions.selectedValues$.next(selectedExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
         conditions.selectedValues$.subscribe(async (selection) => {
+            // 程序化同步不是读者的选择，跳过；调用方紧接着会自己重建。
+            if (pendingSilentSelection) {
+                return;
+            }
             selectedExprs = selection.map<ConditionItem>(selection => {
                 const index = selection.indexOf('!|');
                 if (index === -1) {

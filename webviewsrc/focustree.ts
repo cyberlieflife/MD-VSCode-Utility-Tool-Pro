@@ -116,6 +116,9 @@ let allowBranches: DivDropdown | undefined = undefined;
 let conditions: DivDropdown | undefined = undefined;
 let inlayConditions: DivDropdown | undefined = undefined;
 let checkedFocuses: Record<string, Checkbox> = {};
+// 程序化同步下拉框（把选择对齐到载荷）不是读者的选择：让订阅跳过它，否则调用方紧接着的
+// buildContent 之外还会再重建一次预览。
+let pendingSilentSelection = false;
 
 // ID/name display toggle state. Off by default (focus ids shown); when on, focus labels swap to
 // the localised names resolved by the extension host from the editor-language localisation files.
@@ -1154,6 +1157,12 @@ function updateSelectedFocusTree(clearCondition: boolean) {
         }
 
         if (conditions) {
+            // 清空随树切换而来。下面的程序化同步不再经由下拉框的 change 处理器上报，所以这里把
+            // 存储的选择重置成控件即将显示的内容——否则旧条件会继续过滤重建后的树。
+            if (clearCondition) {
+                selectedExprs = [];
+                setState({ selectedExprs });
+            }
             // Options are built via DOM + textContent so foreign condition strings from mod files
             // can never inject markup into the dropdown.
             conditions.select.innerHTML = '<span class="value"></span>';
@@ -1164,7 +1173,9 @@ function updateSelectedFocusTree(clearCondition: boolean) {
                 div.textContent = (option.scopeName ? `[${option.scopeName}]` : '') + option.nodeContent;
                 conditions.select.appendChild(div);
             }
+            pendingSilentSelection = true;
             conditions.selectedValues$.next(clearCondition ? [] : selectedExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
+            pendingSilentSelection = false;
         }
 
         const inlayConditionContainerElement = document.getElementById('inlay-condition-container') as HTMLDivElement | null;
@@ -1173,6 +1184,10 @@ function updateSelectedFocusTree(clearCondition: boolean) {
         }
 
         if (inlayConditions) {
+            if (clearCondition) {
+                selectedInlayExprs = [];
+                setState({ selectedInlayExprs });
+            }
             inlayConditions.select.innerHTML = '<span class="value"></span>';
             for (const option of inlayConditionExprs) {
                 const div = document.createElement('div');
@@ -1181,7 +1196,9 @@ function updateSelectedFocusTree(clearCondition: boolean) {
                 div.textContent = (option.scopeName ? `[${option.scopeName}]` : '') + option.nodeContent;
                 inlayConditions.select.appendChild(div);
             }
+            pendingSilentSelection = true;
             inlayConditions.selectedValues$.next(clearCondition ? [] : selectedInlayExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
+            pendingSilentSelection = false;
         }
 
     } else {
@@ -1887,6 +1904,10 @@ window.addEventListener('load', tryRun(async function() {
             
             conditions.selectedValues$.next(selectedExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
             conditions.selectedValues$.subscribe(async (selection) => {
+                // 程序化同步不是读者的选择，跳过；调用方紧接着会自己重建。
+                if (pendingSilentSelection) {
+                    return;
+                }
                 selectedExprs = selection.map<ConditionItem>(selection => {
                     const index = selection.indexOf('!|');
                     if (index === -1) {
@@ -1916,6 +1937,10 @@ window.addEventListener('load', tryRun(async function() {
 
             inlayConditions.selectedValues$.next(selectedInlayExprs.map(e => `${e.scopeName}!|${e.nodeContent}`));
             inlayConditions.selectedValues$.subscribe(async (selection) => {
+                // 程序化同步不是读者的选择，跳过；调用方紧接着会自己重建。
+                if (pendingSilentSelection) {
+                    return;
+                }
                 selectedInlayExprs = selection.map<ConditionItem>(selection => {
                     const index = selection.indexOf('!|');
                     if (index === -1) {
