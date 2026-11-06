@@ -5,7 +5,7 @@ import { StyleTable } from './util/styletable';
 import { sendEvent } from './util/telemetry';
 import { forceError } from './util/common';
 import { readFile } from './util/vsccommon';
-import { decodeImageToPng } from './util/image/imagedecoder';
+import { decodeImageToPng, type DecodedImage } from './util/image/imagedecoder';
 
 abstract class CommonViewProvider implements vscode.CustomReadonlyEditorProvider {
     public async openCustomDocument(uri: vscode.Uri) {
@@ -30,12 +30,21 @@ abstract class CommonViewProvider implements vscode.CustomReadonlyEditorProvider
                 return;
             }
 
-            // Decoding runs off the host thread in the image worker; race it against cancellation so a
-            // panel torn down mid-decode isn't reassigned html after disposal.
-            const decoded = await Promise.race([
-                decodeImageToPng(Buffer.from(buffer), this.imageKind),
-                new Promise<null>(resolve => token.onCancellationRequested(_ => resolve(null))),
-            ]);
+            // Decoding runs off the host thread in the image worker. A torn-down panel aborts its
+            // request, so a decode still waiting in the queue is dropped before it is ever copied
+            // or posted, instead of starting for a view that is already closed.
+            const controller = new AbortController();
+            const cancellation = token.onCancellationRequested(() => controller.abort());
+            let decoded: DecodedImage | null = null;
+            try {
+                decoded = await decodeImageToPng(Buffer.from(buffer), this.imageKind, controller.signal);
+            } catch (e) {
+                if (!controller.signal.aborted) {
+                    throw e;
+                }
+            } finally {
+                cancellation.dispose();
+            }
 
             if (decoded === null) {
                 return;
