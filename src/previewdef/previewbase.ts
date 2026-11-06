@@ -11,6 +11,14 @@ import { setPreviewOption } from '../util/previewoptions';
 import { ConfigurationKey } from '../constants';
 import { Logger } from '../util/logger';
 
+// One render request waiting to start: the document of the latest request in the group, whether
+// any request in the group saw a dependency change, and the promise every caller settles with.
+interface PendingChange {
+    document: vscode.TextDocument;
+    dependencyChanged: boolean;
+    promise: Promise<void>;
+}
+
 export abstract class PreviewBase {
     private cachedDependencies: string[] | undefined = undefined;
 
@@ -25,8 +33,12 @@ export abstract class PreviewBase {
     // the preview (and its cached dependencies) through its subscriptions.
     protected readonly subscriptions: vscode.Disposable[] = [];
     // Renders run one at a time, so a slow render can never land after a newer one and overwrite
-    // it. A queued render reads the live document when it starts, so edits in between coalesce.
+    // it. A queued render reads the live document when it starts. The queue is also bounded:
+    // ordinary changes collapse into the single pending render below instead of one task being
+    // enqueued per delivered change.
     private renderQueue: Promise<void> = Promise.resolve();
+    // The render a group of ordinary change requests collapsed into, still waiting to start.
+    private pendingChange: PendingChange | undefined;
     protected panelInitialized = false;
 
     constructor(
@@ -37,7 +49,27 @@ export abstract class PreviewBase {
     }
 
     public onDocumentChange(document: vscode.TextDocument, dependencyChanged = false): Promise<void> {
-        return this.enqueueRender(() => this.renderDocument(document, dependencyChanged));
+        // First request of its group: it becomes the one pending render. Later requests join it
+        // and settle with its promise; nothing further is enqueued while it waits.
+        if (this.pendingChange === undefined) {
+            const promise = this.enqueueRender(() => this.runPendingChange());
+            this.pendingChange = { document, dependencyChanged, promise };
+            return promise;
+        }
+        this.pendingChange.document = document;
+        this.pendingChange.dependencyChanged ||= dependencyChanged;
+        return this.pendingChange.promise;
+    }
+
+    // Starts the render the pending group of change requests collapsed into.
+    private async runPendingChange(): Promise<void> {
+        const pending = this.pendingChange;
+        this.pendingChange = undefined;
+        // Consumed either way: after dispose the pending render must not start.
+        if (pending === undefined || this.disposed) {
+            return;
+        }
+        await this.renderDocument(pending.document, pending.dependencyChanged);
     }
 
     protected enqueueRender(task: () => Promise<void>): Promise<void> {
