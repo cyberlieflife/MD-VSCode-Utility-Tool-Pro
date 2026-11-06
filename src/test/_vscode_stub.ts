@@ -266,13 +266,12 @@ for (const rawExtension of ['.html', '.css', '.txt']) {
     };
 }
 
-// `def.d.ts` declares a handful of compile-time globals (IS_WEB_EXT, VERSION,
-// EXTENSION_ID). The webpack build wires these up via DefinePlugin; under
-// Node + tsc they are undefined. Tests that load modules referencing them
-// (e.g. fileloader.ts) need them set on globalThis.
+// `def.d.ts` declares a handful of compile-time globals (IS_WEB_EXT, VERSION). The
+// webpack build wires these up via DefinePlugin; under Node + tsc they are undefined.
+// Tests that load modules referencing them (e.g. fileloader.ts) need them set on
+// globalThis.
 (globalThis as any).IS_WEB_EXT = false;
 (globalThis as any).VERSION = 'test';
-(globalThis as any).EXTENSION_ID = 'test.test';
 
 const stub = buildStub();
 (require.cache as any)[path.join(__dirname, '__vscode_stub__')] = {

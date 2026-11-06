@@ -17,6 +17,7 @@ tsconfig.webview.test.json
 **/.eslintrc.json
 **/*.map
 **/*.bak_*
+.tmp/**
 **/*.ts
 **/webpack.config.js
 node_modules/**

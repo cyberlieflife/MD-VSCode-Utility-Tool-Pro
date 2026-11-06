@@ -55,7 +55,6 @@ const mainConfig = {
       ]
     }),
     new webpack.DefinePlugin({
-      EXTENSION_ID: JSON.stringify(require("./package.json").name),
       VERSION: JSON.stringify(require("./package.json").version),
       IS_WEB_EXT: false,
     }),
@@ -108,7 +107,6 @@ const imageWorkerConfig = {
   },
   plugins: [
     new webpack.DefinePlugin({
-      EXTENSION_ID: JSON.stringify(require("./package.json").name),
       VERSION: JSON.stringify(require("./package.json").version),
       IS_WEB_EXT: false,
     }),
@@ -183,7 +181,6 @@ const mainWebConfig = {
       ]
     }),
     new webpack.DefinePlugin({
-      EXTENSION_ID: JSON.stringify(require("./package.json").name),
       VERSION: JSON.stringify(require("./package.json").version),
       IS_WEB_EXT: true,
     }),
